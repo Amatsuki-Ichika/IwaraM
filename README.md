@@ -6,6 +6,8 @@
 [![Min SDK](https://img.shields.io/badge/minSdk-26-blue.svg)](https://developer.android.com/about/versions/oreo)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.4-7F52FF.svg?logo=kotlin&logoColor=white)](https://kotlinlang.org)
 
+English · [简体中文](README.zh-CN.md)
+
 An unofficial Android client for [iwara.tv](https://iwara.tv), written in Kotlin and Jetpack
 Compose: browse the site, keep a searchable local library, and play videos with optional
 GPU-accelerated super resolution.

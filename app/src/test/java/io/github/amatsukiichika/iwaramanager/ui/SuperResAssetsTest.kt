@@ -26,8 +26,7 @@ class SuperResAssetsTest {
     private val generated: File by lazy {
         val candidates = listOf(
             "src/main/assets/anime4k/generated",
-            "app/src/main/assets/anime4k/generated",
-            "project/iwara-manager/app/src/main/assets/anime4k/generated"
+            "app/src/main/assets/anime4k/generated"
         )
         candidates.map { File(it) }.firstOrNull { it.isDirectory }
             ?: throw AssertionError(

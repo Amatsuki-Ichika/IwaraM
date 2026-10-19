@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "iwara-manager"
+rootProject.name = "IwaraM"
 include(":app")
