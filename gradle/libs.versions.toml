@@ -16,7 +16,7 @@ media3 = "1.4.1"
 coroutines = "1.9.0"
 documentfile = "1.0.1"
 junit = "4.13.2"
-robolectric = "4.14.1"
+robolectric = "4.17"
 androidxTestCore = "1.6.1"
 
 [libraries]
