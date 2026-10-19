@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 应用显示名（桌面与系统「设置 › 应用」中显示）。应用内顶栏标题不含应用名。 -->
+    <string name="app_name">IwaraM</string>
+</resources>

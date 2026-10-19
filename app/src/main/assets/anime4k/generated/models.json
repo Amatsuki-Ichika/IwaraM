@@ -1,0 +1,1131 @@
+{
+  "A4K_3D": {
+    "stages": [
+      {
+        "desc": "Anime4K-v4.0-De-Ring-Compute-Statistics",
+        "textures": [
+          "MAIN",
+          "HOOKED"
+        ],
+        "rawTextures": [
+          "HOOKED",
+          "MAIN"
+        ],
+        "mainRaw": true,
+        "scale": 1,
+        "final": false,
+        "save": "STATSMAX",
+        "id": 0,
+        "file": "A4K_3D_00.glsl",
+        "src": "Anime4K_Clamp_Highlights.glsl"
+      },
+      {
+        "desc": "Anime4K-v4.0-De-Ring-Compute-Statistics",
+        "textures": [
+          "MAIN",
+          "HOOKED",
+          "STATSMAX"
+        ],
+        "rawTextures": [
+          "HOOKED",
+          "MAIN"
+        ],
+        "mainRaw": true,
+        "scale": 1,
+        "final": false,
+        "save": "STATSMAX",
+        "id": 1,
+        "file": "A4K_3D_01.glsl",
+        "src": "Anime4K_Clamp_Highlights.glsl"
+      },
+      {
+        "desc": "Anime4K-v4.0-3D-AA-Upscale-CNN-x2-(US)-Conv-4x3x3x3",
+        "textures": [
+          "MAIN"
+        ],
+        "rawTextures": [
+          "HOOKED",
+          "MAIN"
+        ],
+        "mainRaw": true,
+        "scale": 1,
+        "final": false,
+        "save": "conv2d_tf",
+        "id": 2,
+        "file": "A4K_3D_02.glsl",
+        "src": "Anime4K_3DGraphics_AA_Upscale_x2_US.glsl"
+      },
+      {
+        "desc": "Anime4K-v4.0-3D-AA-Upscale-CNN-x2-(US)-Conv-4x3x3x8",
+        "textures": [
+          "MAIN",
+          "conv2d_tf"
+        ],
+        "rawTextures": [
+          "HOOKED",
+          "MAIN"
+        ],
+        "mainRaw": true,
+        "scale": 1,
+        "final": false,
+        "save": "conv2d_1_tf",
+        "id": 3,
+        "file": "A4K_3D_03.glsl",
+        "src": "Anime4K_3DGraphics_AA_Upscale_x2_US.glsl"
+      },
+      {
+        "desc": "Anime4K-v4.0-3D-AA-Upscale-CNN-x2-(US)-Conv-4x3x3x4",
+        "textures": [
+          "MAIN",
+          "conv2d_1_tf"
+        ],
+        "rawTextures": [
+          "HOOKED",
+          "MAIN"
+        ],
+        "mainRaw": true,
+        "scale": 1,
+        "final": false,
+        "save": "conv2d_last_tf",
+        "id": 4,
+        "file": "A4K_3D_04.glsl",
+        "src": "Anime4K_3DGraphics_AA_Upscale_x2_US.glsl"
+      },
+      {
+        "desc": "Anime4K-v4.0-De-Ring-Clamp",
+        "textures": [
+          "MAIN",
+          "HOOKED",
+          "STATSMAX"
+        ],
+        "rawTextures": [
+          "HOOKED",
+          "MAIN"
+        ],
+        "mainRaw": true,
+        "scale": 1,
+        "final": false,
+        "save": "MAIN",
+        "id": 5,
+        "file": "A4K_3D_05.glsl",
+        "src": "Anime4K_Clamp_Highlights.glsl"
+      },
+      {
+        "desc": "Anime4K-v4.0-3D-AA-Upscale-CNN-x2-(US)-Depth-to-Space",
+        "textures": [
+          "MAIN",
+          "conv2d_last_tf"
+        ],
+        "rawTextures": [],
+        "mainRaw": false,
+        "scale": 2,
+        "final": true,
+        "save": "MAIN",
+        "id": 6,
+        "file": "A4K_3D_06.glsl",
+        "src": "Anime4K_3DGraphics_AA_Upscale_x2_US.glsl"
+      }
+    ]
+  },
+  "A4K_UP_S": {
+    "stages": [
+      {
+        "desc": "Anime4K-v3.2-Upscale-CNN-x2-(S)-Conv-4x3x3x3",
+        "textures": [
+          "MAIN"
+        ],
+        "rawTextures": [
+          "HOOKED",
+          "MAIN"
+        ],
+        "mainRaw": true,
+        "scale": 1,
+        "final": false,
+        "save": "conv2d_tf",
+        "id": 0,
+        "file": "A4K_UP_S_00.glsl",
+        "src": "Anime4K_Upscale_CNN_x2_S.glsl"
+      },
+      {
+        "desc": "Anime4K-v3.2-Upscale-CNN-x2-(S)-Conv-4x3x3x8",
+        "textures": [
+          "MAIN",
+          "conv2d_tf"
+        ],
+        "rawTextures": [
+          "HOOKED",
+          "MAIN"
+        ],
+        "mainRaw": true,
+        "scale": 1,
+        "final": false,
+        "save": "conv2d_1_tf",
+        "id": 1,
+        "file": "A4K_UP_S_01.glsl",
+        "src": "Anime4K_Upscale_CNN_x2_S.glsl"
+      },
+      {
+        "desc": "Anime4K-v3.2-Upscale-CNN-x2-(S)-Conv-4x3x3x8",
+        "textures": [
+          "MAIN",
+          "conv2d_1_tf"
+        ],
+        "rawTextures": [
+          "HOOKED",
+          "MAIN"
+        ],
+        "mainRaw": true,
+        "scale": 1,
+        "final": false,
+        "save": "conv2d_2_tf",
+        "id": 2,
+        "file": "A4K_UP_S_02.glsl",
+        "src": "Anime4K_Upscale_CNN_x2_S.glsl"
+      },
+      {
+        "desc": "Anime4K-v3.2-Upscale-CNN-x2-(S)-Conv-4x3x3x8",
+        "textures": [
+          "MAIN",
+          "conv2d_2_tf"
+        ],
+        "rawTextures": [
+          "HOOKED",
+          "MAIN"
+        ],
+        "mainRaw": true,
+        "scale": 1,
+        "final": false,
+        "save": "conv2d_last_tf",
+        "id": 3,
+        "file": "A4K_UP_S_03.glsl",
+        "src": "Anime4K_Upscale_CNN_x2_S.glsl"
+      },
+      {
+        "desc": "Anime4K-v3.2-Upscale-CNN-x2-(S)-Depth-to-Space",
+        "textures": [
+          "MAIN",
+          "conv2d_last_tf"
+        ],
+        "rawTextures": [
+          "HOOKED",
+          "MAIN"
+        ],
+        "mainRaw": true,
+        "scale": 2,
+        "final": true,
+        "save": "MAIN",
+        "id": 4,
+        "file": "A4K_UP_S_04.glsl",
+        "src": "Anime4K_Upscale_CNN_x2_S.glsl"
+      }
+    ]
+  },
+  "A4K_BAL": {
+    "stages": [
+      {
+        "desc": "Anime4K-v4.0-De-Ring-Compute-Statistics",
+        "textures": [
+          "MAIN",
+          "HOOKED"
+        ],
+        "rawTextures": [
+          "HOOKED",
+          "MAIN"
+        ],
+        "mainRaw": true,
+        "scale": 1,
+        "final": false,
+        "save": "STATSMAX",
+        "id": 0,
+        "file": "A4K_BAL_00.glsl",
+        "src": "Anime4K_Clamp_Highlights.glsl"
+      },
+      {
+        "desc": "Anime4K-v4.0-De-Ring-Compute-Statistics",
+        "textures": [
+          "MAIN",
+          "HOOKED",
+          "STATSMAX"
+        ],
+        "rawTextures": [
+          "HOOKED",
+          "MAIN"
+        ],
+        "mainRaw": true,
+        "scale": 1,
+        "final": false,
+        "save": "STATSMAX",
+        "id": 1,
+        "file": "A4K_BAL_01.glsl",
+        "src": "Anime4K_Clamp_Highlights.glsl"
+      },
+      {
+        "desc": "Anime4K-v4.0-Restore-CNN-(S)-Conv-4x3x3x3",
+        "textures": [
+          "MAIN"
+        ],
+        "rawTextures": [
+          "HOOKED",
+          "MAIN"
+        ],
+        "mainRaw": true,
+        "scale": 1,
+        "final": false,
+        "save": "conv2d_tf",
+        "id": 2,
+        "file": "A4K_BAL_02.glsl",
+        "src": "Anime4K_Restore_CNN_S.glsl"
+      },
+      {
+        "desc": "Anime4K-v4.0-Restore-CNN-(S)-Conv-4x3x3x8",
+        "textures": [
+          "MAIN",
+          "conv2d_tf"
+        ],
+        "rawTextures": [
+          "HOOKED",
+          "MAIN"
+        ],
+        "mainRaw": true,
+        "scale": 1,
+        "final": false,
+        "save": "conv2d_1_tf",
+        "id": 3,
+        "file": "A4K_BAL_03.glsl",
+        "src": "Anime4K_Restore_CNN_S.glsl"
+      },
+      {
+        "desc": "Anime4K-v4.0-Restore-CNN-(S)-Conv-4x3x3x8",
+        "textures": [
+          "MAIN",
+          "conv2d_1_tf"
+        ],
+        "rawTextures": [
+          "HOOKED",
+          "MAIN"
+        ],
+        "mainRaw": true,
+        "scale": 1,
+        "final": false,
+        "save": "conv2d_2_tf",
+        "id": 4,
+        "file": "A4K_BAL_04.glsl",
+        "src": "Anime4K_Restore_CNN_S.glsl"
+      },
+      {
+        "desc": "Anime4K-v4.0-Restore-CNN-(S)-Conv-3x3x3x8",
+        "textures": [
+          "MAIN",
+          "conv2d_2_tf"
+        ],
+        "rawTextures": [
+          "HOOKED",
+          "MAIN"
+        ],
+        "mainRaw": true,
+        "scale": 1,
+        "final": false,
+        "save": "MAIN",
+        "id": 5,
+        "file": "A4K_BAL_05.glsl",
+        "src": "Anime4K_Restore_CNN_S.glsl"
+      },
+      {
+        "desc": "Anime4K-v3.2-Upscale-CNN-x2-(S)-Conv-4x3x3x3",
+        "textures": [
+          "MAIN"
+        ],
+        "rawTextures": [],
+        "mainRaw": false,
+        "scale": 1,
+        "final": false,
+        "save": "conv2d_tf",
+        "id": 6,
+        "file": "A4K_BAL_06.glsl",
+        "src": "Anime4K_Upscale_CNN_x2_S.glsl"
+      },
+      {
+        "desc": "Anime4K-v3.2-Upscale-CNN-x2-(S)-Conv-4x3x3x8",
+        "textures": [
+          "MAIN",
+          "conv2d_tf"
+        ],
+        "rawTextures": [],
+        "mainRaw": false,
+        "scale": 1,
+        "final": false,
+        "save": "conv2d_1_tf",
+        "id": 7,
+        "file": "A4K_BAL_07.glsl",
+        "src": "Anime4K_Upscale_CNN_x2_S.glsl"
+      },
+      {
+        "desc": "Anime4K-v3.2-Upscale-CNN-x2-(S)-Conv-4x3x3x8",
+        "textures": [
+          "MAIN",
+          "conv2d_1_tf"
+        ],
+        "rawTextures": [],
+        "mainRaw": false,
+        "scale": 1,
+        "final": false,
+        "save": "conv2d_2_tf",
+        "id": 8,
+        "file": "A4K_BAL_08.glsl",
+        "src": "Anime4K_Upscale_CNN_x2_S.glsl"
+      },
+      {
+        "desc": "Anime4K-v3.2-Upscale-CNN-x2-(S)-Conv-4x3x3x8",
+        "textures": [
+          "MAIN",
+          "conv2d_2_tf"
+        ],
+        "rawTextures": [],
+        "mainRaw": false,
+        "scale": 1,
+        "final": false,
+        "save": "conv2d_last_tf",
+        "id": 9,
+        "file": "A4K_BAL_09.glsl",
+        "src": "Anime4K_Upscale_CNN_x2_S.glsl"
+      },
+      {
+        "desc": "Anime4K-v4.0-De-Ring-Clamp",
+        "textures": [
+          "MAIN",
+          "HOOKED",
+          "STATSMAX"
+        ],
+        "rawTextures": [],
+        "mainRaw": false,
+        "scale": 1,
+        "final": false,
+        "save": "MAIN",
+        "id": 10,
+        "file": "A4K_BAL_10.glsl",
+        "src": "Anime4K_Clamp_Highlights.glsl"
+      },
+      {
+        "desc": "Anime4K-v3.2-Upscale-CNN-x2-(S)-Depth-to-Space",
+        "textures": [
+          "MAIN",
+          "conv2d_last_tf"
+        ],
+        "rawTextures": [],
+        "mainRaw": false,
+        "scale": 2,
+        "final": true,
+        "save": "MAIN",
+        "id": 11,
+        "file": "A4K_BAL_11.glsl",
+        "src": "Anime4K_Upscale_CNN_x2_S.glsl"
+      }
+    ]
+  },
+  "A4K_HQ": {
+    "stages": [
+      {
+        "desc": "Anime4K-v4.0-De-Ring-Compute-Statistics",
+        "textures": [
+          "MAIN",
+          "HOOKED"
+        ],
+        "rawTextures": [
+          "HOOKED",
+          "MAIN"
+        ],
+        "mainRaw": true,
+        "scale": 1,
+        "final": false,
+        "save": "STATSMAX",
+        "id": 0,
+        "file": "A4K_HQ_00.glsl",
+        "src": "Anime4K_Clamp_Highlights.glsl"
+      },
+      {
+        "desc": "Anime4K-v4.0-De-Ring-Compute-Statistics",
+        "textures": [
+          "MAIN",
+          "HOOKED",
+          "STATSMAX"
+        ],
+        "rawTextures": [
+          "HOOKED",
+          "MAIN"
+        ],
+        "mainRaw": true,
+        "scale": 1,
+        "final": false,
+        "save": "STATSMAX",
+        "id": 1,
+        "file": "A4K_HQ_01.glsl",
+        "src": "Anime4K_Clamp_Highlights.glsl"
+      },
+      {
+        "desc": "Anime4K-v4.0-Restore-CNN-(M)-Conv-4x3x3x3",
+        "textures": [
+          "MAIN"
+        ],
+        "rawTextures": [
+          "HOOKED",
+          "MAIN"
+        ],
+        "mainRaw": true,
+        "scale": 1,
+        "final": false,
+        "save": "conv2d_tf",
+        "id": 2,
+        "file": "A4K_HQ_02.glsl",
+        "src": "Anime4K_Restore_CNN_M.glsl"
+      },
+      {
+        "desc": "Anime4K-v4.0-Restore-CNN-(M)-Conv-4x3x3x8",
+        "textures": [
+          "MAIN",
+          "conv2d_tf"
+        ],
+        "rawTextures": [
+          "HOOKED",
+          "MAIN"
+        ],
+        "mainRaw": true,
+        "scale": 1,
+        "final": false,
+        "save": "conv2d_1_tf",
+        "id": 3,
+        "file": "A4K_HQ_03.glsl",
+        "src": "Anime4K_Restore_CNN_M.glsl"
+      },
+      {
+        "desc": "Anime4K-v4.0-Restore-CNN-(M)-Conv-4x3x3x8",
+        "textures": [
+          "MAIN",
+          "conv2d_1_tf"
+        ],
+        "rawTextures": [
+          "HOOKED",
+          "MAIN"
+        ],
+        "mainRaw": true,
+        "scale": 1,
+        "final": false,
+        "save": "conv2d_2_tf",
+        "id": 4,
+        "file": "A4K_HQ_04.glsl",
+        "src": "Anime4K_Restore_CNN_M.glsl"
+      },
+      {
+        "desc": "Anime4K-v4.0-Restore-CNN-(M)-Conv-4x3x3x8",
+        "textures": [
+          "MAIN",
+          "conv2d_2_tf"
+        ],
+        "rawTextures": [
+          "HOOKED",
+          "MAIN"
+        ],
+        "mainRaw": true,
+        "scale": 1,
+        "final": false,
+        "save": "conv2d_3_tf",
+        "id": 5,
+        "file": "A4K_HQ_05.glsl",
+        "src": "Anime4K_Restore_CNN_M.glsl"
+      },
+      {
+        "desc": "Anime4K-v4.0-Restore-CNN-(M)-Conv-4x3x3x8",
+        "textures": [
+          "MAIN",
+          "conv2d_3_tf"
+        ],
+        "rawTextures": [
+          "HOOKED",
+          "MAIN"
+        ],
+        "mainRaw": true,
+        "scale": 1,
+        "final": false,
+        "save": "conv2d_4_tf",
+        "id": 6,
+        "file": "A4K_HQ_06.glsl",
+        "src": "Anime4K_Restore_CNN_M.glsl"
+      },
+      {
+        "desc": "Anime4K-v4.0-Restore-CNN-(M)-Conv-4x3x3x8",
+        "textures": [
+          "MAIN",
+          "conv2d_4_tf"
+        ],
+        "rawTextures": [
+          "HOOKED",
+          "MAIN"
+        ],
+        "mainRaw": true,
+        "scale": 1,
+        "final": false,
+        "save": "conv2d_5_tf",
+        "id": 7,
+        "file": "A4K_HQ_07.glsl",
+        "src": "Anime4K_Restore_CNN_M.glsl"
+      },
+      {
+        "desc": "Anime4K-v4.0-Restore-CNN-(M)-Conv-4x3x3x8",
+        "textures": [
+          "MAIN",
+          "conv2d_5_tf"
+        ],
+        "rawTextures": [
+          "HOOKED",
+          "MAIN"
+        ],
+        "mainRaw": true,
+        "scale": 1,
+        "final": false,
+        "save": "conv2d_6_tf",
+        "id": 8,
+        "file": "A4K_HQ_08.glsl",
+        "src": "Anime4K_Restore_CNN_M.glsl"
+      },
+      {
+        "desc": "Anime4K-v4.0-Restore-CNN-(M)-Conv-3x1x1x56",
+        "textures": [
+          "MAIN",
+          "conv2d_tf",
+          "conv2d_1_tf",
+          "conv2d_2_tf",
+          "conv2d_3_tf",
+          "conv2d_4_tf",
+          "conv2d_5_tf",
+          "conv2d_6_tf"
+        ],
+        "rawTextures": [
+          "HOOKED",
+          "MAIN"
+        ],
+        "mainRaw": true,
+        "scale": 1,
+        "final": false,
+        "save": "MAIN",
+        "id": 9,
+        "file": "A4K_HQ_09.glsl",
+        "src": "Anime4K_Restore_CNN_M.glsl"
+      },
+      {
+        "desc": "Anime4K-v3.2-Upscale-CNN-x2-(M)-Conv-4x3x3x3",
+        "textures": [
+          "MAIN"
+        ],
+        "rawTextures": [],
+        "mainRaw": false,
+        "scale": 1,
+        "final": false,
+        "save": "conv2d_tf",
+        "id": 10,
+        "file": "A4K_HQ_10.glsl",
+        "src": "Anime4K_Upscale_CNN_x2_M.glsl"
+      },
+      {
+        "desc": "Anime4K-v3.2-Upscale-CNN-x2-(M)-Conv-4x3x3x8",
+        "textures": [
+          "MAIN",
+          "conv2d_tf"
+        ],
+        "rawTextures": [],
+        "mainRaw": false,
+        "scale": 1,
+        "final": false,
+        "save": "conv2d_1_tf",
+        "id": 11,
+        "file": "A4K_HQ_11.glsl",
+        "src": "Anime4K_Upscale_CNN_x2_M.glsl"
+      },
+      {
+        "desc": "Anime4K-v3.2-Upscale-CNN-x2-(M)-Conv-4x3x3x8",
+        "textures": [
+          "MAIN",
+          "conv2d_1_tf"
+        ],
+        "rawTextures": [],
+        "mainRaw": false,
+        "scale": 1,
+        "final": false,
+        "save": "conv2d_2_tf",
+        "id": 12,
+        "file": "A4K_HQ_12.glsl",
+        "src": "Anime4K_Upscale_CNN_x2_M.glsl"
+      },
+      {
+        "desc": "Anime4K-v3.2-Upscale-CNN-x2-(M)-Conv-4x3x3x8",
+        "textures": [
+          "MAIN",
+          "conv2d_2_tf"
+        ],
+        "rawTextures": [],
+        "mainRaw": false,
+        "scale": 1,
+        "final": false,
+        "save": "conv2d_3_tf",
+        "id": 13,
+        "file": "A4K_HQ_13.glsl",
+        "src": "Anime4K_Upscale_CNN_x2_M.glsl"
+      },
+      {
+        "desc": "Anime4K-v3.2-Upscale-CNN-x2-(M)-Conv-4x3x3x8",
+        "textures": [
+          "MAIN",
+          "conv2d_3_tf"
+        ],
+        "rawTextures": [],
+        "mainRaw": false,
+        "scale": 1,
+        "final": false,
+        "save": "conv2d_4_tf",
+        "id": 14,
+        "file": "A4K_HQ_14.glsl",
+        "src": "Anime4K_Upscale_CNN_x2_M.glsl"
+      },
+      {
+        "desc": "Anime4K-v3.2-Upscale-CNN-x2-(M)-Conv-4x3x3x8",
+        "textures": [
+          "MAIN",
+          "conv2d_4_tf"
+        ],
+        "rawTextures": [],
+        "mainRaw": false,
+        "scale": 1,
+        "final": false,
+        "save": "conv2d_5_tf",
+        "id": 15,
+        "file": "A4K_HQ_15.glsl",
+        "src": "Anime4K_Upscale_CNN_x2_M.glsl"
+      },
+      {
+        "desc": "Anime4K-v3.2-Upscale-CNN-x2-(M)-Conv-4x3x3x8",
+        "textures": [
+          "MAIN",
+          "conv2d_5_tf"
+        ],
+        "rawTextures": [],
+        "mainRaw": false,
+        "scale": 1,
+        "final": false,
+        "save": "conv2d_6_tf",
+        "id": 16,
+        "file": "A4K_HQ_16.glsl",
+        "src": "Anime4K_Upscale_CNN_x2_M.glsl"
+      },
+      {
+        "desc": "Anime4K-v3.2-Upscale-CNN-x2-(M)-Conv-4x1x1x56",
+        "textures": [
+          "MAIN",
+          "conv2d_tf",
+          "conv2d_1_tf",
+          "conv2d_2_tf",
+          "conv2d_3_tf",
+          "conv2d_4_tf",
+          "conv2d_5_tf",
+          "conv2d_6_tf"
+        ],
+        "rawTextures": [],
+        "mainRaw": false,
+        "scale": 1,
+        "final": false,
+        "save": "conv2d_last_tf",
+        "id": 17,
+        "file": "A4K_HQ_17.glsl",
+        "src": "Anime4K_Upscale_CNN_x2_M.glsl"
+      },
+      {
+        "desc": "Anime4K-v4.0-De-Ring-Clamp",
+        "textures": [
+          "MAIN",
+          "HOOKED",
+          "STATSMAX"
+        ],
+        "rawTextures": [],
+        "mainRaw": false,
+        "scale": 1,
+        "final": false,
+        "save": "MAIN",
+        "id": 18,
+        "file": "A4K_HQ_18.glsl",
+        "src": "Anime4K_Clamp_Highlights.glsl"
+      },
+      {
+        "desc": "Anime4K-v3.2-Upscale-CNN-x2-(M)-Depth-to-Space",
+        "textures": [
+          "MAIN",
+          "conv2d_last_tf"
+        ],
+        "rawTextures": [],
+        "mainRaw": false,
+        "scale": 2,
+        "final": true,
+        "save": "MAIN",
+        "id": 19,
+        "file": "A4K_HQ_19.glsl",
+        "src": "Anime4K_Upscale_CNN_x2_M.glsl"
+      }
+    ]
+  },
+  "A4K_RST": {
+    "stages": [
+      {
+        "desc": "Anime4K-v4.0-De-Ring-Compute-Statistics",
+        "textures": [
+          "MAIN",
+          "HOOKED"
+        ],
+        "rawTextures": [
+          "HOOKED",
+          "MAIN"
+        ],
+        "mainRaw": true,
+        "scale": 1,
+        "final": false,
+        "save": "STATSMAX",
+        "id": 0,
+        "file": "A4K_RST_00.glsl",
+        "src": "Anime4K_Clamp_Highlights.glsl"
+      },
+      {
+        "desc": "Anime4K-v4.0-De-Ring-Compute-Statistics",
+        "textures": [
+          "MAIN",
+          "HOOKED",
+          "STATSMAX"
+        ],
+        "rawTextures": [
+          "HOOKED",
+          "MAIN"
+        ],
+        "mainRaw": true,
+        "scale": 1,
+        "final": false,
+        "save": "STATSMAX",
+        "id": 1,
+        "file": "A4K_RST_01.glsl",
+        "src": "Anime4K_Clamp_Highlights.glsl"
+      },
+      {
+        "desc": "Anime4K-v4.0-Restore-CNN-(S)-Conv-4x3x3x3",
+        "textures": [
+          "MAIN"
+        ],
+        "rawTextures": [
+          "HOOKED",
+          "MAIN"
+        ],
+        "mainRaw": true,
+        "scale": 1,
+        "final": false,
+        "save": "conv2d_tf",
+        "id": 2,
+        "file": "A4K_RST_02.glsl",
+        "src": "Anime4K_Restore_CNN_S.glsl"
+      },
+      {
+        "desc": "Anime4K-v4.0-Restore-CNN-(S)-Conv-4x3x3x8",
+        "textures": [
+          "MAIN",
+          "conv2d_tf"
+        ],
+        "rawTextures": [
+          "HOOKED",
+          "MAIN"
+        ],
+        "mainRaw": true,
+        "scale": 1,
+        "final": false,
+        "save": "conv2d_1_tf",
+        "id": 3,
+        "file": "A4K_RST_03.glsl",
+        "src": "Anime4K_Restore_CNN_S.glsl"
+      },
+      {
+        "desc": "Anime4K-v4.0-Restore-CNN-(S)-Conv-4x3x3x8",
+        "textures": [
+          "MAIN",
+          "conv2d_1_tf"
+        ],
+        "rawTextures": [
+          "HOOKED",
+          "MAIN"
+        ],
+        "mainRaw": true,
+        "scale": 1,
+        "final": false,
+        "save": "conv2d_2_tf",
+        "id": 4,
+        "file": "A4K_RST_04.glsl",
+        "src": "Anime4K_Restore_CNN_S.glsl"
+      },
+      {
+        "desc": "Anime4K-v4.0-Restore-CNN-(S)-Conv-3x3x3x8",
+        "textures": [
+          "MAIN",
+          "conv2d_2_tf"
+        ],
+        "rawTextures": [
+          "HOOKED",
+          "MAIN"
+        ],
+        "mainRaw": true,
+        "scale": 1,
+        "final": false,
+        "save": "MAIN",
+        "id": 5,
+        "file": "A4K_RST_05.glsl",
+        "src": "Anime4K_Restore_CNN_S.glsl"
+      },
+      {
+        "desc": "Anime4K-v4.0-De-Ring-Clamp",
+        "textures": [
+          "MAIN",
+          "HOOKED",
+          "STATSMAX"
+        ],
+        "rawTextures": [],
+        "mainRaw": false,
+        "scale": 1,
+        "final": true,
+        "save": "MAIN",
+        "id": 6,
+        "file": "A4K_RST_06.glsl",
+        "src": "Anime4K_Clamp_Highlights.glsl"
+      }
+    ]
+  },
+  "A4K_SOFT": {
+    "stages": [
+      {
+        "desc": "Anime4K-v4.0-De-Ring-Compute-Statistics",
+        "textures": [
+          "MAIN",
+          "HOOKED"
+        ],
+        "rawTextures": [
+          "HOOKED",
+          "MAIN"
+        ],
+        "mainRaw": true,
+        "scale": 1,
+        "final": false,
+        "save": "STATSMAX",
+        "id": 0,
+        "file": "A4K_SOFT_00.glsl",
+        "src": "Anime4K_Clamp_Highlights.glsl"
+      },
+      {
+        "desc": "Anime4K-v4.0-De-Ring-Compute-Statistics",
+        "textures": [
+          "MAIN",
+          "HOOKED",
+          "STATSMAX"
+        ],
+        "rawTextures": [
+          "HOOKED",
+          "MAIN"
+        ],
+        "mainRaw": true,
+        "scale": 1,
+        "final": false,
+        "save": "STATSMAX",
+        "id": 1,
+        "file": "A4K_SOFT_01.glsl",
+        "src": "Anime4K_Clamp_Highlights.glsl"
+      },
+      {
+        "desc": "Anime4K-v4.0-Restore-CNN-Soft-(S)-Conv-4x3x3x3",
+        "textures": [
+          "MAIN"
+        ],
+        "rawTextures": [
+          "HOOKED",
+          "MAIN"
+        ],
+        "mainRaw": true,
+        "scale": 1,
+        "final": false,
+        "save": "conv2d_tf",
+        "id": 2,
+        "file": "A4K_SOFT_02.glsl",
+        "src": "Anime4K_Restore_CNN_Soft_S.glsl"
+      },
+      {
+        "desc": "Anime4K-v4.0-Restore-CNN-Soft-(S)-Conv-4x3x3x8",
+        "textures": [
+          "MAIN",
+          "conv2d_tf"
+        ],
+        "rawTextures": [
+          "HOOKED",
+          "MAIN"
+        ],
+        "mainRaw": true,
+        "scale": 1,
+        "final": false,
+        "save": "conv2d_1_tf",
+        "id": 3,
+        "file": "A4K_SOFT_03.glsl",
+        "src": "Anime4K_Restore_CNN_Soft_S.glsl"
+      },
+      {
+        "desc": "Anime4K-v4.0-Restore-CNN-Soft-(S)-Conv-4x3x3x8",
+        "textures": [
+          "MAIN",
+          "conv2d_1_tf"
+        ],
+        "rawTextures": [
+          "HOOKED",
+          "MAIN"
+        ],
+        "mainRaw": true,
+        "scale": 1,
+        "final": false,
+        "save": "conv2d_2_tf",
+        "id": 4,
+        "file": "A4K_SOFT_04.glsl",
+        "src": "Anime4K_Restore_CNN_Soft_S.glsl"
+      },
+      {
+        "desc": "Anime4K-v4.0-Restore-CNN-Soft-(S)-Conv-3x3x3x8",
+        "textures": [
+          "MAIN",
+          "conv2d_2_tf"
+        ],
+        "rawTextures": [
+          "HOOKED",
+          "MAIN"
+        ],
+        "mainRaw": true,
+        "scale": 1,
+        "final": false,
+        "save": "MAIN",
+        "id": 5,
+        "file": "A4K_SOFT_05.glsl",
+        "src": "Anime4K_Restore_CNN_Soft_S.glsl"
+      },
+      {
+        "desc": "Anime4K-v4.0-De-Ring-Clamp",
+        "textures": [
+          "MAIN",
+          "HOOKED",
+          "STATSMAX"
+        ],
+        "rawTextures": [],
+        "mainRaw": false,
+        "scale": 1,
+        "final": true,
+        "save": "MAIN",
+        "id": 6,
+        "file": "A4K_SOFT_06.glsl",
+        "src": "Anime4K_Clamp_Highlights.glsl"
+      }
+    ]
+  },
+  "DN_MEAN": {
+    "stages": [
+      {
+        "desc": "Anime4K-v3.2-Denoise-Bilateral-Mean",
+        "textures": [
+          "MAIN",
+          "HOOKED"
+        ],
+        "rawTextures": [
+          "HOOKED",
+          "MAIN"
+        ],
+        "mainRaw": true,
+        "scale": 1,
+        "final": true,
+        "save": "MAIN",
+        "id": 0,
+        "file": "DN_MEAN_00.glsl",
+        "src": "Anime4K_Denoise_Bilateral_Mean.glsl"
+      }
+    ]
+  },
+  "DN_MEDIAN": {
+    "stages": [
+      {
+        "desc": "Anime4K-v3.2-Denoise-Bilateral-Median-Luma",
+        "textures": [
+          "MAIN",
+          "HOOKED"
+        ],
+        "rawTextures": [
+          "HOOKED",
+          "MAIN"
+        ],
+        "mainRaw": true,
+        "scale": 1,
+        "final": false,
+        "save": "LINELUMA",
+        "id": 0,
+        "file": "DN_MEDIAN_00.glsl",
+        "src": "Anime4K_Denoise_Bilateral_Median.glsl"
+      },
+      {
+        "desc": "Anime4K-v3.2-Denoise-Bilateral-Median-Apply",
+        "textures": [
+          "MAIN",
+          "HOOKED",
+          "LINELUMA"
+        ],
+        "rawTextures": [
+          "HOOKED",
+          "MAIN"
+        ],
+        "mainRaw": true,
+        "scale": 1,
+        "final": true,
+        "save": "MAIN",
+        "id": 1,
+        "file": "DN_MEDIAN_01.glsl",
+        "src": "Anime4K_Denoise_Bilateral_Median.glsl"
+      }
+    ]
+  },
+  "DN_MODE": {
+    "stages": [
+      {
+        "desc": "Anime4K-v3.2-Denoise-Bilateral-Mode-Luma",
+        "textures": [
+          "MAIN",
+          "HOOKED"
+        ],
+        "rawTextures": [
+          "HOOKED",
+          "MAIN"
+        ],
+        "mainRaw": true,
+        "scale": 1,
+        "final": false,
+        "save": "LINELUMA",
+        "id": 0,
+        "file": "DN_MODE_00.glsl",
+        "src": "Anime4K_Denoise_Bilateral_Mode.glsl"
+      },
+      {
+        "desc": "Anime4K-v3.1-Denoise-Bilateral-Mode-Apply",
+        "textures": [
+          "MAIN",
+          "HOOKED",
+          "LINELUMA"
+        ],
+        "rawTextures": [
+          "HOOKED",
+          "MAIN"
+        ],
+        "mainRaw": true,
+        "scale": 1,
+        "final": true,
+        "save": "MAIN",
+        "id": 1,
+        "file": "DN_MODE_01.glsl",
+        "src": "Anime4K_Denoise_Bilateral_Mode.glsl"
+      }
+    ]
+  }
+}

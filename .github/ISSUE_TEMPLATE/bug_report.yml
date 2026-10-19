@@ -1,0 +1,53 @@
+name: Bug report
+description: Report a problem with the app
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report. Please fill in as much as you can —
+        reports that can be reproduced are much faster to fix.
+
+  - type: input
+    id: version
+    attributes:
+      label: App version
+      description: Shown in Settings → About.
+      placeholder: 0.1.0
+    validations:
+      required: true
+
+  - type: input
+    id: device
+    attributes:
+      label: Device and Android version
+      placeholder: Pixel 8 / Android 15
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: What did you do, in order, and what happened?
+      placeholder: |
+        1. Open …
+        2. Tap …
+        3. The app shows …
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: If the app crashed, paste the crash log if you can retrieve it. Optional.
+    validations:
+      required: false

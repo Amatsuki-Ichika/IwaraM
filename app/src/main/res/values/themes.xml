@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.IwaraManager" parent="android:Theme.Material.Light.NoActionBar">
+        <!-- 把 dialogTheme 换成下面的非浮窗全屏主题：Compose 的 Dialog 在 API 31+ 会解析到平台浮窗主题，
+             使自绘的底部抽屉被排在系统栏内侧而悬空。背景压暗仍在 Compose 侧完成。 -->
+        <item name="android:dialogTheme">@style/IwaraDialogWindowTheme</item>
+    </style>
+
+    <!-- 抽屉/对话框窗口主题：非浮窗 + 全透明系统栏 + 无背景压暗（视觉全部由 Compose 自绘）。 -->
+    <style name="IwaraDialogWindowTheme" parent="android:Theme.DeviceDefault.Light.Dialog">
+        <item name="android:windowIsFloating">false</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:backgroundDimAmount">0.0</item>
+    </style>
+</resources>

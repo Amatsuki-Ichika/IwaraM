@@ -1,0 +1,85 @@
+# Contributing
+
+Thanks for taking the time to contribute. Bug reports, feature suggestions and pull requests
+are all welcome.
+
+## Getting started
+
+1. Fork the repository and clone your fork.
+2. Install **JDK 17** and the **Android SDK** (platform `android-37.2`, build-tools `36.0.0`).
+3. Point Gradle at your SDK:
+
+   ```bash
+   echo "sdk.dir=$ANDROID_HOME" > local.properties
+   ```
+
+4. Build and run the tests:
+
+   ```bash
+   ./gradlew :app:test
+   ./gradlew :app:assembleDebug
+   ```
+
+## Reporting bugs
+
+Open an issue using the bug report template. Useful reports include the app version, your
+device and Android version, and the steps that reproduce the problem. If the app crashed,
+attach the log from the file described in `CrashLogger.kt` if you can retrieve it.
+
+## Pull requests
+
+- Keep changes focused; one topic per pull request.
+- Follow the existing code style (official Kotlin conventions, 4-space indentation) and keep
+  comments in Simplified Chinese, consistent with the rest of the codebase.
+- Add or update JVM unit tests for any pure logic you change. `./gradlew :app:test` must pass.
+- Update [CHANGELOG.md](CHANGELOG.md) under `[Unreleased]` when the change is user-visible.
+- Run the CI workflow locally if you can, and make sure it is green before requesting review.
+
+Please read the [Code of Conduct](CODE_OF_CONDUCT.md) before participating.
+
+## Dependencies
+
+Dependency versions are centralised in `gradle/libs.versions.toml`. Add new entries there
+rather than hard-coding versions in `build.gradle.kts`.
+
+## Signing
+
+Release builds must be signed, but **signing material must never be committed**. The build
+reads it from a git-ignored `keystore.properties` in the repository root:
+
+```properties
+storeFile=keystore/release.jks
+storePassword=<your store password>
+keyAlias=<your key alias>
+keyPassword=<your key password>
+```
+
+To create your own key (contributors do not need one — only maintainers publishing releases do):
+
+```bash
+keytool -genkeypair -v \
+  -keystore keystore/release.jks \
+  -storetype PKCS12 \
+  -alias iwara-manager \
+  -keyalg RSA -keysize 4096 -validity 10000 \
+  -dname "CN=Iwara Manager, O=iwara-manager"
+```
+
+`keystore.properties` and `keystore/` are ignored by git; `keystore.properties.example` shows
+the expected format. Keep a backup of the keystore and its passwords — losing them means
+existing installations can no longer be updated in place.
+
+## Releasing
+
+Maintainers publish a release by pushing a tag:
+
+```bash
+# Bump app.versionCode in gradle.properties and move the CHANGELOG entries out of [Unreleased], then:
+git tag v0.1.1
+git push origin v0.1.1
+```
+
+The tag is the source of truth for `versionName`; the `release` workflow passes it to the build.
+The workflow runs the unit tests, builds the signed APK on the tag and uploads it to a GitHub Release.
+It needs these repository secrets: `KEYSTORE_BASE64` (the keystore file, base64-encoded),
+`STORE_PASSWORD`, `KEY_ALIAS` and `KEY_PASSWORD`.

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 通知栏小图标：纯白矢量、透明底。系统渲染小图标时只取 alpha 通道，
+     若沿用不透明的启动图标会显示成一个实心方块。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:scaleX="0.45"
+        android:scaleY="0.45"
+        android:pivotX="54"
+        android:pivotY="54">
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M36,24 L84,54 L36,84 Z" />
+    </group>
+</vector>

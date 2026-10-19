@@ -1,0 +1,41 @@
+# Gradle
+.gradle/
+build/
+.kotlin/
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Local configuration (machine-specific SDK path)
+local.properties
+
+# Signing material — NEVER commit these
+keystore.properties
+*.jks
+*.keystore
+*.p12
+*.pepk
+
+# Build outputs
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# Logs, crash dumps and merge leftovers
+*.log
+*.hprof
+*.orig
+*.rej
+*.bak
