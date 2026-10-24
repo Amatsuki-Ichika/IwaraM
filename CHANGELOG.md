@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Add Room secondary indexes (schema v3): `videos.iwaraId` for download dedup lookups,
+  `(videos.metaFetched, videos.iwaraId)` for the pending-metadata scan, and
+  `video_tag_cross_ref.tagId` for the tag JOIN - all previously full table scans.
+
 - Housekeeping: ignore `.zcode/`, drop `validateDistributionUrl=false` from the Gradle wrapper
   properties (restoring default distribution URL validation), log SAF persistable-permission
   failures, stop the download service via the framework startId protocol once the queue drains
