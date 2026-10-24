@@ -30,7 +30,7 @@ small hand-written overlay stack. State is held in `StateFlow`s, most of which l
 
 ## Module map
 
-`app/src/main/java/io/github/amatsukiichika/iwaramanager/`
+`app/src/main/java/io/github/amatsukiichika/iwaram/`
 
 | Path | Responsibility |
 | --- | --- |

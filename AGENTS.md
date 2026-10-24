@@ -41,7 +41,7 @@ release — see [CONTRIBUTING.md](CONTRIBUTING.md), section "Releasing".
 ## Layout
 
 ```
-app/src/main/java/io/github/amatsukiichika/iwaramanager/
+app/src/main/java/io/github/amatsukiichika/iwaram/
 ├── MainActivity.kt        single Activity: the three main tabs and the overlay stack
 ├── IwaraApp.kt            Application: lazy database/repository, crash logger
 ├── CrashLogger.kt         uncaught-exception handler that writes crash logs to private storage
