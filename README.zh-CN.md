@@ -32,6 +32,9 @@
 前往 [Releases 页面](https://github.com/Amatsuki-Ichika/IwaraM/releases/latest) 下载最新 APK 安装。
 构建目标为 **arm64-v8a**、**Android 8.0（API 26）** 及以上。
 
+测试版（RC）也会发布在 [Releases 页面](https://github.com/Amatsuki-Ichika/IwaraM/releases)并标注为
+pre-release；上面的下载链接始终指向最新的正式版。
+
 每个版本都用同一张证书签名，因此新版本可以直接覆盖安装旧版本；由他人签名的包则不能——
 若你之前用的是别的签名包，请先卸载。校验下载文件的完整性与签名见 [SECURITY.md](SECURITY.md)。
 
