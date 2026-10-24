@@ -6,8 +6,32 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 10
+    labels:
+      - dependencies
+    commit-message:
+      prefix: "chore(deps)"
+      prefix-development: "chore(deps-dev)"
+    # Minor/patch bumps are batched; major bumps (e.g. retrofit 3, okhttp 5) stay
+    # as individual PRs so they can be reviewed and smoke-tested one by one.
+    groups:
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
 
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    open-pull-requests-limit: 10
+    labels:
+      - dependencies
+      - github-actions
+    commit-message:
+      prefix: "ci(deps)"
+    groups:
+      actions:
+        update-types:
+          - "major"
+          - "minor"
+          - "patch"

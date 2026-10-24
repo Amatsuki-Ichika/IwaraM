@@ -7,14 +7,19 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '17'
@@ -26,21 +31,32 @@ jobs:
       - name: Install SDK packages
         run: sdkmanager "platforms;android-37.2" "build-tools;36.0.0"
 
+      - name: Check tag matches gradle.properties
+        env:
+          TAG_VERSION: ${{ github.ref_name }}
+        run: |
+          VERSION="${TAG_VERSION#v}"
+          PROPS_VERSION="$(sed -n 's/^app\.versionName=//p' gradle.properties)"
+          if [ "$VERSION" != "$PROPS_VERSION" ]; then
+            echo "::error::Tag $TAG_VERSION does not match app.versionName=$PROPS_VERSION in gradle.properties. Bump gradle.properties before tagging."
+            exit 1
+          fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
       - name: Restore signing material
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           mkdir -p keystore
           echo "$KEYSTORE_BASE64" | base64 -d > keystore/release.jks
-          cat > keystore.properties <<EOF
-          storeFile=keystore/release.jks
-          storePassword=${{ secrets.STORE_PASSWORD }}
-          keyAlias=${{ secrets.KEY_ALIAS }}
-          keyPassword=${{ secrets.KEY_PASSWORD }}
-          EOF
-
-      - name: Read version from tag
-        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+          printf '%s\n' \
+            "storeFile=keystore/release.jks" \
+            "storePassword=$STORE_PASSWORD" \
+            "keyAlias=$KEY_ALIAS" \
+            "keyPassword=$KEY_PASSWORD" > keystore.properties
 
       - name: Unit tests
         run: ./gradlew :app:test --no-daemon
@@ -48,13 +64,17 @@ jobs:
       - name: Build signed release
         run: ./gradlew :app:assembleRelease -Papp.versionName="$VERSION" --no-daemon
 
+      - name: Verify signed APK
+        run: |
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs app/build/outputs/apk/release/app-release.apk
+
       - name: Rename and checksum
         run: |
           cp app/build/outputs/apk/release/app-release.apk "iwara-manager-$VERSION-arm64-v8a.apk"
           sha256sum "iwara-manager-$VERSION-arm64-v8a.apk" > "iwara-manager-$VERSION-arm64-v8a.apk.sha256"
 
       - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             iwara-manager-*.apk
