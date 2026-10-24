@@ -21,7 +21,8 @@ import java.util.concurrent.TimeUnit
  * - access token：POST /user/token（Bearer refresh）返回，约 1 小时有效，内存缓存 + JWT exp 自检自动续期。
  *
  * 登录无需验证码（多开源客户端一致做法）。会话数据独立存放在 prefs 的 iwara_* 键下，
- * 与旧「手动粘贴 access_token」流程互不干扰。
+ * 与旧「手动粘贴 access_token」流程互不干扰。token 落盘前经 [TokenCrypto]
+ * （AndroidKeyStore AES-256-GCM）加密，旧版明文在 [restore] 时平滑迁移成密文。
  */
 object IwaraSession {
 
@@ -71,12 +72,38 @@ object IwaraSession {
 
     fun restore(context: Context) {
         prefs = context.getSharedPreferences("prefs", Context.MODE_PRIVATE)
-        refreshToken = prefs.getString(KEY_REFRESH, null)?.takeIf { it.isNotBlank() }
-        accessToken = prefs.getString(KEY_ACCESS, null)?.takeIf { it.isNotBlank() }
+        refreshToken = readStoredToken(KEY_REFRESH)
+        accessToken = readStoredToken(KEY_ACCESS)
+        // 旧版明文 token 一次性迁移成 Keystore 密文（已是密文或 Keystore 不可用时保持原样）。
+        migrateStoredToken(KEY_REFRESH)
+        migrateStoredToken(KEY_ACCESS)
         accessExpireAtMs = jwtExp(accessToken ?: "") * 1000L
         // 恢复时同步给旧元数据 API（R18 元数据请求从第一次起就带鉴权头）；
         // 手动粘贴的 access_token 优先级更高，不被会话覆盖。
         IwaraApi.accessToken = accessToken ?: IwaraApi.accessToken
+    }
+
+    /**
+     * 读落盘 token：兼容旧版明文与 `v1:` 密文（[TokenCrypto.decrypt]）。
+     * 密文解密失败（KeyStore 被系统重置）返回 null ⇒ 按未登录处理，用户重新登录即可。
+     */
+    private fun readStoredToken(key: String): String? {
+        val raw = prefs.getString(key, null)?.takeIf { it.isNotBlank() } ?: return null
+        return TokenCrypto.decrypt(raw)
+    }
+
+    /** 写落盘 token：尽量加密；Keystore 不可用时降级明文（安全特性不得搞挂登录）。 */
+    private fun writeStoredToken(key: String, value: String) {
+        val stored = TokenCrypto.encrypt(value) ?: value
+        prefs.edit().putString(key, stored).apply()
+    }
+
+    /** 一次性迁移：旧版明文 → 密文。已是密文或不可加密时保持原样（不重复写）。 */
+    private fun migrateStoredToken(key: String) {
+        val raw = prefs.getString(key, null)?.takeIf { it.isNotBlank() } ?: return
+        if (raw.startsWith(TokenCrypto.PREFIX)) return
+        val stored = TokenCrypto.encrypt(raw) ?: return
+        prefs.edit().putString(key, stored).apply()
     }
 
     val isLoggedIn: Boolean get() = !refreshToken.isNullOrBlank()
@@ -124,7 +151,7 @@ object IwaraSession {
                 ?: throw IwaraApiException("登录失败：服务器未返回令牌")
 
             refreshToken = refresh
-            prefs.edit().putString(KEY_REFRESH, refresh).apply()
+            writeStoredToken(KEY_REFRESH, refresh)
 
             // 立即换取 access token 并拉取用户信息；任一步失败都视为登录失败（回滚）。
             try {
@@ -275,7 +302,7 @@ object IwaraSession {
         accessToken = access
         accessExpireAtMs = jwtExp(access) * 1000L
         // 顺手缓存，加速下次启动（可能已过期，仅作初始值）。
-        prefs.edit().putString(KEY_ACCESS, access).apply()
+        writeStoredToken(KEY_ACCESS, access)
         // 统一 token：同步给旧元数据 API（管理器补全元数据自动带上登录身份）。
         IwaraApi.accessToken = access
         return access

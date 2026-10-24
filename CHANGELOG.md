@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Encrypt stored Iwara session tokens (refresh/access) and the manually pasted access token with
+  an AndroidKeyStore AES-256-GCM key before they reach SharedPreferences. Legacy plaintext values
+  migrate to ciphertext on startup; when KeyStore is unavailable the app degrades to the old
+  plaintext behaviour, and a lost key is treated as logged out rather than falling back.
+
 ### Changed
 
 - Housekeeping: ignore `.zcode/`, drop `validateDistributionUrl=false` from the Gradle wrapper

@@ -569,12 +569,15 @@ class IwaraRepository(
 
     fun setAccessToken(token: String?) {
         if (token.isNullOrBlank()) prefs.edit().remove("access_token").apply()
-        else prefs.edit().putString("access_token", token).apply()
+        // 手动粘贴的 access token 同样落盘前加密（Keystore 不可用时降级明文，保持旧行为）。
+        else prefs.edit().putString("access_token", TokenCrypto.encrypt(token) ?: token).apply()
         IwaraApi.accessToken = token?.takeIf { it.isNotBlank() }
         _accessToken.value = token?.takeIf { it.isNotBlank() }.orEmpty()
     }
 
-    fun getAccessToken(): String? = prefs.getString("access_token", null)?.takeIf { it.isNotBlank() }
+    /** 兼容旧版明文与 `v1:` 密文；密文解密失败（密钥丢失）按公开无 token 模式处理。 */
+    fun getAccessToken(): String? =
+        prefs.getString("access_token", null)?.takeIf { it.isNotBlank() }?.let { TokenCrypto.decrypt(it) }
 
     private val _accessToken = MutableStateFlow(getAccessToken().orEmpty())
 
