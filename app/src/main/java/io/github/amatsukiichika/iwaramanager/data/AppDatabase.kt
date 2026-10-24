@@ -9,7 +9,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [VideoEntity::class, TagEntity::class, VideoTagCrossRef::class, WatchHistoryEntity::class],
-    version = 2,
+    version = 3,
     // schema 导出到 app/schemas/，供后续版本的迁移回归测试比对（见 app/build.gradle.kts 的 ksp 配置）
     exportSchema = true
 )
@@ -46,6 +46,24 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * 2→3 迁移：给 `videos` 与 `video_tag_cross_ref` 补二级索引。纯索引新增，不动任何表结构。
+         * 索引名必须与 Room 按实体默认生成的名字逐字一致（`index_<表>_<列…>`）——
+         * Room 打开库时按实体期望校验 schema，名字/列序对不上都会崩；
+         * 回归测试见 [io.github.amatsukiichika.iwaramanager.data.RoomIndicesMigrationTest]。
+         */
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_videos_iwaraId` ON `videos` (`iwaraId`)")
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_videos_metaFetched_iwaraId` ON `videos` (`metaFetched`, `iwaraId`)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_video_tag_cross_ref_tagId` ON `video_tag_cross_ref` (`tagId`)"
+                )
+            }
+        }
+
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
@@ -56,7 +74,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "iwara_manager.db"
                 )
-                    .addMigrations(MIGRATION_1_2)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                     .build().also { INSTANCE = it }
             }
     }
