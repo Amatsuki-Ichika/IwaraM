@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0-rc.1] - 2026-10-24
+
 ### Security
 
 - Encrypt stored Iwara session tokens (refresh/access) and the manually pasted access token with
@@ -58,5 +60,6 @@ First public release.
   frosted-glass treatment for the bars.
 - **Crash log capture** — uncaught exceptions are written to a file for troubleshooting.
 
-[Unreleased]: https://github.com/Amatsuki-Ichika/IwaraM/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Amatsuki-Ichika/IwaraM/compare/v0.2.0-rc.1...HEAD
+[0.2.0-rc.1]: https://github.com/Amatsuki-Ichika/IwaraM/compare/v0.1.0...v0.2.0-rc.1
 [0.1.0]: https://github.com/Amatsuki-Ichika/IwaraM/releases/tag/v0.1.0
