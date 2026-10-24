@@ -32,8 +32,6 @@ import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -57,7 +55,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Folder
@@ -67,7 +64,6 @@ import androidx.compose.material.icons.filled.Subscriptions
 import androidx.compose.material.icons.filled.SmartDisplay
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -77,10 +73,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.InputChip
 import androidx.compose.material3.InputChipDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -90,13 +82,11 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import android.os.Build
@@ -107,9 +97,6 @@ import io.github.amatsukiichika.iwaramanager.ui.components.glassPillEffects
 import io.github.amatsukiichika.iwaramanager.ui.components.glassViewBackdrop
 import io.github.amatsukiichika.iwaramanager.ui.components.rememberGlassViewBackdrop
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInParent
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
@@ -140,16 +127,13 @@ import io.github.amatsukiichika.iwaramanager.ui.components.BAR_HEIGHT_BASE
 import io.github.amatsukiichika.iwaramanager.ui.components.GLASS_BAR_SIZE
 import io.github.amatsukiichika.iwaramanager.ui.components.GlassRole
 import io.github.amatsukiichika.iwaramanager.ui.components.LocalGlassSettings
-import io.github.amatsukiichika.iwaramanager.ui.components.R18Pill
 import io.github.amatsukiichika.iwaramanager.ui.components.glassMaterialFor
 import io.github.amatsukiichika.iwaramanager.ui.components.glassScale
-import io.github.amatsukiichika.iwaramanager.ui.TagChip
 import io.github.amatsukiichika.iwaramanager.ui.VideoCardContent
 import io.github.amatsukiichika.iwaramanager.ui.VideoCardModel
 import io.github.amatsukiichika.iwaramanager.ui.components.PillSegment
 import io.github.amatsukiichika.iwaramanager.ui.components.PillSelector
 import io.github.amatsukiichika.iwaramanager.ui.components.SearchPill
-import io.github.amatsukiichika.iwaramanager.ui.components.TagSuggestionRow
 import io.github.amatsukiichika.iwaramanager.ui.components.debugAwareErrorText
 import io.github.amatsukiichika.iwaramanager.ui.normalizeCardText
 import kotlinx.coroutines.delay

@@ -43,11 +43,9 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.RemoveRedEye
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -82,7 +80,6 @@ import io.github.amatsukiichika.iwaramanager.data.IwaraComment
 import io.github.amatsukiichika.iwaramanager.data.IwaraImageItem
 import io.github.amatsukiichika.iwaramanager.data.IwaraPlaylist
 import io.github.amatsukiichika.iwaramanager.data.IwaraPostItem
-import io.github.amatsukiichika.iwaramanager.data.IwaraProfileData
 import io.github.amatsukiichika.iwaramanager.data.IwaraVideoItem
 import io.github.amatsukiichika.iwaramanager.data.filterBy
 import io.github.amatsukiichika.iwaramanager.data.videoKeys
