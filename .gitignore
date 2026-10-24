@@ -15,6 +15,7 @@ local.properties
 
 # Signing material — NEVER commit these
 keystore.properties
+keystore/
 *.jks
 *.keystore
 *.p12

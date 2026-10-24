@@ -32,6 +32,13 @@ apksigner verify --print-certs iwara-manager-<version>-arm64-v8a.apk
 Compare the printed SHA-256 digest with the fingerprint below. If they differ, the file did
 not come from this project — do not install it.
 
+Every release also ships a `.sha256` checksum file next to the APK; use it to check download
+integrity (before worrying about signatures):
+
+```bash
+sha256sum -c iwara-manager-<version>-arm64-v8a.apk.sha256
+```
+
 Current release certificate SHA-256 fingerprint:
 
 ```

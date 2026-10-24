@@ -41,7 +41,7 @@ small hand-written overlay stack. State is held in `StateFlow`s, most of which l
 | `CrashLogger.kt` | Writes uncaught exceptions to a file under the app's private storage. |
 | `data/` | Room entities, DAOs and migrations; the Retrofit API and DTOs; session/token handling; the repository; and pure helpers such as the ID parser and the global filter rules. |
 | `ui/` | Screens and shared components: the local library, the player, settings, the video card, sorting, scroll geometry, the theme, and the browse/ subtree with the online screens. |
-| `ui/components/` | Reusable Compose building blocks (top bar, bottom bar, sheets, dialogs, sliders, glass material and backdrop helpers). |
+| `ui/components/` | Reusable Compose building blocks (top bar, glass bars, sheets, dialogs, sliders, glass material and backdrop helpers). The floating bottom bar itself lives in `ui/browse/IwaraBottomBar.kt`. |
 
 Tests live in `app/src/test/java/...` and run on the JVM. Pure logic — geometry maths, parsers,
 filtering, sorting, database migrations — is covered by JUnit 4 tests; Robolectric is used where
@@ -64,7 +64,8 @@ Android APIs are unavoidable.
 
 ## Conventions worth knowing
 
-- Comments are written in Simplified Chinese, matching the UI language.
+- Comments in Kotlin sources are written in Simplified Chinese, matching the UI language; build
+  scripts keep English comments.
 - The app version is defined once, in `gradle.properties`; dependency versions live in
   `gradle/libs.versions.toml`.
 - No absolute paths, SDK locations or machine-specific configuration are checked in.

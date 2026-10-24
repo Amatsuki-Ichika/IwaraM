@@ -30,7 +30,8 @@ attach the log from the file described in `CrashLogger.kt` if you can retrieve i
 
 - Keep changes focused; one topic per pull request.
 - Follow the existing code style (official Kotlin conventions, 4-space indentation) and keep
-  comments in Simplified Chinese, consistent with the rest of the codebase.
+  comments in Kotlin sources in Simplified Chinese, consistent with the rest of the codebase
+  (build scripts keep English comments).
 - Add or update JVM unit tests for any pure logic you change. `./gradlew :app:test` must pass.
 - Update [CHANGELOG.md](CHANGELOG.md) under `[Unreleased]` when the change is user-visible.
 - Run the CI workflow locally if you can, and make sure it is green before requesting review.
@@ -74,12 +75,15 @@ existing installations can no longer be updated in place.
 Maintainers publish a release by pushing a tag:
 
 ```bash
-# Bump app.versionCode in gradle.properties and move the CHANGELOG entries out of [Unreleased], then:
+# Bump app.versionName in gradle.properties, move the CHANGELOG entries out of [Unreleased], then:
 git tag v0.1.1
 git push origin v0.1.1
 ```
 
-The tag is the source of truth for `versionName`; the `release` workflow passes it to the build.
-The workflow runs the unit tests, builds the signed APK on the tag and uploads it to a GitHub Release.
+`gradle.properties` is the single source of truth for the version: the tag must match
+`app.versionName` there (the workflow fails the build on a mismatch), and `versionCode` is
+derived from `versionName` automatically (major\*10000 + minor\*100 + patch). The workflow runs
+the unit tests, builds the signed APK on the tag, verifies the signature with `apksigner` and
+uploads the APK plus its `.sha256` checksum to a GitHub Release.
 It needs these repository secrets: `KEYSTORE_BASE64` (the keystore file, base64-encoded),
 `STORE_PASSWORD`, `KEY_ALIAS` and `KEY_PASSWORD`.

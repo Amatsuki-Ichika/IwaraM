@@ -17,5 +17,10 @@ trim_trailing_whitespace = false
 [*.{bat,cmd}]
 end_of_line = crlf
 
+# Third-party generated Anime4K shaders — do not reformat or normalise
+[app/src/main/assets/anime4k/generated/**]
+insert_final_newline = false
+trim_trailing_whitespace = false
+
 [*.png]
 insert_final_newline = false

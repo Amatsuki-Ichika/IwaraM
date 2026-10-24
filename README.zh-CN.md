@@ -4,6 +4,7 @@
 [![Release](https://img.shields.io/github/v/release/Amatsuki-Ichika/IwaraM?sort=semver)](https://github.com/Amatsuki-Ichika/IwaraM/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 [![Min SDK](https://img.shields.io/badge/minSdk-26-blue.svg)](https://developer.android.com/about/versions/oreo)
+[![Kotlin](https://img.shields.io/badge/Kotlin-2.4-7F52FF.svg?logo=kotlin&logoColor=white)](https://kotlinlang.org)
 
 [English](README.md) · 简体中文
 

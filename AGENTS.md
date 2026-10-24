@@ -22,6 +22,7 @@ SDK locations or locally installed toolchains to build files or documentation.
 app/src/main/java/io/github/amatsukiichika/iwaramanager/
 ├── MainActivity.kt        single Activity: the three main tabs and the overlay stack
 ├── IwaraApp.kt            Application: lazy database/repository, crash logger
+├── CrashLogger.kt         uncaught-exception handler that writes crash logs to private storage
 ├── ScanService.kt         foreground service that scans media folders and fetches metadata
 ├── DownloadService.kt     foreground service that runs downloads
 ├── data/                  Room entities and DAOs, Retrofit API, session handling, repository
@@ -32,7 +33,8 @@ app/src/test/java/...      JVM unit tests (JUnit 4 + Robolectric where Android A
 ## Conventions
 
 - Kotlin + Jetpack Compose, Material 3. Official Kotlin code style (4-space indent); sources are
-  UTF-8. Comments are written in Simplified Chinese, matching the UI language.
+  UTF-8. Comments in Kotlin sources are written in Simplified Chinese, matching the UI language;
+  build scripts (`*.gradle.kts`, `gradle.properties`, `proguard-rules.pro`) keep English comments.
 - **No DI framework, no Navigation library, no MVI.** Screens are composed directly and
   navigation is a hand-written overlay stack on the single Activity. Do not introduce those
   dependencies.
