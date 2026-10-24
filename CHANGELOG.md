@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Upgrade the network stack: Retrofit 2.11 -> 3.0 and OkHttp 4.12 -> 5.5.1.
+
 - Add Room secondary indexes (schema v3): `videos.iwaraId` for download dedup lookups,
   `(videos.metaFetched, videos.iwaraId)` for the pending-metadata scan, and
   `video_tag_cross_ref.tagId` for the tag JOIN - all previously full table scans.
