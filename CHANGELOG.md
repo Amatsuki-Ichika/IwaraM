@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (instead of leaving an idle service resident), and reuse thread-safe `DateTimeFormatter`s for
   the download-list and relative-time date labels.
 
+### Fixed
+
+- Rethrow `CancellationException` in the online feed pager and view-model catch blocks instead of
+  surfacing it as a load error / diagnostic log noise when a screen is left mid-request.
+
 ## [0.1.0] - 2026-10-24
 
 First public release.

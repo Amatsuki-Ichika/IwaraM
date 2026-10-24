@@ -4,6 +4,7 @@ import androidx.compose.runtime.Immutable
 import io.github.amatsukiichika.iwaramanager.data.IwaraImageItem
 import io.github.amatsukiichika.iwaramanager.data.IwaraPostItem
 import io.github.amatsukiichika.iwaramanager.data.IwaraVideoItem
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -123,6 +124,9 @@ class FeedPager<T>(
                     endReached = fetched.size < pageSize || (page > 0 && added == 0)
                 )
             } catch (t: Throwable) {
+                // 取消是正常控制流，必须原样上抛：写进 error 状态会把「用户离开 / 刷新」当成
+                // 「加载失败」，吞掉取消还会让协程假装正常结束、破坏结构化并发。
+                if (t is CancellationException) throw t
                 if (generation != gen) return@launch // 同上（含被 cancel 的旧任务）
                 _state.value = _state.value.copy(loading = false, error = describeError(t))
             }
