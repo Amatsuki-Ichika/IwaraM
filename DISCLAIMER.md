@@ -2,7 +2,7 @@
 
 ## Unofficial client
 
-Iwara Manager is an **unofficial, community-developed client** for [iwara.tv](https://iwara.tv).
+IwaraM is an **unofficial, community-developed client** for [iwara.tv](https://iwara.tv).
 
 It is not affiliated with, endorsed by, sponsored by, or in any way officially connected to
 iwara.tv, its operators, or its affiliates. The names "iwara", "iwara.tv" and any related
