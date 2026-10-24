@@ -101,6 +101,16 @@ class ScanService : Service() {
         return START_NOT_STICKY
     }
 
+    /**
+     * Android 15+ 的 dataSync「6 小时/24h」限额对扫描同样生效；正常扫描远短于限额，这里是兜底：
+     * 立即收起前台并自停（stopSelf → onDestroy 取消扫描协程，ScanState 停在最后进度，
+     * 再点「检索」会重新走一遍）。onTimeout 之后系统只给几秒宽限，不做任何慢操作。
+     */
+    override fun onTimeout(startId: Int) {
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+    }
+
     override fun onDestroy() {
         scope.cancel()
         super.onDestroy()

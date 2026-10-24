@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Target Android 16 (`targetSdk` 36). Edge-to-edge and predictive back were already in place;
+  the dataSync foreground services now implement `onTimeout()` so downloads pause gracefully
+  when Android 15+ enforces the 6-hour/24h limit, resuming via the existing 「继续」 flow.
+
 - Upgrade the network stack: Retrofit 2.11 -> 3.0 and OkHttp 4.12 -> 5.5.1.
 
 - Add Room secondary indexes (schema v3): `videos.iwaraId` for download dedup lookups,
