@@ -172,7 +172,8 @@ internal fun pendingToTask(p: PendingDownload): DownloadState.Task = DownloadSta
  */
 /**
  * 常驻 worker 的核心消费循环（抽成可注入的纯协程函数以便单测）：
- * 串行消费直到 channel 关闭；每个任务结束后若队列已空则触发 [onIdle]（服务里用于收起前台通知）。
+ * 串行消费直到 channel 关闭；每个任务结束后若队列已空，则以「最后消费任务的 startId」触发 [onIdle]
+ * （服务里用于收起前台通知并按框架 startId 协议自停，见 [DownloadService.onCreate] 注释）。
  *
  * 关键不变量：
  * - **没有空闲退出**：`withTimeoutOrNull(1500){queue.receive()} ?: break` 会在 worker
@@ -184,14 +185,14 @@ internal fun pendingToTask(p: PendingDownload): DownloadState.Task = DownloadSta
 internal suspend fun drainDownloadQueue(
     queue: ReceiveChannel<DownloadService.Job>,
     execute: suspend (DownloadService.Job) -> Unit,
-    onIdle: suspend () -> Unit = {}
+    onIdle: suspend (Int) -> Unit = {}
 ) {
     for (job in queue) {
         execute(job)
         // 注意 Channel 语义：isEmpty 表示"receive 会挂起吗"——对"已关闭且已取空"的 channel
         // 它返回 false（receive 不挂起而是立即返回关闭结果），所以必须并上 isClosedForReceive
         // 才能覆盖"最后一批任务消费完"的情形。
-        if (queue.isEmpty || queue.isClosedForReceive) onIdle()
+        if (queue.isEmpty || queue.isClosedForReceive) onIdle(job.startId)
     }
 }
 
@@ -205,7 +206,9 @@ class DownloadService : Service() {
         val title: String,
         val url: String,
         val fileName: String,
-        val quality: String
+        val quality: String,
+        /** 框架交付序：onStartCommand 的 startId；onIdle 凭最后一个它安全 stopSelf（见 onCreate 注释）。 */
+        val startId: Int = 0
     )
 
     override fun onCreate() {
@@ -216,9 +219,15 @@ class DownloadService : Service() {
             drainDownloadQueue(
                 queue,
                 execute = { runDownload(it) },
-                onIdle = {
-                    // 前台通知随任务走：队列清空后收起常驻通知；服务本身不停止（进程常驻无通知，可接受）。
+                onIdle = { lastStartId ->
+                    // 前台通知随任务走：队列清空后收起常驻通知；随后按 startId 协议自停，
+                    // 空跑的服务不再常驻进程。stopSelf(lastStartId) 是 IntentService 同款的
+                    // 竞态防护：若自停的同时又有新的 startForegroundService 进来，框架看到
+                    // 更新的 startId 会忽略本次停止，新任务照常被 worker 消费；只有当前这个
+                    // 确实是最后交付的 startId 时服务才真正停止。前提是任务在 onStartCommand
+                    // 内同步入队（入队序 = startId 交付序，见 onStartCommand 注释）。
                     stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelf(lastStartId)
                 }
             )
         }
@@ -234,7 +243,8 @@ class DownloadService : Service() {
                 title = it.getStringExtra(EXTRA_TITLE) ?: id,
                 url = it.getStringExtra(EXTRA_URL) ?: return@let null,
                 fileName = it.getStringExtra(EXTRA_FILE_NAME) ?: "$id.mp4",
-                quality = it.getStringExtra(EXTRA_QUALITY) ?: "Source"
+                quality = it.getStringExtra(EXTRA_QUALITY) ?: "Source",
+                startId = startId
             )
         }
         if (job == null) {
@@ -257,15 +267,14 @@ class DownloadService : Service() {
                 url = job.url, fileName = job.fileName, quality = job.quality
             )
         )
+        // trySend：UNLIMITED channel 下必然入队成功，channel 已随 onDestroy 关闭时返回失败
+        // 结果而非抛出。必须在 onStartCommand 内同步入队（不能经 launch 异步跳一拍）：
+        // startId 协议要求「入队序 = 框架交付序」，onIdle 才能凭最后消费的 startId 安全自停。
+        queue.trySend(job)
         // `savePendingDownload` 是「prefs JSON 读 → Gson 反序列化 → 再序列化 → 写回」，
         // 不能直接在 onStartCommand（**主线程**）上跑：待续传记录越多越慢，连点多个下载时
-        // 每次都要主线程做一遍整表 JSON 解析。挪进 IO 作用域（入队照旧立刻发，不等它）。
+        // 每次都要主线程做一遍整表 JSON 解析。挪进 IO 作用域，不等它。
         val app = application as IwaraApp
-        scope.launch {
-            // trySend：UNLIMITED channel 下与 send 等价（永不禁发），但 channel 已随
-            // onDestroy 关闭时不会向 scope 抛出未捕获的 ClosedSendChannelException。
-            queue.trySend(job)
-        }
         scope.launch {
             runCatching {
                 app.repository.savePendingDownload(

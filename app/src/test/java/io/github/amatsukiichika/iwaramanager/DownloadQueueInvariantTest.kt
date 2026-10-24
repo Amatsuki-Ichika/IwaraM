@@ -22,8 +22,9 @@ import org.junit.Test
  */
 class DownloadQueueInvariantTest {
 
-    private fun job(id: String) = DownloadService.Job(
-        videoId = id, title = "t-$id", url = "https://example/$id", fileName = "$id.mp4", quality = "Source"
+    private fun job(id: String, startId: Int = 0) = DownloadService.Job(
+        videoId = id, title = "t-$id", url = "https://example/$id", fileName = "$id.mp4", quality = "Source",
+        startId = startId
     )
 
     /** 记录型 execute：把消费到的 videoId 按序记录，模拟 runDownload 的占位。 */
@@ -74,10 +75,23 @@ class DownloadQueueInvariantTest {
         drainDownloadQueue(
             queue,
             execute = recorder(executed),
-            onIdle = { idleCount.add(1) }
+            onIdle = { _ -> idleCount.add(1) }
         )
         assertEquals(listOf("a", "b"), executed)
         assertTrue("连排任务中间不得触发 onIdle（否则前台通知会闪烁）", idleCount.size == 1)
+    }
+
+    @Test
+    fun `onIdle carries the last consumed job's startId for the stopSelf protocol`() = runBlocking {
+        // 服务端 onIdle 收到「最后消费任务」的 startId 后调 stopSelf(startId)：若期间有更新的
+        // start 交付，框架会忽略这次停止（IntentService 同款协议），新任务照常被消费。
+        val queue = Channel<DownloadService.Job>(Channel.UNLIMITED)
+        val idleStartIds = mutableListOf<Int>()
+        queue.send(job("a", startId = 11))
+        queue.send(job("b", startId = 12))
+        queue.close()
+        drainDownloadQueue(queue, execute = { _ -> }, onIdle = { idleStartIds.add(it) })
+        assertEquals(listOf(12), idleStartIds)
     }
 
     @Test

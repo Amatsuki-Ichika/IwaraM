@@ -1393,6 +1393,10 @@ fun formatCount(n: Int): String = when {
     else -> n.toString()
 }
 
+/** 「yyyy-MM-dd」回退格式器：DateTimeFormatter 不可变线程安全，文件级缓存避免每个卡片调用都新建。 */
+private val timeAgoDateFormatter =
+    java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd", java.util.Locale.CHINA)
+
 /** ISO 时间 → 相对时间文案；解析失败返回 null。 */
 fun timeAgoLabel(iso: String?): String? {
     val ms = parseIwaraDate(iso) ?: return null
@@ -1404,6 +1408,8 @@ fun timeAgoLabel(iso: String?): String? {
         diff < hour -> "${(diff / minute).coerceAtLeast(1)} 分钟前"
         diff < day -> "${diff / hour} 小时前"
         diff < 30 * day -> "${diff / day} 天前"
-        else -> java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.CHINA).format(java.util.Date(ms))
+        else -> timeAgoDateFormatter.format(
+            java.time.Instant.ofEpochMilli(ms).atZone(java.time.ZoneId.systemDefault())
+        )
     }
 }

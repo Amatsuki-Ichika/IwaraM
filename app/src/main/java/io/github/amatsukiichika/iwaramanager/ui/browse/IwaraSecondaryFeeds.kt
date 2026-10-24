@@ -68,8 +68,9 @@ import io.github.amatsukiichika.iwaramanager.ui.components.horizontalSlideSpec
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.text.SimpleDateFormat
-import java.util.Date
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 /** 收藏覆盖层（从「我的」页进入）：顶栏返回 + 视频/图片分段。 */
@@ -177,7 +178,9 @@ private fun FavoriteImagesGrid(cvm: IwaraClientViewModel, actions: IwaraNavActio
 
 /* ---------- 下载列表：左"正在下载"右"已完成" ---------- */
 
-private val downloadTimeFormat = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault())
+// DateTimeFormatter 不可变、线程安全：共享的 SimpleDateFormat 一旦被多线程并发 format 会输出
+// 错乱结果（PlayerDiagnostics 的注释里有同款告诫），改用 java.time 消除这颗埋雷。
+private val downloadTimeFormat = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm", Locale.getDefault())
 
 /** 下载列表覆盖层：药丸滑块切换 正在下载/已完成，列表带基础滚动条。 */
 @Composable
@@ -365,7 +368,11 @@ private fun DownloadHistoryList(cvm: IwaraClientViewModel, modifier: Modifier = 
                             buildString {
                                 if (entry.quality.isNotBlank()) append(entry.quality)
                                 append(" · ")
-                                append(downloadTimeFormat.format(Date(entry.time)))
+                                append(
+                                    downloadTimeFormat.format(
+                                        Instant.ofEpochMilli(entry.time).atZone(ZoneId.systemDefault())
+                                    )
+                                )
                             },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
