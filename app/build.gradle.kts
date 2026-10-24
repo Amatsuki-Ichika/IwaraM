@@ -38,7 +38,11 @@ android {
     defaultConfig {
         applicationId = "io.github.amatsukiichika.iwaramanager"
         minSdk = 26
-        targetSdk = 34
+        // Android 16（API 36）。升档涉及的行为变化均已处理：
+        //   - edge-to-edge 强制：MainActivity 已 enableEdgeToEdge()，各栏/抽屉消费 insets；
+        //   - predictive back 默认开：manifest 已开 enableOnBackInvokedCallback，返回链走 BackHandler；
+        //   - dataSync 前台服务 6h/24h 限额：DownloadService/ScanService 各自实现 onTimeout()。
+        targetSdk = 36
         versionCode = appVersionCode
         versionName = appVersionName
 

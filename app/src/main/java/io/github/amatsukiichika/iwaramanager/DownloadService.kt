@@ -224,7 +224,15 @@ class DownloadService : Service() {
         scope.launch {
             drainDownloadQueue(
                 queue,
-                execute = { runDownload(it) },
+                execute = { job ->
+                    // 在跑任务集合：onTimeout（dataSync 6h 限额）据此把所有在跑任务转暂停。
+                    activeJobs.add(job.videoId)
+                    try {
+                        runDownload(job)
+                    } finally {
+                        activeJobs.remove(job.videoId)
+                    }
+                },
                 onIdle = { lastStartId ->
                     // 前台通知随任务走：队列清空后收起常驻通知；随后按 startId 协议自停，
                     // 空跑的服务不再常驻进程。stopSelf(lastStartId) 是 IntentService 同款的
@@ -295,6 +303,29 @@ class DownloadService : Service() {
             }
         }
         return START_NOT_STICKY
+    }
+
+    /**
+     * Android 15+ 对 dataSync 前台服务施加「6 小时/24h」运行限额，到时系统回调这里（API 35+）。
+     * 已有的暂停机制接管：在跑任务全部标记暂停（读循环安全收尾，半成品文件与记录都保留），
+     * 队列里未跑的任务留在「正在下载」列表；随后收起前台并自停 —— onTimeout 之后系统只给
+     * 几秒宽限，必须立即 stopSelf，否则 ANR。进程被带走的任务按既有路径在下次启动恢复为
+     * 「下载中断/排队」，点「继续」即可断点续传。
+     */
+    override fun onTimeout(startId: Int) {
+        DiagLog.log("Download", "dataSync 前台服务到时（6h 限额）：在跑任务全部转暂停并自停")
+        activeJobs.forEach { pauseRequested.add(it) }
+        notify(
+            DONE_NOTIF_ID,
+            NotificationCompat.Builder(this, CHANNEL_ID)
+                .setSmallIcon(R.drawable.ic_notification)
+                .setContentTitle("下载已暂停")
+                .setContentText("已到系统后台运行限额；打开应用点「继续」断点续传")
+                .setAutoCancel(true)
+                .build()
+        )
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
     }
 
     override fun onDestroy() {
@@ -716,6 +747,9 @@ class DownloadService : Service() {
 
         /** 暂停标记：UI 置入，读循环每 64KB 检查一次；服务进程内单例，跨组件共享。 */
         private val pauseRequested = CopyOnWriteArraySet<String>()
+
+        /** 在跑（已出队、尚未收尾）任务的 videoId 集合：onTimeout 据此批量转暂停。 */
+        private val activeJobs = CopyOnWriteArraySet<String>()
 
         fun start(context: Context, job: Job) {
             // 暂停标记在「主动发起新任务」时清除：如果在 runDownload 出队后清，
