@@ -28,6 +28,9 @@ keystore/
 *.dex
 *.class
 
+# AI agent workspace config (local tooling only)
+.zcode/
+
 # OS / editor
 .DS_Store
 Thumbs.db

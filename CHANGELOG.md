@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Housekeeping: ignore `.zcode/`, drop `validateDistributionUrl=false` from the Gradle wrapper
+  properties (restoring default distribution URL validation), log SAF persistable-permission
+  failures, stop the download service via the framework startId protocol once the queue drains
+  (instead of leaving an idle service resident), and reuse thread-safe `DateTimeFormatter`s for
+  the download-list and relative-time date labels.
+
 ## [0.1.0] - 2026-10-24
 
 First public release.

@@ -367,6 +367,9 @@ class MainActivity : ComponentActivity() {
                     uri,
                     Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
                 )
+            }.onFailure { e ->
+                // 静默吞掉的话用户只会看到「扫描不到文件」，SAF 授权异常将无从归因。
+                DiagLog.log("SAF", "扫描目录权限持久化失败 uri=$uri: $e")
             }
             vm.importFolder(uri)
         }
@@ -380,6 +383,8 @@ class MainActivity : ComponentActivity() {
                     uri,
                     Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
                 )
+            }.onFailure { e ->
+                DiagLog.log("SAF", "下载目录权限持久化失败 uri=$uri: $e")
             }
             vm.setDownloadRoot(uri)
         }
