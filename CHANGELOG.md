@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** the application ID changed from `io.github.amatsukiichika.iwaramanager` to
+  `io.github.amatsukiichika.iwaram` (Kotlin package renamed to match). Android treats this as a
+  different app: existing installations cannot update in place and must uninstall first, and
+  local data (library index, watch history, settings) does not carry over. Downloaded media in
+  user-chosen folders is unaffected.
+
 ## [0.2.0-rc.1] - 2026-10-24
 
 ### Security

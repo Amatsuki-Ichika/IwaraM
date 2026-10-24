@@ -35,12 +35,12 @@ val keystoreProperties = Properties().apply {
 }
 
 android {
-    namespace = "io.github.amatsukiichika.iwaramanager"
+    namespace = "io.github.amatsukiichika.iwaram"
     compileSdk = 37
     compileSdkMinor = 2
 
     defaultConfig {
-        applicationId = "io.github.amatsukiichika.iwaramanager"
+        applicationId = "io.github.amatsukiichika.iwaram"
         minSdk = 26
         // Android 16（API 36）。升档涉及的行为变化均已处理：
         //   - edge-to-edge 强制：MainActivity 已 enableEdgeToEdge()，各栏/抽屉消费 insets；
