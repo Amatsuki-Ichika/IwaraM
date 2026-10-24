@@ -33,10 +33,8 @@ including maintainer changes — go through a pull request:
 There is no dependency-update bot: bump versions manually in `gradle/libs.versions.toml`
 and smoke-test larger upgrades with a debug build before merging.
 
-Releases go out in two stages, both by pushing a `v*` tag that matches `app.versionName` in
-`gradle.properties`: a pre-release tag with a suffix (e.g. `v0.2.0-rc.1`) publishes a GitHub
-pre-release for testing, then the plain final tag (e.g. `v0.2.0`) publishes the stable
-release — see [CONTRIBUTING.md](CONTRIBUTING.md), section "Releasing".
+Releases are published by pushing a `v*` tag that matches `app.versionName` in
+`gradle.properties` — see [CONTRIBUTING.md](CONTRIBUTING.md), section "Releasing".
 
 ## Layout
 
