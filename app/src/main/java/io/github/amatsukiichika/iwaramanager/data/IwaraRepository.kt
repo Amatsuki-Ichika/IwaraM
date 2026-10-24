@@ -46,14 +46,18 @@ internal fun resolveVideoSort(stored: String?, migrated: Boolean): String =
 /**
  * 业务仓库：连接 Room 数据库、iwara API 与本地文件系统。
  */
+
+/**
+ * 业务仓库：连接 Room 数据库、iwara API 与本地文件系统。
+ */
 class IwaraRepository(
-    private val context: Context,
+    internal val context: Context,
     private val db: AppDatabase
 ) {
-    private val dao = db.videoDao()
-    private val historyDao = db.watchHistoryDao()
+    internal val dao = db.videoDao()
+    internal val historyDao = db.watchHistoryDao()
 
-    private val prefs = context.getSharedPreferences("prefs", Context.MODE_PRIVATE)
+    internal val prefs = context.getSharedPreferences("prefs", Context.MODE_PRIVATE)
 
     /**
      * 半透明材质的默认不透明度（0f..1f）。
@@ -66,9 +70,9 @@ class IwaraRepository(
         const val DEFAULT_GLASS_OPACITY = 0.78f
     }
 
-    private val gson = Gson()
-    private val downloadHistoryType = object : TypeToken<List<DownloadHistoryEntry>>() {}.type
-    private val pendingDownloadType = object : TypeToken<List<PendingDownload>>() {}.type
+    internal val gson = Gson()
+    internal val downloadHistoryType = object : TypeToken<List<DownloadHistoryEntry>>() {}.type
+    internal val pendingDownloadType = object : TypeToken<List<PendingDownload>>() {}.type
 
     init {
         // 与 IwaraSession.restore 协调初始化——IwaraApp.onCreate 先行 restore，
@@ -417,63 +421,7 @@ class IwaraRepository(
      * 都不是 suspend、内部也不调用挂起函数，没必要把 suspend 传染给所有调用方。
      * （`synchronized` 可重入，所以锁内再调 [loadDownloadHistory] / [loadPendingDownloads] 安全。）
      */
-    private val prefsJsonLock = Any()
-
-    /** 下载历史：最新在前，同一视频只保留最近一次记录，上限 100 条。 */
-    fun addDownloadHistory(entry: DownloadHistoryEntry) = synchronized(prefsJsonLock) {
-        val list = loadDownloadHistory().filterNot { it.videoId == entry.videoId }.toMutableList()
-        list.add(0, entry)
-        prefs.edit().putString("download_history_cache", gson.toJson(list.take(100))).apply()
-    }
-
-    fun loadDownloadHistory(): List<DownloadHistoryEntry> =
-        prefs.getString("download_history_cache", null)
-            ?.takeIf { it.isNotBlank() }
-            ?.let {
-                runCatching {
-                    gson.fromJson<List<DownloadHistoryEntry>>(it, downloadHistoryType)
-                }.getOrNull()
-            }
-            .orEmpty()
-
-    /** 移除某视频的下载历史记录（「移除任务 / 移除任务和文件」用）。 */
-    fun removeDownloadHistory(videoId: String) = synchronized(prefsJsonLock) {
-        val rest = loadDownloadHistory().filterNot { it.videoId == videoId }
-        prefs.edit().putString("download_history_cache", gson.toJson(rest)).apply()
-    }
-
-    /** 未完成下载（暂停/失败）持久化：重启后「下载列表」还能看到并可续传/重新下载。 */
-    fun savePendingDownload(p: PendingDownload) = synchronized(prefsJsonLock) {
-        val list = loadPendingDownloads().filterNot { it.videoId == p.videoId }.toMutableList()
-        list.add(0, p)
-        prefs.edit().putString("download_pending_cache", gson.toJson(list.take(50))).apply()
-    }
-
-    fun removePendingDownload(videoId: String) = synchronized(prefsJsonLock) {
-        val rest = loadPendingDownloads().filterNot { it.videoId == videoId }
-        prefs.edit().putString("download_pending_cache", gson.toJson(rest)).apply()
-    }
-
-    fun loadPendingDownloads(): List<PendingDownload> =
-        prefs.getString("download_pending_cache", null)
-            ?.takeIf { it.isNotBlank() }
-            ?.let {
-                runCatching {
-                    gson.fromJson<List<PendingDownload>>(it, pendingDownloadType)
-                }.onFailure { e ->
-                    // 解析失败若无痕迹地清空整个续传列表，会变成"数据不对但查不出来"。
-                    // 这里只记原文长度，绝不打原始内容（内含文件路径等本地信息）。
-                    DiagLog.log("Repo", "待续传记录解析失败(${e.javaClass.simpleName})，已忽略 ${it.length} 字符的旧记录")
-                }.getOrNull()
-            }
-            .orEmpty()
-
-    /** 播放列表离线缓存（JSON），断网时「我的」页展示。 */
-    fun savePlaylistsCache(json: String) {
-        prefs.edit().putString("playlists_cache", json).apply()
-    }
-
-    fun loadPlaylistsCache(): String? = prefs.getString("playlists_cache", null)?.takeIf { it.isNotBlank() }
+    internal val prefsJsonLock = Any()
 
     /* ---------- 观看历史 ---------- */
 
@@ -481,89 +429,16 @@ class IwaraRepository(
      * 观看记录的写入方是 PlayerScreen（onDispose 时页面组合已在外走），不能用页面作用域；
      * 这里持一个私有 IO 作用域做 fire-and-forget，单线程顺序落库（Room 串行写，无并发抖动）。
      */
-    private val historyScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    internal val historyScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     /** 观看历史上限，超出按 lastWatchAt 最旧裁剪。 */
-    private val watchHistoryLimit = 500
+    internal val watchHistoryLimit = 500
 
     /**
      * 扫描导入的攒批大小 —— 每这么多个新文件做一次批量 upsert
      * （= 一次写库事务 + 一次 observeAll 失效），见 [importFolder] 内注释。
      */
-    private val importBatchSize = 20
-
-    /**
-     * 记一条观看（fire-and-forget）。同 key 重看经唯一索引 REPLACE 原地覆盖 = 天然置顶；
-     * 超上限裁最旧。key 推不出（无 iwaraId 且无 localUri）直接放弃，不写脏行。
-     */
-    fun recordWatch(
-        iwaraId: String?,
-        localUri: String?,
-        title: String,
-        author: String?,
-        authorId: String?,
-        thumbnail: String?,
-        positionMs: Long = 0,
-        durationMs: Long = 0,
-    ) {
-        val key = watchHistoryKey(iwaraId, localUri) ?: return
-        historyScope.launch {
-            runCatching {
-                historyDao.upsert(
-                    WatchHistoryEntity(
-                        videoKey = key,
-                        iwaraId = iwaraId?.takeIf { it.isNotBlank() },
-                        localUri = localUri?.takeIf { it.isNotBlank() },
-                        title = title,
-                        author = author,
-                        authorId = authorId,
-                        thumbnail = thumbnail,
-                        isLocal = !localUri.isNullOrBlank(),
-                        lastWatchAt = System.currentTimeMillis(),
-                        positionMs = positionMs.coerceAtLeast(0),
-                        durationMs = durationMs.coerceAtLeast(0),
-                    )
-                )
-                val count = historyDao.count()
-                // 裁剪收进单条 SQL（逐条 deleteById 会给每条一个事务）。
-                if (count > watchHistoryLimit) {
-                    historyDao.deleteOldest(count - watchHistoryLimit)
-                }
-            }.onFailure { e ->
-                DiagLog.log("Repo", "观看记录写入失败(${e.javaClass.simpleName}): ${e.message}")
-            }
-        }
-    }
-
-    /**
-     * 更新进度（fire-and-forget）。记录不存在时忽略——进度更新只跟随首帧那条记录，
-     * 不凭空造行；durationMs > 0 时顺带补写总时长（首帧时常常还拿不到）。
-     */
-    fun updateWatchProgress(key: String, positionMs: Long, durationMs: Long) {
-        historyScope.launch {
-            runCatching {
-                val row = historyDao.byKey(key) ?: return@launch
-                historyDao.upsert(
-                    row.copy(
-                        positionMs = positionMs.coerceAtLeast(0),
-                        durationMs = if (durationMs > 0) durationMs else row.durationMs,
-                        lastWatchAt = System.currentTimeMillis(),
-                    )
-                )
-            }.onFailure { e ->
-                DiagLog.log("Repo", "观看进度更新失败(${e.javaClass.simpleName}): ${e.message}")
-            }
-        }
-    }
-
-    fun observeWatchHistory(): Flow<List<WatchHistoryEntity>> = historyDao.observeAll()
-
-    suspend fun deleteWatchHistory(id: Long) = withContext(Dispatchers.IO) { historyDao.deleteById(id) }
-
-    suspend fun clearWatchHistory() = withContext(Dispatchers.IO) { historyDao.clearAll() }
-
-    /** 历史行点击本地条目时查"文件还在不在库里"。 */
-    suspend fun findVideoByUri(uri: String): VideoEntity? = withContext(Dispatchers.IO) { dao.byUri(uri) }
+    internal val importBatchSize = 20
 
     /* ---------- Token（可选的登录模式；留空即公开无 token 模式） ---------- */
 
@@ -584,263 +459,6 @@ class IwaraRepository(
     /** 手动 access token 的单一真源（空串 = 公开无 token 模式）。 */
     val accessToken: StateFlow<String> = _accessToken.asStateFlow()
 
-    /* ---------- 扫描导入 ---------- */
-
-    /**
-     * 扫描 SAF 树下的所有视频文件，逐个入库并拉取 iwara 元数据。
-     */
-    suspend fun importFolder(treeUri: Uri, onProgress: (done: Int, total: Int) -> Unit) {
-        withContext(Dispatchers.IO) {
-            val root = DocumentFile.fromTreeUri(context, treeUri) ?: return@withContext
-            setRootName(root.name)
-            val files = mutableListOf<Pair<DocumentFile, String>>()
-            collectVideoFiles(root, "", files)
-
-            // 一次性把已入库的条目读进内存判重 —— 对**每个文件**都 `dao.byUri(uri)`
-            //   查一次库是 N 次查询。这里一次性取 URI + iwaraId + fileName（最小投影），
-            //   既做判重，也供下面「老条目补 ID」用。
-            val existing = dao.getAllRefs().associateBy { it.localUri }
-            // 同一批里重复出现时只处理一次（防御性：与原实现的 set.add 语义一致）。
-            val handled = HashSet<String>(files.size)
-
-            var done = 0
-            // 新文件**攒批落库**（每 [importBatchSize] 个一次批量 upsert）。
-            //   逐文件 upsert 会在千级库扫描时写库千次，每次写库都触发 observeAll 重发射 ⇒
-            //   全链路（重算 / 列表 diff / 作者页过滤）被放大千遍。攒批后每批只发一次失效；
-            //   元数据拉取是逐条网络请求（天然节流），放在批落库之后跑 —— 行先可见、资料后到，
-            //   最终态与原行为一致（中断时未拉到资料的行由 fetchAllMissing 兜底补拉）。
-            val batch = ArrayList<Pair<VideoEntity, String?>>(importBatchSize) // row → 待拉元数据的 iwaraId
-            suspend fun flushBatch() {
-                if (batch.isEmpty()) return
-                dao.upsertAll(batch.map { it.first })
-                for ((v, id) in batch) {
-                    if (id != null) fetchAndApplyMetadata(v)
-                }
-                batch.clear()
-            }
-            for ((f, rel) in files) {
-                val name = f.name ?: continue
-                val uri = f.uri.toString()
-                if (!handled.add(uri)) {
-                    done++
-                    onProgress(done, files.size)
-                    continue
-                }
-                val row = existing[uri]
-                if (row == null) {
-                    val id = parseIwaraId(name)
-                    val local = VideoEntity(
-                        localUri = uri,
-                        fileName = name,
-                        iwaraId = id,
-                        title = name,
-                        author = null,
-                        authorId = null,
-                        createdAt = null,
-                        viewCount = null,
-                        likeCount = null,
-                        commentCount = null,
-                        rating = null,
-                        thumbnailUrl = null,
-                        localThumbnailPath = generateLocalThumbnail(f.uri),
-                        relPath = rel.ifBlank { null },
-                        tagsCsv = null,
-                        metaFetched = false,
-                        addedAt = System.currentTimeMillis()
-                    )
-                    batch.add(local to id)
-                    if (batch.size >= importBatchSize) flushBatch()
-                } else if (row.iwaraId.isNullOrBlank()) {
-                    // 老条目补救：更早的解析器要求 ID 必须含数字，纯字母 ID 全被拒 ⇒ 这些文件早已入库、
-                    //   iwaraId 为 null、metaFetched=false。而导入判重是按 URI 命中的，
-                    //   所以**只修解析器、重扫一遍也不会重新解析它们**。
-                    //   这里对"已存在但没 ID"的条目就地补一次解析 ⇒ 重扫一次即可，
-                    //   历史数据自动修复，不需要删库重来。
-                    parseIwaraId(row.fileName)?.let { fixedId ->
-                        dao.setIwaraId(uri, fixedId)
-                        // 重新读出完整实体（upsert 需要整行），再补元数据。
-                        dao.byUri(uri)?.let { fetchAndApplyMetadata(it) }
-                    }
-                }
-                done++
-                onProgress(done, files.size)
-            }
-            flushBatch()
-        }
-    }
-
-    /** 重扫已保存的根目录（用于刷新时增量更新）。 */
-    suspend fun rescanStoredRoot(onProgress: (Int, Int) -> Unit) {
-        getRoot()?.let { importFolder(Uri.parse(it), onProgress) }
-    }
-
-    /** 为所有尚未拉取元数据的视频补拉信息（含手动录入 ID 后的重试）。 */
-    suspend fun fetchAllMissing(onProgress: (Int, Int) -> Unit) {
-        withContext(Dispatchers.IO) {
-            // 查询下推到 SQL（getAll() 整表读进内存再 filter 开销更大）。
-            val pending = dao.getMissingMetadata()
-            var done = 0
-            for (v in pending) {
-                fetchAndApplyMetadata(v)
-                done++
-                onProgress(done, pending.size)
-            }
-        }
-    }
-
-    /** 已入库视频总数。 */
-    suspend fun countVideos(): Int = dao.count()
-
-    private fun collectVideoFiles(
-        dir: DocumentFile,
-        rel: String,
-        out: MutableList<Pair<DocumentFile, String>>
-    ) {
-        for (f in dir.listFiles()) {
-            when {
-                f.isDirectory -> collectVideoFiles(
-                    f,
-                    if (rel.isEmpty()) (f.name ?: "") else "$rel/${f.name}",
-                    out
-                )
-                f.isFile && isVideo(f.name) -> out.add(f to rel)
-            }
-        }
-    }
-
-    private fun isVideo(name: String?): Boolean {
-        if (name == null) return false
-        val n = name.lowercase()
-        return n.endsWith(".mp4") || n.endsWith(".webm") ||
-            n.endsWith(".mkv") || n.endsWith(".mov") || n.endsWith(".m4v")
-    }
-
-    /* ---------- 元数据拉取与落库 ---------- */
-
-    suspend fun fetchAndApplyMetadata(video: VideoEntity) {
-        val id = video.iwaraId ?: return
-        try {
-            val resp = IwaraApi.service.video(id)
-            if (resp.title.isNullOrBlank() && resp.id == null) return
-
-            val tags = resp.tags.orEmpty().mapNotNull { it.id }.filter { it.isNotBlank() }
-            val updated = video.copy(
-                title = resp.title?.takeIf { it.isNotBlank() } ?: video.title,
-                author = resp.user?.name,
-                authorId = resp.user?.username ?: resp.user?.id,
-                createdAt = parseIwaraDate(resp.createdAt),
-                viewCount = resp.numViews,
-                likeCount = resp.numLikes,
-                commentCount = resp.numComments,
-                rating = resp.rating,
-                thumbnailUrl = resp.file?.id?.let { IwaraApi.thumbnailUrl(it) },
-                tagsCsv = tags.joinToString(","),
-                metaFetched = true
-            )
-            // 四步写收进单个 Room 事务（upsert → 清旧关联 → 重建标签/关联），
-            // 中途崩溃不再留下孤儿 cross-ref 或半更新的条目。
-            dao.upsertVideoWithTags(
-                video = updated,
-                tags = tags.map { TagEntity(id = it, name = it) },
-                refs = tags.map { VideoTagCrossRef(video.localUri, it) }
-            )
-        } catch (e: Exception) {
-            // 网络失败时保留本地条目，等待后续重试。
-            // 无痕迹时"检索完成但元数据缺失"类问题无法归因，这里落 DiagLog。
-            DiagLog.log("Repo", "元数据拉取失败 ${video.iwaraId}: ${e.javaClass.simpleName}: ${e.message ?: ""}")
-        }
-    }
-
-    /** 手动指定某条视频的 iwara ID 后调用。 */
-    suspend fun linkIwaraId(video: VideoEntity, id: String) {
-        withContext(Dispatchers.IO) {
-            dao.upsert(video.copy(iwaraId = id, metaFetched = false))
-            fetchAndApplyMetadata(video.copy(iwaraId = id))
-        }
-    }
-
-    /* ---------- 本地缩略图 ---------- */
-
-    fun generateLocalThumbnail(uri: Uri): String? {
-        return try {
-            val mmr = MediaMetadataRetriever()
-            val frame: Bitmap? = try {
-                mmr.setDataSource(context, uri)
-                val durationMs = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
-                    ?.toLongOrNull() ?: 0L
-                // 从多个时间点取样，遇到过暗（开头黑场）的帧就往后找，最多取 3 帧，控制成本。
-                pickDecentFrame(mmr, durationMs)
-            } finally {
-                mmr.release()
-            }
-            if (frame == null) {
-                null
-            } else {
-                val dir = File(context.cacheDir, "thumbs").apply { mkdirs() }
-                val f = File(dir, "thumb_${uri.hashCode()}.jpg")
-                f.outputStream().use { frame.compress(Bitmap.CompressFormat.JPEG, 80, it) }
-                frame.recycle()
-                f.absolutePath
-            }
-        } catch (e: Throwable) {
-            // 缩略图失败（含个别大分辨率/损坏文件导致的 OOM）不阻断扫描，回退到在线封面或占位图。
-            // 留痕以便区分"文件损坏"与"解析不到封面"。
-            DiagLog.log("Repo", "本地缩略图生成失败 uri#${uri.hashCode()}: ${e.javaClass.simpleName}")
-            null
-        }
-    }
-
-    /** 依次在 1s / 20% / 50% 处取样，返回第一帧不是近黑的帧；全部过暗则返回最后一帧。 */
-    private fun pickDecentFrame(mmr: MediaMetadataRetriever, durationMs: Long): Bitmap? {
-        val durUs = durationMs * 1000
-        val candidates = buildList {
-            add(1_000_000L)
-            if (durUs > 0) {
-                add(durUs / 5)
-                add(durUs / 2)
-            }
-        }.filter { durUs <= 0L || it < durUs }.distinct()
-
-        var last: Bitmap? = null
-        for (t in candidates) {
-            val f = grabFrame(mmr, t) ?: continue
-            last?.recycle()
-            last = f
-            if (!isMostlyBlack(f)) return f
-        }
-        return last
-    }
-
-    /** 优先抽缩小帧（降低大分辨率视频的内存占用，避免 OOM 崩溃），API 26 回退整帧。 */
-    private fun grabFrame(mmr: MediaMetadataRetriever, timeUs: Long): Bitmap? =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
-            mmr.getScaledFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, 480, 270)
-        } else {
-            mmr.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
-        }
-
-    /**
-     * 缩放后按平均亮度判断是否为近黑帧（阈值约 12/255）。
-     *
-     * 注意两点：
-     *  1. 逐像素 `getPixel` 每次都是 JNI 调用 —— 32×32 即 1024 次、扫 1000 个视频就是
-     *     300 万次 JNI。这里用**一次 `getPixels`** 把 1024 个像素读进 IntArray，再在 Kotlin 里循环。
-     *  2. `Bitmap.createScaledBitmap` 在入参**恰好就是 32×32** 时会返回**同一个实例**，
-     *     无条件 `recycle()` 会把调用方那一帧回收掉。故加 `!==` 判断（当前调用路径不会命中）。
-     */
-    private fun isMostlyBlack(bitmap: Bitmap): Boolean {
-        val small = Bitmap.createScaledBitmap(bitmap, 32, 32, true)
-        val pixels = IntArray(32 * 32)
-        small.getPixels(pixels, 0, 32, 0, 0, 32, 32)
-        var sum = 0L
-        for (p in pixels) {
-            sum += (android.graphics.Color.red(p) +
-                android.graphics.Color.green(p) +
-                android.graphics.Color.blue(p)) / 3
-        }
-        if (small !== bitmap) small.recycle()
-        return (sum / 1024) < 12
-    }
 }
 
 /** 一条下载历史记录（已完成/失败），持久化于 prefs JSON 供「下载列表」展示。 */

@@ -51,6 +51,9 @@ import io.github.amatsukiichika.iwaramanager.data.filterBy
 import io.github.amatsukiichika.iwaramanager.data.historyBadge
 import io.github.amatsukiichika.iwaramanager.data.historyGroupLabel
 import io.github.amatsukiichika.iwaramanager.data.historyTimeText
+import io.github.amatsukiichika.iwaramanager.data.clearWatchHistory
+import io.github.amatsukiichika.iwaramanager.data.deleteWatchHistory
+import io.github.amatsukiichika.iwaramanager.data.observeWatchHistory
 import io.github.amatsukiichika.iwaramanager.ui.components.AppDialog
 import kotlinx.coroutines.launch
 

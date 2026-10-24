@@ -62,6 +62,10 @@ import kotlinx.coroutines.flow.map
 import io.github.amatsukiichika.iwaramanager.data.IwaraClient
 import io.github.amatsukiichika.iwaramanager.data.imageKeys
 import io.github.amatsukiichika.iwaramanager.data.videoKeys
+import io.github.amatsukiichika.iwaramanager.data.loadDownloadHistory
+import io.github.amatsukiichika.iwaramanager.data.loadPendingDownloads
+import io.github.amatsukiichika.iwaramanager.data.removeDownloadHistory
+import io.github.amatsukiichika.iwaramanager.data.removePendingDownload
 import io.github.amatsukiichika.iwaramanager.ui.FastScrollbarBasic
 import io.github.amatsukiichika.iwaramanager.ui.components.debugAwareErrorText
 import io.github.amatsukiichika.iwaramanager.ui.components.horizontalSlideSpec

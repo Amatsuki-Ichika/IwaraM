@@ -84,6 +84,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.amatsukiichika.iwaramanager.data.VideoEntity
+import io.github.amatsukiichika.iwaramanager.data.linkIwaraId
 import kotlinx.coroutines.launch
 
 /**

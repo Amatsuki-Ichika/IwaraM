@@ -124,6 +124,7 @@ import io.github.amatsukiichika.iwaramanager.ui.browse.LocalDownloadedIwaraIds
 import io.github.amatsukiichika.iwaramanager.ui.browse.LocalShowR18Tag
 // Debug 模式开关：LocalDebugDetails 分发 + 错误文案两轨（人话/技术细节）
 import io.github.amatsukiichika.iwaramanager.data.friendlyIwaraError
+import io.github.amatsukiichika.iwaramanager.data.importFolder
 import io.github.amatsukiichika.iwaramanager.ui.components.AppTopBar
 import io.github.amatsukiichika.iwaramanager.ui.components.GlassMode
 import io.github.amatsukiichika.iwaramanager.ui.components.GlassSettings
