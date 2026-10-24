@@ -11,10 +11,14 @@ plugins {
 val appVersionName: String = findProperty("app.versionName") as String?
     ?: error("app.versionName is not set; define it in gradle.properties or pass -Papp.versionName=")
 
-// versionCode derives from versionName (major * 10000 + minor * 100 + patch) so the
-// numeric code can never drift from the single version source in gradle.properties.
-val appVersionCode: Int = appVersionName.split(".").let { parts ->
-    require(parts.size == 3) { "app.versionName must be major.minor.patch, got \"$appVersionName\"" }
+// versionCode derives from the numeric base of versionName (major * 10000 + minor * 100 + patch) so
+// the numeric code can never drift from the single version source in gradle.properties. A semver
+// pre-release suffix (e.g. 0.2.0-rc.1) is ignored, so an RC and its stable release share the same
+// versionCode and testers can upgrade from the RC APK to the stable APK in place.
+val appVersionCode: Int = appVersionName.substringBefore('-').split(".").let { parts ->
+    require(parts.size == 3) {
+        "app.versionName must be major.minor.patch[-pre-release], got \"$appVersionName\""
+    }
     val (major, minor, patch) = parts.map { part ->
         part.toIntOrNull() ?: error("Non-numeric part in app.versionName: \"$appVersionName\"")
     }
