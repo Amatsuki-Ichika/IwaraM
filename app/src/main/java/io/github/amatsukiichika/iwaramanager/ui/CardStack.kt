@@ -94,32 +94,34 @@ fun rememberPageCornerRadii(): PageCornerRadii {
     var radii by remember { mutableStateOf(cachedRadii ?: FALLBACK_RADII) }
     LaunchedEffect(view) {
         // rootWindowInsets 在 attach 之前是 null —— 轮询几次（最多约 0.5s），拿不到就用兜底值。
-        repeat(10) {
-            val ins = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) view.rootWindowInsets else null
-            if (ins != null) {
-                val tl = ins.getRoundedCorner(RoundedCorner.POSITION_TOP_LEFT)?.radius ?: 0
-                val tr = ins.getRoundedCorner(RoundedCorner.POSITION_TOP_RIGHT)?.radius ?: 0
-                val br = ins.getRoundedCorner(RoundedCorner.POSITION_BOTTOM_RIGHT)?.radius ?: 0
-                val bl = ins.getRoundedCorner(RoundedCorner.POSITION_BOTTOM_LEFT)?.radius ?: 0
-                if (tl > 0 || tr > 0 || br > 0 || bl > 0) {
-                    fun px(r: Int): Dp = if (r > 0) {
-                        with(density) { r.toDp() }.coerceAtMost(MAX_CORNER_DP)
-                    } else {
-                        SECONDARY_PAGE_RADIUS
+            repeat(10) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    val ins = view.rootWindowInsets
+                    if (ins != null) {
+                        val tl = ins.getRoundedCorner(RoundedCorner.POSITION_TOP_LEFT)?.radius ?: 0
+                        val tr = ins.getRoundedCorner(RoundedCorner.POSITION_TOP_RIGHT)?.radius ?: 0
+                        val br = ins.getRoundedCorner(RoundedCorner.POSITION_BOTTOM_RIGHT)?.radius ?: 0
+                        val bl = ins.getRoundedCorner(RoundedCorner.POSITION_BOTTOM_LEFT)?.radius ?: 0
+                        if (tl > 0 || tr > 0 || br > 0 || bl > 0) {
+                            fun px(r: Int): Dp = if (r > 0) {
+                                with(density) { r.toDp() }.coerceAtMost(MAX_CORNER_DP)
+                            } else {
+                                SECONDARY_PAGE_RADIUS
+                            }
+                            val next = PageCornerRadii(px(tl), px(tr), px(br), px(bl))
+                            // 只在值真的变化时打日志：每次重入组合都打会把诊断信息淹掉。
+                            if (cachedRadii != next) {
+                                Log.i(TAG, "屏幕物理圆角 TL${tl} TR${tr} BR${br} BL${bl}px → $next")
+                                DiagLog.log(TAG, "屏幕物理圆角四角 $next")
+                            }
+                            cachedRadii = next
+                            radii = next
+                            return@LaunchedEffect
+                        }
                     }
-                    val next = PageCornerRadii(px(tl), px(tr), px(br), px(bl))
-                    // 只在值真的变化时打日志：每次重入组合都打会把诊断信息淹掉。
-                    if (cachedRadii != next) {
-                        Log.i(TAG, "屏幕物理圆角 TL${tl} TR${tr} BR${br} BL${bl}px → $next")
-                        DiagLog.log(TAG, "屏幕物理圆角四角 $next")
-                    }
-                    cachedRadii = next
-                    radii = next
-                    return@LaunchedEffect
                 }
+                delay(50)
             }
-            delay(50)
-        }
         Log.i(TAG, "系统未上报屏幕圆角，四角用兜底 $SECONDARY_PAGE_RADIUS")
         DiagLog.log(TAG, "系统未上报屏幕圆角，四角兜底 $SECONDARY_PAGE_RADIUS")
     }

@@ -6,17 +6,12 @@ import android.net.Uri
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -32,7 +27,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
@@ -68,22 +62,18 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import io.github.amatsukiichika.iwaramanager.data.IwaraClient
-import io.github.amatsukiichika.iwaramanager.data.IwaraVideoItem
 import io.github.amatsukiichika.iwaramanager.data.VideoEntity
 import io.github.amatsukiichika.iwaramanager.ui.components.AvatarImage
 import io.github.amatsukiichika.iwaramanager.ui.components.PillSegment
@@ -91,10 +81,10 @@ import io.github.amatsukiichika.iwaramanager.ui.components.PillSelector
 import io.github.amatsukiichika.iwaramanager.ui.components.R18Pill
 import io.github.amatsukiichika.iwaramanager.ui.components.horizontalSlideSpec
 import io.github.amatsukiichika.iwaramanager.ui.browse.LocalShowR18Tag
+import io.github.amatsukiichika.iwaramanager.ui.browse.formatCount
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-import java.util.Locale
 
 /** 详情区两个 tab：固定头药丸条的目标态（ordinal 定横滑方向）。 */
 private enum class DetailsTab { INTRO, COMMENTS }
@@ -530,7 +520,7 @@ private fun CommentsTabPane(targetId: String?, pane: @Composable () -> Unit) {
 }
 
 /** 评论 tab 文案：有计数显示「评论 1.2万」，无计数只显示「评论」。 */
-private fun commentTabLabel(count: Int?): String =
+internal fun commentTabLabel(count: Int?): String =
     if (count == null) "评论" else "评论 ${formatCount(count)}"
 
 /**
@@ -641,13 +631,6 @@ private fun ratingLabelOf(raw: String): String = when (raw.trim().lowercase()) {
     "general" -> "一般"
     "ecchi" -> "R18"
     else -> raw
-}
-
-/** 大数值简写：如 12345 -> 1.2万。 */
-private fun formatCount(n: Int): String = when {
-    n >= 100_000_000 -> String.format(Locale.getDefault(), "%.1f亿", n / 100_000_000f)
-    n >= 10_000 -> String.format(Locale.getDefault(), "%.1f万", n / 10_000f)
-    else -> n.toString()
 }
 
 /**

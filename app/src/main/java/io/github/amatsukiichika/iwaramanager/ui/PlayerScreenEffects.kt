@@ -13,8 +13,9 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
+import io.github.amatsukiichika.iwaramanager.LocalAppRepository
 import androidx.media3.exoplayer.ExoPlayer
-import io.github.amatsukiichika.iwaramanager.IwaraApp
 import kotlinx.coroutines.delay
 
 /**
@@ -46,6 +47,8 @@ private const val STALL_NUDGE_MS = 80L
  * 逐帧心跳 + 停滞判定合成一个单元，共享同一个时间戳（[lastFrameAtMs]）。
  * 心跳时间戳用普通 AtomicLong：只有停滞检测协程读它，无需 Compose 状态的快照写入。
  */
+@OptIn(UnstableApi::class)
+@Suppress("UnsafeOptInUsageError") // lint 追踪不到 @Composable 函数体内的 @OptIn，兜底抑制
 @Composable
 internal fun PlayerFrameStallGuardEffect(player: ExoPlayer) {
     val lastFrameAtMs = androidx.compose.runtime.remember {
@@ -112,13 +115,14 @@ internal fun FullscreenOrientationEffect(
     activity: Activity?,
     context: Context
 ) {
+    val repo = LocalAppRepository.current
     LaunchedEffect(
         isFullscreen, playerAspectLandscape, videoWidth, videoHeight,
         // 超分实测帧尺寸也是画幅来源，一变就要重算方向。
         SuperResStatus.sourceWidth, SuperResStatus.sourceHeight
     ) {
         if (isFullscreen) {
-            val pref = (context.applicationContext as IwaraApp).repository.getFullscreenOrientation()
+            val pref = repo.getFullscreenOrientation()
             // ---- 画幅来源（按可靠度排序）----
             // 装了特效管线时播放器不报画面尺寸（`onVideoSizeChanged` 不触发，见上游 #2505 家族）：
             //   `playerSize=0x0 回调=nullxnull 轮询=null landscape=null 请求=null`

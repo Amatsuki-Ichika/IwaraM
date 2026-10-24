@@ -24,29 +24,22 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FilterAlt
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.FilterAlt
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -61,9 +54,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.derivedStateOf
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -120,7 +111,6 @@ import io.github.amatsukiichika.iwaramanager.ui.SettingsScreen
 import io.github.amatsukiichika.iwaramanager.ui.VideoViewModel
 import io.github.amatsukiichika.iwaramanager.ui.rememberAdaptivePageShape
 import io.github.amatsukiichika.iwaramanager.ui.DiagLog
-import io.github.amatsukiichika.iwaramanager.ui.browse.FavoritesOverlay
 import io.github.amatsukiichika.iwaramanager.ui.browse.GlobalFilterSheet
 import io.github.amatsukiichika.iwaramanager.ui.browse.HomeTab
 import io.github.amatsukiichika.iwaramanager.ui.browse.IwaraClientViewModel
@@ -148,18 +138,11 @@ import io.github.amatsukiichika.iwaramanager.ui.components.TOP_BAR_CONTENT_HEIGH
 import io.github.amatsukiichika.iwaramanager.ui.browse.isActionSheet
 import io.github.amatsukiichika.iwaramanager.ui.browse.resetEntrancePlayed
 import io.github.amatsukiichika.iwaramanager.ui.browse.IwaraMeScreen
-import io.github.amatsukiichika.iwaramanager.ui.browse.PlaylistsOverlay
 import io.github.amatsukiichika.iwaramanager.ui.browse.profileRevertIndex
 import io.github.amatsukiichika.iwaramanager.ui.browse.Segment
-import io.github.amatsukiichika.iwaramanager.ui.browse.TagVideosOverlay
 import io.github.amatsukiichika.iwaramanager.ui.browse.IwaraNavActions
 import io.github.amatsukiichika.iwaramanager.ui.browse.IwaraOverlay
 import io.github.amatsukiichika.iwaramanager.ui.browse.OverlayEntry
-import io.github.amatsukiichika.iwaramanager.ui.browse.CommentsOverlay
-import io.github.amatsukiichika.iwaramanager.ui.browse.ImageViewerOverlay
-import io.github.amatsukiichika.iwaramanager.ui.browse.PlaylistDetailOverlay
-import io.github.amatsukiichika.iwaramanager.ui.browse.PostDetailOverlay
-import io.github.amatsukiichika.iwaramanager.ui.browse.ProfileOverlay
 import io.github.amatsukiichika.iwaramanager.ui.browse.drawOrderSeqs
 import io.github.amatsukiichika.iwaramanager.ui.browse.zIndexOf
 import io.github.amatsukiichika.iwaramanager.ui.browse.layerStillOnScreen
@@ -270,6 +253,9 @@ class MainActivity : ComponentActivity() {
                 val glassOpacity by vm.glassOpacityFlow.collectAsStateWithLifecycle()
                 val glassMode by vm.glassModeFlow.collectAsStateWithLifecycle()
                 CompositionLocalProvider(
+                    // 仓库正门：UI 各处经 LocalAppRepository.current 取数据/设置，
+                    // 不再各自强转 application（见 IwaraApp.kt 的定义）。
+                    LocalAppRepository provides app.repository,
                     LocalDownloadedIwaraIds provides downloadedIds,
                     LocalShowR18Tag provides showR18Tag,
                     LocalDebugDetails provides debugDetails,

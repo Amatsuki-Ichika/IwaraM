@@ -1,6 +1,7 @@
 package io.github.amatsukiichika.iwaramanager
 
 import android.app.Application
+import androidx.compose.runtime.staticCompositionLocalOf
 import coil.ImageLoader
 import coil.ImageLoaderFactory
 import io.github.amatsukiichika.iwaramanager.data.AppDatabase
@@ -10,6 +11,15 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+
+/**
+ * UI 层取仓库的正门：MainActivity 根部下发，界面经它读数据/设置，
+ * 不再各自 `(context.applicationContext as IwaraApp).repository` 强转。
+ * 仓库是进程级单例，用 static 版本避免读取处失效重组。
+ */
+val LocalAppRepository = staticCompositionLocalOf<IwaraRepository> {
+    error("LocalAppRepository 未提供：应在 MainActivity 根部 CompositionLocalProvider 下发")
+}
 
 class IwaraApp : Application(), ImageLoaderFactory {
     val database: AppDatabase by lazy { AppDatabase.get(this) }

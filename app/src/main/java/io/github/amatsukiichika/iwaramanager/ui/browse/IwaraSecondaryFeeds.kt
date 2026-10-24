@@ -1,13 +1,6 @@
 package io.github.amatsukiichika.iwaramanager.ui.browse
 
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -59,6 +52,7 @@ import androidx.documentfile.provider.DocumentFile
 import io.github.amatsukiichika.iwaramanager.DownloadService
 import io.github.amatsukiichika.iwaramanager.DownloadState
 import io.github.amatsukiichika.iwaramanager.IwaraApp
+import io.github.amatsukiichika.iwaramanager.LocalAppRepository
 import io.github.amatsukiichika.iwaramanager.activeDownloadTasks
 import io.github.amatsukiichika.iwaramanager.pendingToTask
 import io.github.amatsukiichika.iwaramanager.data.DownloadHistoryEntry
@@ -218,10 +212,10 @@ private fun ActiveDownloadsList(cvm: IwaraClientViewModel, modifier: Modifier = 
     //   故统一走 activeDownloadTasks()（只排除已完成，有单测盯住）。
     val active = activeDownloadTasks(tasks)
     val ctx = LocalContext.current
+    val repo = LocalAppRepository.current
     val scope = rememberCoroutineScope()
     // 应用重启后恢复持久化的未完成任务（排队/暂停/失败/中断），续传记录不丢。
     LaunchedEffect(Unit) {
-        val repo = (ctx.applicationContext as IwaraApp).repository
         // prefs JSON 读取放 IO（LaunchedEffect 默认跑在主线程）。
         val pending = withContext(Dispatchers.IO) { repo.loadPendingDownloads() }
         DownloadState.restoreIfAbsent(pending.map { pendingToTask(it) })
@@ -319,7 +313,7 @@ private fun ActiveDownloadsList(cvm: IwaraClientViewModel, modifier: Modifier = 
 
 @Composable
 private fun DownloadHistoryList(cvm: IwaraClientViewModel, modifier: Modifier = Modifier) {
-    val repo = (LocalContext.current.applicationContext as IwaraApp).repository
+    val repo = LocalAppRepository.current
     val scope = rememberCoroutineScope()
     // 历史加载挪出组合期（在组合期同步读 SharedPreferences+Gson 会在滚动/进入时卡顿）。
     // prefs+gson 读取极快，加载中的空窗显示既有"还没有下载记录"占位，肉眼不可见。
@@ -531,7 +525,7 @@ private suspend fun removeHistoryAndFile(
     return deleteDocument(app, localUri)
 }
 
-private fun formatBytes(bytes: Long): String = when {
+internal fun formatBytes(bytes: Long): String = when {
     bytes >= 1L shl 30 -> String.format("%.2f GB", bytes / (1L shl 30).toFloat())
     bytes >= 1L shl 20 -> String.format("%.1f MB", bytes / (1L shl 20).toFloat())
     bytes >= 1L shl 10 -> String.format("%.0f KB", bytes / (1L shl 10).toFloat())

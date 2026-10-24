@@ -15,8 +15,6 @@ import io.github.amatsukiichika.iwaramanager.data.IwaraClient
 import io.github.amatsukiichika.iwaramanager.data.IwaraComment
 import io.github.amatsukiichika.iwaramanager.data.IwaraCommentBody
 import io.github.amatsukiichika.iwaramanager.data.IwaraFollowEdge
-import io.github.amatsukiichika.iwaramanager.data.IwaraFavImageEdge
-import io.github.amatsukiichika.iwaramanager.data.IwaraFavVideoEdge
 import io.github.amatsukiichika.iwaramanager.data.IwaraImageItem
 import io.github.amatsukiichika.iwaramanager.data.IwaraPlaylist
 import io.github.amatsukiichika.iwaramanager.data.IwaraPlaylistBody
@@ -39,6 +37,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -240,46 +239,40 @@ class IwaraClientViewModel(private val app: IwaraApp) : ViewModel() {
     private val videosPager = FeedPager<IwaraVideoItem>(viewModelScope, PAGE_LIMIT, OnlineIdentity::video, ::describeIwaraError)
     val videos: StateFlow<FeedState<IwaraVideoItem>> = videosPager.state
 
-    private val _videoSort = MutableStateFlow(repo.getVideoSort())
-    val videoSort: StateFlow<String> = _videoSort.asStateFlow()
-
-    /** 手动选择的分级（持久化）。设置页「默认 R18」开启期间不用它，但也不覆盖它。 */
-    private val _userRating = MutableStateFlow(repo.getRating())
+    /** 视频流排序：直通仓库单一真源流（窄出口，不自持镜像）。 */
+    val videoSort: StateFlow<String> = repo.videoSort
 
     /**
      * 默认 R18（设置项）：开启后隐藏分级筛选并强制只看 R18。
      *
-     * 直接订阅 repo 的单一真源（`repo.defaultR18`），不保留内存副本；
+     * 直通仓库的单一真源（`repo.defaultR18`），不保留内存副本；
      * 否则设置页与 Iwara 页各持一份、互不通知，改动要重启 App 才生效。
      */
-    private val _defaultR18 = MutableStateFlow(repo.getDefaultR18())
-    val defaultR18: StateFlow<Boolean> = _defaultR18.asStateFlow()
+    val defaultR18: StateFlow<Boolean> = repo.defaultR18
 
     /**
      * **当前生效**的分级（所有请求统一用它）：默认 R18 开启时恒为 "ecchi"。
-     * 这样各请求点无需感知设置项，关闭设置后自动回到 [_userRating]。
+     * 这样各请求点无需感知设置项，关闭设置后自动回到手选值（仓库 [IwaraRepository.rating]）。
      */
-    private val _rating = MutableStateFlow(if (_defaultR18.value) "ecchi" else _userRating.value)
+    private val _rating = MutableStateFlow(if (repo.defaultR18.value) "ecchi" else repo.rating.value)
     val rating: StateFlow<String> = _rating.asStateFlow()
 
     init {
         viewModelScope.launch {
-            repo.defaultR18.collect { v ->
-                if (v != _defaultR18.value) {
-                    _defaultR18.value = v
-                    syncEffectiveRating()
-                    // 分级变化会影响所有按分级过滤的流 → 强制重拉当前可见的那条。
-                    refreshIwaraTab()
-                }
+            // StateFlow 首帧必为当前值，跳过；之后的每次变更重算生效分级并重拉当前流。
+            repo.defaultR18.drop(1).collect {
+                syncEffectiveRating()
+                // 分级变化会影响所有按分级过滤的流 → 强制重拉当前可见的那条。
+                refreshIwaraTab()
             }
         }
     }
 
     private fun syncEffectiveRating() {
-        _rating.value = if (_defaultR18.value) "ecchi" else _userRating.value
+        _rating.value = if (repo.defaultR18.value) "ecchi" else repo.rating.value
     }
 
-    /** 只写单一真源，内存字段由上面的订阅回调更新（本地库共用同一份）。 */
+    /** 只写单一真源，生效分级由上面的订阅回调更新（本地库共用同一份）。 */
     fun setDefaultR18(value: Boolean) {
         repo.setDefaultR18(value)
     }
@@ -303,7 +296,7 @@ class IwaraClientViewModel(private val app: IwaraApp) : ViewModel() {
 
     fun loadMoreVideos(force: Boolean = false) {
         videosPager.load(force) { page ->
-            val sort = _videoSort.value
+            val sort = videoSort.value
             val rating = _rating.value
             val items = IwaraClient.call {
                 it.videos(page, PAGE_LIMIT, sort, rating, null, null).results.orEmpty()
@@ -314,15 +307,13 @@ class IwaraClientViewModel(private val app: IwaraApp) : ViewModel() {
     }
 
     fun setVideoSort(sort: String) {
-        if (sort == _videoSort.value) return
-        _videoSort.value = sort
+        if (sort == videoSort.value) return
         repo.setVideoSort(sort)
         loadMoreVideos(force = true)
     }
 
     fun setRating(rating: String) {
-        if (rating == _userRating.value) return
-        _userRating.value = rating
+        if (rating == repo.rating.value) return
         repo.setRating(rating)
         syncEffectiveRating()
         loadMoreVideos(force = true)
@@ -502,7 +493,7 @@ class IwaraClientViewModel(private val app: IwaraApp) : ViewModel() {
         _searchQuery.value = tags.joinToString(" ") { "#$it" }
         val joined = tags.joinToString(",")
         searchPager.load(force = true) { page ->
-            val sort = _videoSort.value
+            val sort = videoSort.value
             val rating = _rating.value
             val items = IwaraClient.call {
                 it.videos(page, PAGE_LIMIT, sort, rating, null, null, joined).results.orEmpty()
@@ -524,7 +515,7 @@ class IwaraClientViewModel(private val app: IwaraApp) : ViewModel() {
         val tags = _searchTags.value
         searchPager.load(force = false) { page ->
             val rating = _rating.value
-            val sort = _videoSort.value
+            val sort = videoSort.value
             when {
                 tags.isNotEmpty() -> {
                     val joined = tags.joinToString(",")
@@ -679,7 +670,7 @@ class IwaraClientViewModel(private val app: IwaraApp) : ViewModel() {
     fun loadMoreImages(force: Boolean = false) {
         imagesPager.load(force) { page ->
             IwaraClient.call {
-                it.images(page, PAGE_LIMIT, _videoSort.value, _rating.value, null).results.orEmpty()
+                it.images(page, PAGE_LIMIT, videoSort.value, _rating.value, null).results.orEmpty()
             }
         }
     }
@@ -690,7 +681,7 @@ class IwaraClientViewModel(private val app: IwaraApp) : ViewModel() {
     fun loadMorePosts(force: Boolean = false) {
         postsPager.load(force) { page ->
             IwaraClient.call {
-                it.posts(page, PAGE_LIMIT, _videoSort.value, _rating.value).results.orEmpty()
+                it.posts(page, PAGE_LIMIT, videoSort.value, _rating.value).results.orEmpty()
             }
         }
     }

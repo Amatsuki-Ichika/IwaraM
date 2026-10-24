@@ -16,8 +16,6 @@ import androidx.media3.effect.GlEffect
 import androidx.media3.effect.GlShaderProgram
 import androidx.media3.effect.LanczosResample
 import androidx.media3.effect.PassthroughShaderProgram
-import androidx.media3.common.GlObjectsProvider
-import androidx.media3.common.GlTextureInfo
 import androidx.media3.effect.BaseGlShaderProgram
 import com.google.gson.JsonParser
 import kotlin.math.roundToInt
@@ -467,7 +465,10 @@ private class TestColorProgram(
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
     }
 
-    override fun release() = Unit
+    override fun release() {
+        // 基类 release 带 @CallSuper（负责回收纹理池），不能省略调用
+        super.release()
+    }
 }
 
 // ---------------------------------------------------------------------------

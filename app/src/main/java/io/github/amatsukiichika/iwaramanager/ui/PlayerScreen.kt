@@ -14,28 +14,11 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -50,25 +33,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.zIndex
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.WindowInsetsControllerCompat
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -81,11 +52,11 @@ import androidx.media3.datasource.HttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
+import io.github.amatsukiichika.iwaramanager.LocalAppRepository
 import io.github.amatsukiichika.iwaramanager.data.IwaraClient
 import io.github.amatsukiichika.iwaramanager.data.IwaraRepository
 import io.github.amatsukiichika.iwaramanager.data.IwaraVideoItem
 import io.github.amatsukiichika.iwaramanager.data.OkHttpDataSource
-import io.github.amatsukiichika.iwaramanager.IwaraApp
 import io.github.amatsukiichika.iwaramanager.data.friendlyHttpError
 import io.github.amatsukiichika.iwaramanager.data.VideoEntity
 import io.github.amatsukiichika.iwaramanager.data.watchHistoryKey
@@ -175,7 +146,8 @@ sealed interface RelatedVideo {
 
 // PlayerView 复用池（PlayerViewPool）已随播放页 UI 树迁至 PlayerScreenContent.kt。
 
-@OptIn(UnstableApi::class, ExperimentalLayoutApi::class)
+@OptIn(UnstableApi::class)
+@Suppress("UnsafeOptInUsageError") // lint 追踪不到 @Composable 函数体内的 @OptIn，兜底抑制
 @Composable
 fun PlayerScreen(
     video: VideoEntity,
@@ -384,7 +356,7 @@ fun PlayerScreen(
     val mediaUrl = video.localUri.ifBlank { online?.mediaUrl.orEmpty() }
     // 超分：默认取设置页选择，播放器内可临时切换。
     // （声明在 listener 之前：7001 自动保播放需要在错误回调里读写 SR 开关。）
-    val srRepo = (context.applicationContext as IwaraApp).repository
+    val srRepo = LocalAppRepository.current
     var srEnabled by remember { mutableStateOf(srRepo.getSuperResEnabled()) }
     var srModel by remember { mutableStateOf(SuperRes.normalize(srRepo.getSuperResModel())) }
     // 观看历史 key：组合期推导一次（无 iwaraId 且无 localUri 的条目 key=null，不记录）；

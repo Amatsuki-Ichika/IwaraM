@@ -94,10 +94,16 @@ class IwaraRepository(
 
     fun setRootName(name: String?) {
         prefs.edit().putString("root_name", name ?: "").apply()
+        _rootName.value = name ?: ""
     }
 
     fun getRootName(): String? =
         prefs.getString("root_name", null)?.takeIf { it.isNotBlank() }
+
+    private val _rootName = MutableStateFlow(getRootName().orEmpty())
+
+    /** 根目录显示名的单一真源（导入扫描内部更新，设置页经流自动刷新）。 */
+    val rootName: StateFlow<String> = _rootName.asStateFlow()
 
     /** 在线视频的自定义下载目录；null = 跟随管理器根目录（默认）。 */
     fun setDownloadRoot(treeUri: String?) {
@@ -109,31 +115,55 @@ class IwaraRepository(
 
     fun setDownloadRootName(name: String?) {
         prefs.edit().putString("download_root_name", name ?: "").apply()
+        _downloadRootName.value = name ?: ""
     }
 
     fun getDownloadRootName(): String? =
         prefs.getString("download_root_name", null)?.takeIf { it.isNotBlank() }
 
+    private val _downloadRootName = MutableStateFlow(getDownloadRootName().orEmpty())
+
+    /** 自定义下载目录显示名的单一真源；空串 = 跟随管理器根目录。 */
+    val downloadRootName: StateFlow<String> = _downloadRootName.asStateFlow()
+
     fun setFullscreenOrientation(value: String) {
         prefs.edit().putString("fs_orientation", value).apply()
+        _fullscreenOrientation.value = value
     }
 
     fun getFullscreenOrientation(): String =
         prefs.getString("fs_orientation", "auto") ?: "auto"
 
+    private val _fullscreenOrientation = MutableStateFlow(getFullscreenOrientation())
+
+    /** 全屏方向偏好的单一真源。 */
+    val fullscreenOrientation: StateFlow<String> = _fullscreenOrientation.asStateFlow()
+
     /* ---------- 主题与显示偏好 ---------- */
 
     fun setThemeMode(value: String) {
         prefs.edit().putString("theme_mode", value).apply()
+        _themeMode.value = value
     }
 
     fun getThemeMode(): String = prefs.getString("theme_mode", "system") ?: "system"
 
+    private val _themeMode = MutableStateFlow(getThemeMode())
+
+    /** 主题模式的单一真源。 */
+    val themeMode: StateFlow<String> = _themeMode.asStateFlow()
+
     fun setThemeColor(value: String) {
         prefs.edit().putString("theme_color", value).apply()
+        _themeColor.value = value
     }
 
     fun getThemeColor(): String = prefs.getString("theme_color", "blue") ?: "blue"
+
+    private val _themeColor = MutableStateFlow(getThemeColor())
+
+    /** 主题色的单一真源。 */
+    val themeColor: StateFlow<String> = _themeColor.asStateFlow()
 
     fun setShowTags(value: Boolean) {
         prefs.edit().putBoolean("show_tags", value).apply()
@@ -235,14 +265,26 @@ class IwaraRepository(
         return resolved
     }
 
+    private val _videoSort = MutableStateFlow(getVideoSort())
+
+    /** 视频流排序偏好的单一真源。 */
+    val videoSort: StateFlow<String> = _videoSort.asStateFlow()
+
     fun setVideoSort(value: String) {
         prefs.edit().putString(KEY_VIDEO_SORT, value).apply()
+        _videoSort.value = value
     }
 
     fun getRating(): String = prefs.getString("iwara_rating", "all") ?: "all"
 
+    private val _rating = MutableStateFlow(getRating())
+
+    /** 在线页上次手选分级的单一真源（与本地库 [localRating] 相互独立）。 */
+    val rating: StateFlow<String> = _rating.asStateFlow()
+
     fun setRating(value: String) {
         prefs.edit().putString("iwara_rating", value).apply()
+        _rating.value = value
     }
 
     /**
@@ -303,36 +345,66 @@ class IwaraRepository(
     /** 本地库的分级筛选（all / general / ecchi）；与在线页的 [getRating] 相互独立。 */
     fun getLocalRating(): String = prefs.getString("local_rating", "all") ?: "all"
 
+    private val _localRating = MutableStateFlow(getLocalRating())
+
+    /** 本地库分级筛选的单一真源。 */
+    val localRating: StateFlow<String> = _localRating.asStateFlow()
+
     fun setLocalRating(value: String) {
         prefs.edit().putString("local_rating", value).apply()
+        _localRating.value = value
     }
 
     fun getQualityPref(): String = prefs.getString("iwara_quality", "Source") ?: "Source"
 
+    private val _qualityPref = MutableStateFlow(getQualityPref())
+
+    /** 在线播放默认分辨率的单一真源。 */
+    val qualityPref: StateFlow<String> = _qualityPref.asStateFlow()
+
     fun setQualityPref(value: String) {
         prefs.edit().putString("iwara_quality", value).apply()
+        _qualityPref.value = value
     }
 
     /** 下载分辨率：独立于在线播放的默认分辨率。 */
     fun getDownloadQuality(): String = prefs.getString("iwara_download_quality", "Source") ?: "Source"
 
+    private val _downloadQuality = MutableStateFlow(getDownloadQuality())
+
+    /** 下载分辨率的单一真源。 */
+    val downloadQuality: StateFlow<String> = _downloadQuality.asStateFlow()
+
     fun setDownloadQuality(value: String) {
         prefs.edit().putString("iwara_download_quality", value).apply()
+        _downloadQuality.value = value
     }
 
     /** 超分（Anime4K 风格）：默认是否启用与模型档位（C/B/A）。 */
     fun getSuperResEnabled(): Boolean = prefs.getBoolean("sr_enabled", false)
 
+    private val _superResEnabled = MutableStateFlow(getSuperResEnabled())
+
+    /** 超分默认开关的单一真源。 */
+    val superResEnabled: StateFlow<Boolean> = _superResEnabled.asStateFlow()
+
     fun setSuperResEnabled(value: Boolean) {
         prefs.edit().putBoolean("sr_enabled", value).apply()
+        _superResEnabled.value = value
     }
 
     // 默认 "A4K_3D"：MMD / 3D 画面优先（Anime4K 3D 专用放大 + 抗锯齿）。
     // 旧版本存的是自写锐化的 "A"/"B"/"C" —— UI 侧统一走 SuperRes.normalize() 迁移。
     fun getSuperResModel(): String = prefs.getString("sr_model", "A4K_3D") ?: "A4K_3D"
 
+    private val _superResModel = MutableStateFlow(getSuperResModel())
+
+    /** 超分模型档位的单一真源（旧档位由 VideoViewModel 启动时迁移落库）。 */
+    val superResModel: StateFlow<String> = _superResModel.asStateFlow()
+
     fun setSuperResModel(value: String) {
         prefs.edit().putString("sr_model", value).apply()
+        _superResModel.value = value
     }
 
     /**
@@ -499,9 +571,15 @@ class IwaraRepository(
         if (token.isNullOrBlank()) prefs.edit().remove("access_token").apply()
         else prefs.edit().putString("access_token", token).apply()
         IwaraApi.accessToken = token?.takeIf { it.isNotBlank() }
+        _accessToken.value = token?.takeIf { it.isNotBlank() }.orEmpty()
     }
 
     fun getAccessToken(): String? = prefs.getString("access_token", null)?.takeIf { it.isNotBlank() }
+
+    private val _accessToken = MutableStateFlow(getAccessToken().orEmpty())
+
+    /** 手动 access token 的单一真源（空串 = 公开无 token 模式）。 */
+    val accessToken: StateFlow<String> = _accessToken.asStateFlow()
 
     /* ---------- 扫描导入 ---------- */
 

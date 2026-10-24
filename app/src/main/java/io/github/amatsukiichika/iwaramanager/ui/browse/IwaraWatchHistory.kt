@@ -44,7 +44,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
-import io.github.amatsukiichika.iwaramanager.IwaraApp
+import io.github.amatsukiichika.iwaramanager.LocalAppRepository
 import io.github.amatsukiichika.iwaramanager.data.GlobalFilterHolder
 import io.github.amatsukiichika.iwaramanager.data.WatchHistoryEntity
 import io.github.amatsukiichika.iwaramanager.data.filterBy
@@ -67,7 +67,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun WatchHistoryOverlay(actions: IwaraNavActions, onClose: () -> Unit) {
     val context = LocalContext.current
-    val repo = (context.applicationContext as IwaraApp).repository
+    val repo = LocalAppRepository.current
     val scope = rememberCoroutineScope()
     val entries by repo.observeWatchHistory().collectAsStateWithLifecycle(initialValue = emptyList())
     // 列表消费端订阅防抖视图。

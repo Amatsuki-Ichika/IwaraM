@@ -224,97 +224,67 @@ class VideoViewModel(private val app: IwaraApp) : ViewModel() {
     private val _localTagNames = MutableStateFlow<List<String>>(emptyList())
     val localTagNames: StateFlow<List<String>> = _localTagNames.asStateFlow()
 
-    private val _token = MutableStateFlow(repo.getAccessToken() ?: "")
-    val token: StateFlow<String> = _token.asStateFlow()
+    // 以下设置全部直通 IwaraRepository 的单一真源流（窄出口模式，同上面的
+    // showR18TagFlow 等）：本 VM 不再自持镜像副本，setter 只写仓库，广播由仓库负责。
 
-    private val _fsOrientation = MutableStateFlow(repo.getFullscreenOrientation())
-    val fsOrientation: StateFlow<String> = _fsOrientation.asStateFlow()
+    /** 手动 access token（空串 = 公开无 token 模式）。 */
+    val token: StateFlow<String> = repo.accessToken
 
-    private val _themeMode = MutableStateFlow(repo.getThemeMode())
-    val themeMode: StateFlow<String> = _themeMode.asStateFlow()
+    val fsOrientation: StateFlow<String> = repo.fullscreenOrientation
 
-    private val _rootName = MutableStateFlow(repo.getRootName() ?: "")
-    val rootName: StateFlow<String> = _rootName.asStateFlow()
+    val themeMode: StateFlow<String> = repo.themeMode
+
+    /** 根目录显示名；空串 = 未导入（导入扫描时由仓库更新，此处经流自动刷新）。 */
+    val rootName: StateFlow<String> = repo.rootName
 
     /** 自定义下载目录的显示名；空串 = 跟随管理器根目录（默认）。 */
-    private val _downloadRootName = MutableStateFlow(repo.getDownloadRootName() ?: "")
-    val downloadRootName: StateFlow<String> = _downloadRootName.asStateFlow()
+    val downloadRootName: StateFlow<String> = repo.downloadRootName
 
     /** 在线播放的默认分辨率（偏好档；该档缺失时回退最高可用档）。 */
-    private val _qualityPref = MutableStateFlow(repo.getQualityPref())
-    val qualityPref: StateFlow<String> = _qualityPref.asStateFlow()
+    val qualityPref: StateFlow<String> = repo.qualityPref
 
     /** 下载分辨率（独立于在线播放的默认分辨率；该档缺失时回退最高可用档）。 */
-    private val _downloadQualityPref = MutableStateFlow(repo.getDownloadQuality())
-    val downloadQualityPref: StateFlow<String> = _downloadQualityPref.asStateFlow()
+    val downloadQualityPref: StateFlow<String> = repo.downloadQuality
 
-    /** 超分（Anime4K 风格）：默认启用与模型档位（C/B/A）。 */
-    private val _srEnabled = MutableStateFlow(repo.getSuperResEnabled())
-    val srEnabled: StateFlow<Boolean> = _srEnabled.asStateFlow()
+    /** 超分（Anime4K 风格）：默认启用开关。 */
+    val srEnabled: StateFlow<Boolean> = repo.superResEnabled
 
-    // 把早期存的 "A"/"B"/"C"（自写锐化三档）迁移到新的成品算法档位。
-    private val _srModel = MutableStateFlow(SuperRes.normalize(repo.getSuperResModel()))
-    val srModel: StateFlow<String> = _srModel.asStateFlow()
+    /** 超分模型档位；旧档位（自写锐化 A/B/C）在 init 里一次性迁移落库。 */
+    val srModel: StateFlow<String> = repo.superResModel
 
     /** 应用主题色（THEME_COLOR_OPTIONS 的 value）。 */
-    private val _themeColor = MutableStateFlow(repo.getThemeColor())
-    val themeColor: StateFlow<String> = _themeColor.asStateFlow()
+    val themeColor: StateFlow<String> = repo.themeColor
 
     /** 当前是否为无 token 公开模式。 */
-    fun isPublicMode(): Boolean = _token.value.isBlank()
+    fun isPublicMode(): Boolean = repo.accessToken.value.isBlank()
 
-    fun setToken(value: String) {
-        val t = value.trim()
-        repo.setAccessToken(t)
-        _token.value = t
-    }
+    fun setToken(value: String) = repo.setAccessToken(value.trim())
 
-    fun setFsOrientation(value: String) {
-        repo.setFullscreenOrientation(value)
-        _fsOrientation.value = value
-    }
+    fun setFsOrientation(value: String) = repo.setFullscreenOrientation(value)
 
-    fun setThemeMode(value: String) {
-        repo.setThemeMode(value)
-        _themeMode.value = value
-    }
+    fun setThemeMode(value: String) = repo.setThemeMode(value)
 
-    fun setThemeColor(value: String) {
-        repo.setThemeColor(value)
-        _themeColor.value = value
-    }
+    fun setThemeColor(value: String) = repo.setThemeColor(value)
 
-    fun setQualityPref(value: String) {
-        repo.setQualityPref(value)
-        _qualityPref.value = value
-    }
+    fun setQualityPref(value: String) = repo.setQualityPref(value)
 
-    fun setDownloadQualityPref(value: String) {
-        repo.setDownloadQuality(value)
-        _downloadQualityPref.value = value
-    }
+    fun setDownloadQualityPref(value: String) = repo.setDownloadQuality(value)
 
-    fun setSrEnabled(value: Boolean) {
-        repo.setSuperResEnabled(value)
-        _srEnabled.value = value
-    }
+    fun setSrEnabled(value: Boolean) = repo.setSuperResEnabled(value)
 
-    fun setSrModel(value: String) {
-        repo.setSuperResModel(value)
-        _srModel.value = value
-    }
+    fun setSrModel(value: String) = repo.setSuperResModel(value)
 
     /**
      * 设置自定义下载目录；null = 恢复默认（跟随管理器根目录）。
      * 目录名用 DocumentFile 解析（SAF 树 URI 本身不可读），失败时存空名但仍保存 URI。
      * `DocumentFile.fromTreeUri(...).name` 是 SAF Binder IPC，放到 IO 线程
-     * （设置页选择器回调在主线程，目录多时会卡一下）；URI 本身先同步落库。
+     * （设置页选择器回调在主线程，目录多时会卡一下）；URI 本身先同步落库，
+     * 显示名经仓库的 downloadRootName 流广播回 UI。
      */
     fun setDownloadRoot(treeUri: Uri?) {
         if (treeUri == null) {
             repo.setDownloadRoot(null)
             repo.setDownloadRootName(null)
-            _downloadRootName.value = ""
             return
         }
         repo.setDownloadRoot(treeUri.toString())
@@ -323,7 +293,6 @@ class VideoViewModel(private val app: IwaraApp) : ViewModel() {
                 DocumentFile.fromTreeUri(app, treeUri)?.name
             }.getOrNull()
             repo.setDownloadRootName(name)
-            _downloadRootName.value = name ?: ""
         }
     }
 
@@ -336,6 +305,12 @@ class VideoViewModel(private val app: IwaraApp) : ViewModel() {
         uri?.takeIf { it.isNotBlank() }?.let { wanted -> rawVideos.firstOrNull { it.localUri == wanted } }
 
     init {
+        // 旧超分档位（自写锐化 "A"/"B"/"C"）一次性迁移到成品算法档位并落回 prefs，
+        // 之后 srModel 直接透传仓库的单一真源流，不再每读一次归一化。
+        val rawSrModel = repo.getSuperResModel()
+        val normalizedSrModel = SuperRes.normalize(rawSrModel)
+        if (normalizedSrModel != rawSrModel) repo.setSuperResModel(normalizedSrModel)
+
         viewModelScope.launch {
             dao.observeAll().collect {
                 rawVideos = it
@@ -365,14 +340,14 @@ class VideoViewModel(private val app: IwaraApp) : ViewModel() {
                     done = p?.done ?: 0,
                     total = p?.total ?: 0
                 )
-                if (p == null) _rootName.value = repo.getRootName() ?: ""
                 // 这里**不调用 recompute()** —— 扫描进度与"库里有哪些视频"无关，
                 //   否则每个进度 tick 都要重算一遍全库（最多 6 趟 filter + 排序 + 4 次 groupBy/sort），
                 //   是"扫描/导入时掉帧"最直接的来源。进度走 _scanProgress 这条独立流。
             }
         }
-        // 两个内容分级开关订阅 repo 的**单一真源** —— 设置页改一处，
-        //   本地库与在线页同时生效（两份内存副本互不通知时，在线页要重启 App 才生效）。
+        // 两个内容分级开关 + 显示标签 + 本地分级筛选，统一订阅 repo 的**单一真源** ——
+        //   设置页改一处，本地库与在线页同时生效（两份内存副本互不通知时，在线页要重启 App 才生效）。
+        //   这四个只是 recompute 的输入快照（后台线程读字段），不是对外暴露的第二份状态。
         viewModelScope.launch {
             repo.defaultR18.collect { v ->
                 if (v != defaultR18) {
@@ -385,6 +360,22 @@ class VideoViewModel(private val app: IwaraApp) : ViewModel() {
             repo.showR18Tag.collect { v ->
                 if (v != showR18Tag) {
                     showR18Tag = v
+                    recompute()
+                }
+            }
+        }
+        viewModelScope.launch {
+            repo.showTags.collect { v ->
+                if (v != showTags) {
+                    showTags = v
+                    recompute()
+                }
+            }
+        }
+        viewModelScope.launch {
+            repo.localRating.collect { v ->
+                if (v != ratingFilter) {
+                    ratingFilter = v
                     recompute()
                 }
             }
@@ -502,25 +493,18 @@ class VideoViewModel(private val app: IwaraApp) : ViewModel() {
         recompute()
     }
 
+    /** 只写仓库真源，界面刷新由 init 里的订阅统一驱动。 */
     fun setShowTags(value: Boolean) {
-        showTags = value
         repo.setShowTags(value)
-        recompute()
     }
 
     fun setRatingFilter(value: String) {
-        if (value == ratingFilter) return
-        ratingFilter = value
         repo.setLocalRating(value)
-        recompute()
     }
 
     /** 清除分级筛选（返回键逐层清除用）。 */
     fun clearRatingFilter() {
-        if (ratingFilter == "all") return
-        ratingFilter = "all"
         repo.setLocalRating("all")
-        recompute()
     }
 
     /**
