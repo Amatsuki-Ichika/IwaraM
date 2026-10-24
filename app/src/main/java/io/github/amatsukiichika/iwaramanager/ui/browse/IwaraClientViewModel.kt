@@ -31,6 +31,7 @@ import io.github.amatsukiichika.iwaramanager.data.GlobalFilterHolder
 import io.github.amatsukiichika.iwaramanager.data.parseIwaraDate
 import io.github.amatsukiichika.iwaramanager.ui.DiagLog
 import io.github.amatsukiichika.iwaramanager.ui.QualityOption
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -142,6 +143,7 @@ class IwaraClientViewModel(private val app: IwaraApp) : ViewModel() {
                 val me: IwaraProfileData? = try {
                     IwaraClient.call { it.me() }
                 } catch (e: Throwable) {
+                    if (e is CancellationException) throw e
                     // 头像/登录信息回退本地缓存是预期行为，但失败要留痕（网络/权限问题归因）。
                     DiagLog.log("Browse", "拉取当前用户信息失败，回退本地缓存: ${e.javaClass.simpleName}")
                     null
@@ -174,6 +176,7 @@ class IwaraClientViewModel(private val app: IwaraApp) : ViewModel() {
                 message = null
             )
         } catch (t: Throwable) {
+            if (t is CancellationException) throw t
             // 网络不可用等临时故障：保留已显示的缓存内容继续用；
             // token 彻底失效时 IwaraSession 会清空并回调 onSessionExpired 回到登录页。
             _session.value = _session.value.copy(checking = false, message = describeIwaraError(t))
@@ -197,6 +200,7 @@ class IwaraClientViewModel(private val app: IwaraApp) : ViewModel() {
                 refreshSession(loadRemote = true)
                 _session.value = _session.value.copy(busy = false, loggedIn = true)
             } catch (t: Throwable) {
+                if (t is CancellationException) throw t
                 _session.value = _session.value.copy(busy = false, message = describeIwaraError(t))
             }
         }
@@ -356,7 +360,7 @@ class IwaraClientViewModel(private val app: IwaraApp) : ViewModel() {
             val token = try {
                 IwaraSession.ensureAccessToken(base = IwaraClient.subscriptionBase)
             } catch (t: Throwable) {
-                if (t is kotlinx.coroutines.CancellationException) throw t
+                if (t is CancellationException) throw t
                 // 只有"续期这一步失败"会走到这里，两类要分开说：
                 //  · 凭证被服务器拒绝（IwaraApiException）⇒ 换一句能对上账号状态的话；
                 //  · 网络类失败 ⇒ 原样上抛，错误面板显示"网络异常，请检查网络"。
@@ -710,6 +714,7 @@ class IwaraClientViewModel(private val app: IwaraApp) : ViewModel() {
                 likeStates[likeKey(type, id)] = !currentlyLiked
                 onDone(!currentlyLiked, null)
             } catch (t: Throwable) {
+                if (t is CancellationException) throw t
                 onDone(null, describeIwaraError(t))
             }
         }
@@ -728,6 +733,7 @@ class IwaraClientViewModel(private val app: IwaraApp) : ViewModel() {
                 followStates[userId] = !currentlyFollowing
                 onDone(!currentlyFollowing, null)
             } catch (t: Throwable) {
+                if (t is CancellationException) throw t
                 onDone(null, describeIwaraError(t))
             }
         }
@@ -775,6 +781,7 @@ class IwaraClientViewModel(private val app: IwaraApp) : ViewModel() {
                     endReached = items.size < PAGE_LIMIT
                 )
             } catch (t: Throwable) {
+                if (t is CancellationException) throw t
                 _comments.value = _comments.value.copy(loading = false, error = describeIwaraError(t))
             }
         }
@@ -821,6 +828,7 @@ class IwaraClientViewModel(private val app: IwaraApp) : ViewModel() {
                 loadMoreComments(force = true)
                 onDone(null)
             } catch (t: Throwable) {
+                if (t is CancellationException) throw t
                 _comments.value = _comments.value.copy(sending = false)
                 onDone(describeIwaraError(t))
             }
@@ -834,6 +842,7 @@ class IwaraClientViewModel(private val app: IwaraApp) : ViewModel() {
                 _comments.value = _comments.value.copy(items = _comments.value.items.filterNot { it.id == commentId })
                 onDone(null)
             } catch (t: Throwable) {
+                if (t is CancellationException) throw t
                 onDone(describeIwaraError(t))
             }
         }
@@ -863,6 +872,7 @@ class IwaraClientViewModel(private val app: IwaraApp) : ViewModel() {
                 repo.savePlaylistsCache(gson.toJson(items))
                 _playlists.value = PlaylistsState(items = items, loaded = true)
             } catch (t: Throwable) {
+                if (t is CancellationException) throw t
                 // 断网兜底：列表为空且本地有缓存时显示缓存内容，并明确提示。
                 // 缓存读取与 JSON 解析放在 IO 线程（缓存大时主线程会卡顿）。
                 val cached = if (_playlists.value.items.isEmpty()) {
@@ -895,6 +905,7 @@ class IwaraClientViewModel(private val app: IwaraApp) : ViewModel() {
                 )
                 onDone(null)
             } catch (t: Throwable) {
+                if (t is CancellationException) throw t
                 onDone(describeIwaraError(t))
             }
         }
@@ -906,6 +917,7 @@ class IwaraClientViewModel(private val app: IwaraApp) : ViewModel() {
                 IwaraClient.call { it.addToPlaylist(playlistId, videoId) }.ensureIwaraSuccess()
                 onDone(null)
             } catch (t: Throwable) {
+                if (t is CancellationException) throw t
                 onDone(describeIwaraError(t))
             }
         }
@@ -917,6 +929,7 @@ class IwaraClientViewModel(private val app: IwaraApp) : ViewModel() {
                 IwaraClient.call { it.removeFromPlaylist(playlistId, videoId) }.ensureIwaraSuccess()
                 onDone(null)
             } catch (t: Throwable) {
+                if (t is CancellationException) throw t
                 onDone(describeIwaraError(t))
             }
         }
@@ -931,6 +944,7 @@ class IwaraClientViewModel(private val app: IwaraApp) : ViewModel() {
                 )
                 onDone(null)
             } catch (t: Throwable) {
+                if (t is CancellationException) throw t
                 onDone(describeIwaraError(t))
             }
         }
@@ -942,6 +956,7 @@ class IwaraClientViewModel(private val app: IwaraApp) : ViewModel() {
                 val detail = IwaraClient.call { it.playlist(playlistId) }
                 onDone(detail, null)
             } catch (t: Throwable) {
+                if (t is CancellationException) throw t
                 onDone(null, describeIwaraError(t))
             }
         }
@@ -958,6 +973,7 @@ class IwaraClientViewModel(private val app: IwaraApp) : ViewModel() {
                 }
                 onDone(detail, null)
             } catch (t: Throwable) {
+                if (t is CancellationException) throw t
                 onDone(null, describeIwaraError(t))
             }
         }
@@ -976,6 +992,7 @@ class IwaraClientViewModel(private val app: IwaraApp) : ViewModel() {
                 }
                 onDone(detail, null)
             } catch (t: Throwable) {
+                if (t is CancellationException) throw t
                 onDone(null, describeIwaraError(t))
             }
         }
@@ -1007,6 +1024,8 @@ class IwaraClientViewModel(private val app: IwaraApp) : ViewModel() {
                 }
                 followSeeded = true
             }.onFailure {
+                // 取消原样上抛：打底只是尽力而为，但不能把取消伪装成"打底失败"记进日志。
+                if (it is CancellationException) throw it
                 DiagLog.log("Follow", "关注列表打底失败: ${it.message ?: it.javaClass.simpleName}")
             }
         }
@@ -1021,6 +1040,7 @@ class IwaraClientViewModel(private val app: IwaraApp) : ViewModel() {
                 profile.uid?.let { followStates[it] = followStates[it] ?: false }
                 onDone(profile, null)
             } catch (t: Throwable) {
+                if (t is CancellationException) throw t
                 onDone(null, describeIwaraError(t))
             }
         }
@@ -1046,13 +1066,14 @@ class IwaraClientViewModel(private val app: IwaraApp) : ViewModel() {
                         it.videos(page, PAGE_LIMIT, sort, _rating.value, null, userId).results.orEmpty()
                     }
                 } catch (e: Throwable) {
-                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    if (e is CancellationException) throw e
                     IwaraClient.call {
                         it.userContent(userId, "video", page, PAGE_LIMIT, sort).results.orEmpty()
                     }
                 }
                 onDone(items, items.size < PAGE_LIMIT, null)
             } catch (t: Throwable) {
+                if (t is CancellationException) throw t
                 onDone(emptyList(), true, describeIwaraError(t))
             }
         }
@@ -1073,6 +1094,7 @@ class IwaraClientViewModel(private val app: IwaraApp) : ViewModel() {
                 val accounts = edges.mapNotNull { it.asAccount() }
                 onDone(accounts, edges.size < PAGE_LIMIT, null)
             } catch (t: Throwable) {
+                if (t is CancellationException) throw t
                 onDone(emptyList(), true, describeIwaraError(t))
             }
         }
@@ -1095,6 +1117,7 @@ class IwaraClientViewModel(private val app: IwaraApp) : ViewModel() {
                 }
                 onDone(items, items.size < PAGE_LIMIT, null)
             } catch (t: Throwable) {
+                if (t is CancellationException) throw t
                 onDone(emptyList(), true, describeIwaraError(t))
             }
         }
@@ -1118,13 +1141,14 @@ class IwaraClientViewModel(private val app: IwaraApp) : ViewModel() {
                         it.postsByUser(userId, page, PAGE_LIMIT, sort, _rating.value).results.orEmpty()
                     }
                 } catch (e: Throwable) {
-                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    if (e is CancellationException) throw e
                     IwaraClient.call {
                         it.userContentPosts(userId, "post", page, PAGE_LIMIT, sort).results.orEmpty()
                     }
                 }
                 onDone(items, items.size < PAGE_LIMIT, null)
             } catch (t: Throwable) {
+                if (t is CancellationException) throw t
                 onDone(emptyList(), true, describeIwaraError(t))
             }
         }
@@ -1145,6 +1169,7 @@ class IwaraClientViewModel(private val app: IwaraApp) : ViewModel() {
                 val accounts = edges.mapNotNull { it.asAccount() }
                 onDone(accounts, edges.size < PAGE_LIMIT, null)
             } catch (t: Throwable) {
+                if (t is CancellationException) throw t
                 onDone(emptyList(), true, describeIwaraError(t))
             }
         }
@@ -1161,7 +1186,7 @@ class IwaraClientViewModel(private val app: IwaraApp) : ViewModel() {
             suspend fun one(block: suspend (io.github.amatsukiichika.iwaramanager.data.IwaraBrowseService) -> Int?): Int? =
                 try {
                     IwaraClient.call { block(it) }
-                } catch (e: kotlinx.coroutines.CancellationException) {
+                } catch (e: CancellationException) {
                     throw e
                 } catch (t: Throwable) {
                     null
@@ -1198,6 +1223,7 @@ class IwaraClientViewModel(private val app: IwaraApp) : ViewModel() {
                     null
                 )
             } catch (t: Throwable) {
+                if (t is CancellationException) throw t
                 onResult(null, describeIwaraError(t))
             }
         }
@@ -1289,6 +1315,7 @@ class IwaraClientViewModel(private val app: IwaraApp) : ViewModel() {
                 reportView(id)
                 onResult(OnlinePlayData(chosen.url, detail.liked == true, options, chosen.name), null)
             } catch (t: Throwable) {
+                if (t is CancellationException) throw t
                 onResult(null, describeIwaraError(t))
             }
         }
@@ -1354,6 +1381,7 @@ class IwaraClientViewModel(private val app: IwaraApp) : ViewModel() {
                     )
                 )
             } catch (t: Throwable) {
+                if (t is CancellationException) throw t
                 onError(describeIwaraError(t))
             }
         }

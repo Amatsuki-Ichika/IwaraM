@@ -13,6 +13,7 @@ import io.github.amatsukiichika.iwaramanager.data.TagEntity
 import io.github.amatsukiichika.iwaramanager.data.VideoEntity
 import io.github.amatsukiichika.iwaramanager.data.filterBy
 import io.github.amatsukiichika.iwaramanager.data.localVideoKeys
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -576,6 +577,7 @@ class VideoViewModel(private val app: IwaraApp) : ViewModel() {
             val next = try {
                 computeState()
             } catch (t: Throwable) {
+                if (t is CancellationException) throw t
                 // 单条坏数据不应导致崩溃循环：记录后沿用上一次的界面状态。
                 android.util.Log.e("IwaraManager", "recompute failed", t)
                 return@launch
