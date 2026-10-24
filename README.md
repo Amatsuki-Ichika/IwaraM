@@ -35,6 +35,9 @@ GPU-accelerated super resolution.
 Download the latest APK from the [releases page](https://github.com/Amatsuki-Ichika/IwaraM/releases/latest)
 and install it. The build targets **arm64-v8a** devices running **Android 8.0 (API 26)** or newer.
 
+Testing builds (RCs) are published to the [releases page](https://github.com/Amatsuki-Ichika/IwaraM/releases)
+marked as pre-releases; the download link above always points at the latest stable.
+
 Because each release is signed with the same certificate, newer versions can be installed over
 older ones. Builds signed by anyone else cannot — uninstall first if you are coming from a
 different build. Verify a download as described in [SECURITY.md](SECURITY.md).
