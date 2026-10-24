@@ -16,6 +16,26 @@ documentation, start with [README.md](README.md); for the module map, see
 Always go through the Gradle wrapper (`./gradlew`). Do not add absolute paths, machine-specific
 SDK locations or locally installed toolchains to build files or documentation.
 
+## Workflow
+
+`main` is protected by branch rules: direct pushes are rejected, force pushes and
+deletions are blocked, and merging requires the `build` check to pass. All changes —
+including maintainer changes — go through a pull request:
+
+1. Branch from an up-to-date `main` using `fix/<topic>` or `feat/<topic>`.
+2. Run the full local check before pushing:
+   `./gradlew :app:test :app:assembleDebug :app:lintDebug`
+3. Open a pull request with a Conventional Commit style title (`fix: ...`, `feat: ...`).
+   Pull requests are squash-merged, so the title becomes the commit message on `main`.
+4. Wait for the `build` check to go green (~5 minutes), then squash-merge. No review
+   approval is required.
+
+There is no dependency-update bot: bump versions manually in `gradle/libs.versions.toml`
+and smoke-test larger upgrades with a debug build before merging.
+
+Releases are published by pushing a `v*` tag that matches `app.versionName` in
+`gradle.properties` — see [CONTRIBUTING.md](CONTRIBUTING.md), section "Releasing".
+
 ## Layout
 
 ```

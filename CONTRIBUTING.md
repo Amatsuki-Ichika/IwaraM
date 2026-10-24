@@ -28,20 +28,24 @@ attach the log from the file described in `CrashLogger.kt` if you can retrieve i
 
 ## Pull requests
 
+- Direct pushes to `main` are blocked by branch rules — always open a pull request;
+  CI must pass before merging.
 - Keep changes focused; one topic per pull request.
 - Follow the existing code style (official Kotlin conventions, 4-space indentation) and keep
   comments in Kotlin sources in Simplified Chinese, consistent with the rest of the codebase
   (build scripts keep English comments).
 - Add or update JVM unit tests for any pure logic you change. `./gradlew :app:test` must pass.
 - Update [CHANGELOG.md](CHANGELOG.md) under `[Unreleased]` when the change is user-visible.
-- Run the CI workflow locally if you can, and make sure it is green before requesting review.
+- Run the checks locally before requesting review:
+  `./gradlew :app:test :app:assembleDebug :app:lintDebug`.
 
 Please read the [Code of Conduct](CODE_OF_CONDUCT.md) before participating.
 
 ## Dependencies
 
 Dependency versions are centralised in `gradle/libs.versions.toml`. Add new entries there
-rather than hard-coding versions in `build.gradle.kts`.
+rather than hard-coding versions in `build.gradle.kts`. Dependency-update bots are disabled;
+updates are applied manually and verified with a debug build.
 
 ## Signing
 
