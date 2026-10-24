@@ -1,6 +1,7 @@
 package io.github.amatsukiichika.iwaramanager
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -185,6 +186,137 @@ private const val PAGE_SLIDE_MS = 320
 private const val OVERSCROLL_HOLD_SETTLE_MS = 500L
 
 private fun nextOverlaySeq(): Long = overlaySeqCounter.incrementAndGet()
+
+
+/**
+ * 播放解析编排状态（从 [MainActivity.MainContent] 下沉）。
+ *
+ * 只收「数据槽 + 编排入口」：currentVideo / 在线解析产物 / 相关推荐等状态，以及
+ * [startResolve] / [resolveAndPlay] / [playHistoryItem] 三个入口。层序分配、进出场动画与
+ * 「页面开关」（showingPlayer / openPlayer / closePlayer）仍留在 MainContent —— 它们与
+ * AnimatedVisibility / MutableTransitionState / 预测式返回强耦合；本类通过 [onOpenPlayer]
+ * 回调请求开页，closePlayer 的清场部分走 [clearPlayback]。
+ *
+ * 由此 MainContent 顶层不再声明这些槽：点赞 / 地址解析 / 相关推荐到达时只重组真正读取
+ * 它们的调用点，不再重跑整棵 MainContent 函数体。
+ */
+private class PlayerResolutionState(
+    private val vm: VideoViewModel,
+    private val cvm: IwaraClientViewModel,
+    private val context: Context,
+    /** debug 开关（回调 lambda 里读不到 CompositionLocal，构造期捕获）。 */
+    private val debugDetails: Boolean,
+) {
+    var currentVideo by mutableStateOf<VideoEntity?>(null)
+    var currentOnline by mutableStateOf<IwaraVideoItem?>(null)
+    var onlineLiked by mutableStateOf(false)
+    var onlinePlayUrl by mutableStateOf<String?>(null)
+    /** 在线地址解析失败的说明文字。非空时留在播放页显示错误面板，不关页。 */
+    var resolveError by mutableStateOf<String?>(null)
+    // 全部可选清晰度与当前档名（分辨率切换用）。
+    var onlineQualities by mutableStateOf<List<QualityOption>>(emptyList())
+    var onlineQualityName by mutableStateOf<String?>(null)
+    // 播放页「相关推荐」（在线 = related 接口结果；本地 = 同作者/同标签实时算）。
+    var relatedVideos by mutableStateOf<List<IwaraVideoItem>>(emptyList())
+    // 观看历史：本次打开的续播起点（ms），只有"从观看历史点开"才非 0；openPlayer(startMs) 是唯一写入口。
+    var playerStartMs by mutableLongStateOf(0L)
+    // 解析代数令牌：每次 startResolve 递增；过期回调（页面已关闭 / 已发起新解析）静默丢弃。
+    var resolveGen by mutableLongStateOf(0L)
+
+    /** MainContent 注入：打开播放页（层序 / 动画归它管）。 */
+    lateinit var onOpenPlayer: (Long) -> Unit
+
+    fun startResolve(item: IwaraVideoItem, closeOnFailure: Boolean) {
+        resolveGen++
+        val gen = resolveGen
+        onlinePlayUrl = null
+        resolveError = null
+        cvm.resolveOnlineUrl(item) { result, err ->
+            if (gen != resolveGen) return@resolveOnlineUrl // 过期回调：静默丢弃
+            if (result == null) {
+                // Toast 与面板副行按 debug 开关取轨（关=人话，开=技术细节原样）
+                val text = err?.let { if (debugDetails) it else friendlyIwaraError(it) }
+                    ?: "无法播放该视频"
+                Toast.makeText(context, text, Toast.LENGTH_SHORT).show()
+                resolveError = text
+            } else {
+                onlinePlayUrl = result.url
+                onlineLiked = result.liked
+                onlineQualities = result.qualities
+                onlineQualityName = result.qualityName
+                resolveError = null
+            }
+        }
+    }
+
+    /**
+     * 点开即播：先用列表数据秒开播放页（播放区显示加载提示），
+     * 播放地址在后台解析，解析完成自动开播；解析失败提示后退回。
+     * [startMs] = 观看历史的续播起点（普通入口走默认 0）。
+     */
+    fun resolveAndPlay(item: IwaraVideoItem, startMs: Long = 0L) {
+        // 本地已有同 id 视频（下载过/关联过）时直接播本地版本，省去解析与流量。
+        vm.findLocalByIwaraId(item.id)?.let { local ->
+            currentVideo = local
+            currentOnline = item
+            onlineLiked = item.liked == true
+            onlinePlayUrl = null
+            onlineQualities = emptyList()
+            onlineQualityName = null
+            // 开播放页一律走 onOpenPlayer(0L)（拿到新的层序号 = 画在最上面）。
+            onOpenPlayer(startMs)
+            return
+        }
+        currentVideo = cvm.buildEntity(item)
+        currentOnline = item
+        onlineLiked = item.liked == true
+        onlinePlayUrl = null
+        onlineQualities = emptyList()
+        onlineQualityName = null
+        onOpenPlayer(startMs)
+        startResolve(item, closeOnFailure = true)
+    }
+
+    /**
+     * 观看历史：从历史行点开。
+     * 本地条目先查现库（元数据取最新；有 iwaraId 的话播放页在线互动也接得上），
+     * 文件已不在库 → 有 iwaraId 转在线、否则提示。在线条目 → 用存档字段重建最小
+     * IwaraVideoItem 走 [resolveAndPlay]（它本来就优先播本地副本，下载/关联过的自然合流）。
+     * 续播起点由 [resumeStartMs] 决定（进度 ≥5s 且不足 95% 才续，否则从头）。
+     */
+    fun playHistoryItem(entry: WatchHistoryEntity) {
+        val startMs = resumeStartMs(entry.positionMs, entry.durationMs)
+        if (entry.isLocal) {
+            val local = vm.findLocalByUri(entry.localUri)
+            if (local != null) {
+                currentVideo = local
+                currentOnline = null
+                onOpenPlayer(startMs)
+                return
+            }
+            if (entry.iwaraId == null) {
+                Toast.makeText(context, "文件已不在库中", Toast.LENGTH_SHORT).show()
+                return
+            }
+            // 本地文件没了但 iwaraId 还在 → 落到下面的在线分支
+        }
+        val item = IwaraVideoItem(
+            id = entry.iwaraId,
+            title = entry.title,
+            user = IwaraAccount(id = entry.authorId, username = entry.authorId, name = entry.author),
+            file = IwaraFileRef(id = thumbnailFileIdFromUrl(entry.thumbnail))
+        )
+        resolveAndPlay(item, startMs)
+    }
+
+    /** closePlayer 的清场部分：作废在途解析并清空播放上下文。 */
+    fun clearPlayback() {
+    resolveError = null
+    onlinePlayUrl = null
+    onlineQualities = emptyList()
+    onlineQualityName = null
+    }
+}
 
 class MainActivity : ComponentActivity() {
 
@@ -406,6 +538,13 @@ class MainActivity : ComponentActivity() {
         // 加载态收集已下沉进 [RefreshButton]（map 成布尔再收集），本作用域不订阅任何信息流；
         // 若在这里顶层收集各信息流整流来拼「刷新按钮旋转」布尔，任何翻页都会重跑整个函数体。
         val sessionState by cvm.session.collectAsStateWithLifecycle()
+        // 播放解析编排状态（从本函数下沉，见 [PlayerResolutionState] 的说明）：
+        // currentVideo / 在线解析产物 / 相关推荐等槽都在里面，点赞、地址解析、相关推荐到达时
+        // 只重组真正读取它们的调用点，不再重跑整棵 MainContent 函数体。
+        // Debug 模式开关：本作用域内所有 Toast / 错误文案的取轨判据
+        //（回调 lambda 里读不到 CompositionLocal，先在组合期捕获）。
+        val debugDetails by vm.debugDetailsFlow.collectAsStateWithLifecycle()
+        val prs = remember { PlayerResolutionState(vm, cvm, context, debugDetails) }
 
         // 播放页作为覆盖层叠在主页之上：返回时主页始终在下方，滑出即可露出真实主页内容。
         var showingPlayer by remember { mutableStateOf(false) }
@@ -415,29 +554,9 @@ class MainActivity : ComponentActivity() {
         // 全局筛选面板（顶栏刷新键旁入口）的开关：它是 ModalBottomSheet（独立窗口），
         // 不进二级页栈，与动作面板同一种"不占页面栈"的处理。
         var showingFilter by remember { mutableStateOf(false) }
-        var currentVideo by remember { mutableStateOf<VideoEntity?>(null) }
-        // 观看历史：本次打开的续播起点（ms），只有"从观看历史点开"才非 0；
-        // openPlayer(startMs) 是唯一写入口，普通播放路径走默认 0。
-        var playerStartMs by remember { mutableLongStateOf(0L) }
 
         // 在线播放上下文：用于 PlayerScreen 的附加操作（点赞/评论/下载）与作者跳转分支。
-        var currentOnline by remember { mutableStateOf<IwaraVideoItem?>(null) }
-        var onlineLiked by remember { mutableStateOf(false) }
-        // 后台解析出的在线播放地址；null 表示解析中（播放页显示加载提示）。
-        var onlinePlayUrl by remember { mutableStateOf<String?>(null) }
-        /** 在线地址解析失败的说明文字。非空时留在播放页显示错误面板，不关页。 */
-        var resolveError by remember { mutableStateOf<String?>(null) }
-        // Debug 模式开关：本作用域内所有 Toast / 错误文案的取轨判据
-        //（回调 lambda 里读不到 CompositionLocal，先在组合期捕获）。
-        val debugDetails = LocalDebugDetails.current
         // 全部可选清晰度与当前档名（分辨率切换用）。
-        var onlineQualities by remember { mutableStateOf<List<QualityOption>>(emptyList()) }
-        var onlineQualityName by remember { mutableStateOf<String?>(null) }
-        // 播放页「相关推荐」（在线 = related 接口结果；本地 = 同作者/同标签实时算）。
-        var relatedVideos by remember { mutableStateOf<List<IwaraVideoItem>>(emptyList()) }
-
-        // Iwara 浏览覆盖层栈（评论/主页/播放列表/图片/帖子/动作面板），后进先出。
-        // 栈条目带自增序号 [OverlayEntry.seq]：结构相等（data class）的同一页连续入栈两次
         // 不再撞组合 key，IwaraOverlayHost 的渲染/退场集合/冻结位移也全部按序号比对。
         // 序号必须是进程级单调计数器：`remember { 0L }` 只在首次组合执行 lambda、缓存的是 0，
         // `+= 1` 改的是当次组合执行的局部变量，下一次重组又回到 0，会导致所有栈条目撞同一个
@@ -530,7 +649,7 @@ class MainActivity : ComponentActivity() {
 
         /** 打开播放页（必须走这里才能拿到新的层序号）。[startMs] = 观看历史续播起点（默认 0）。 */
         fun openPlayer(startMs: Long = 0L) {
-            playerStartMs = startMs
+            prs.playerStartMs = startMs
             // 引擎开关不影响"打开哪个页"——PlayerScreen 单页按引擎运行，
             // 详情区/点赞/评论/下载在 mpv 引擎下原样可用。
             DiagLog.log("Player", "点击打开播放页（startMs=$startMs）")
@@ -539,6 +658,7 @@ class MainActivity : ComponentActivity() {
             playerSeq = nextOverlaySeq()
             showingPlayer = true
         }
+        prs.onOpenPlayer = { openPlayer(it) }
 
         /** 打开设置页（同上）。 */
         fun openSettings() {
@@ -725,116 +845,21 @@ class MainActivity : ComponentActivity() {
         val settingsCovered = showingSettings && visibleSeqs.any { it > settingsSeq }
         val playerCovered = showingPlayer && visibleSeqs.any { it > playerSeq }
 
-        /** 后台解析在线播放地址。
-         *  解析失败不关页：只把原因写进 resolveError，播放页内显示「重试 / 退出」，不再自动关闭。
-         *  `closeOnFailure` 参数保留仅为兼容既有调用点，语义已不再生效。 */
-        /**
-         * 解析代数令牌：每次 startResolve 递增；回调捕获当次的值，到达时若已不是最新
-         *（页面已关闭 / 已发起新解析）则静默丢弃：不弹 Toast、不写 resolveError/onlinePlayUrl
-         * 等任何状态槽，避免"关闭页面后连接不上弹错误"与"旧视频的报错留到下一个视频"。
-         */
-        var resolveGen by remember { mutableLongStateOf(0L) }
 
         /** 关闭播放页的唯一入口：关页 + 清播放上下文 + 作废在途解析。 */
         fun closePlayer() {
-            resolveGen++ // 作废在途解析回调
+            prs.resolveGen++ // 作废在途解析回调
             showingPlayer = false
             // 同步登记"退场动画还没播完"（挂载标记靠它派生，见 playerMounted 的说明）。
             playerExitPending = true
-            resolveError = null
-            onlinePlayUrl = null
-            onlineQualities = emptyList()
-            onlineQualityName = null
-        }
-
-        fun startResolve(item: IwaraVideoItem, closeOnFailure: Boolean) {
-            resolveGen++
-            val gen = resolveGen
-            onlinePlayUrl = null
-            resolveError = null
-            cvm.resolveOnlineUrl(item) { result, err ->
-                if (gen != resolveGen) return@resolveOnlineUrl // 过期回调：静默丢弃
-                if (result == null) {
-                    // Toast 与面板副行按 debug 开关取轨（关=人话，开=技术细节原样）
-                    val text = err?.let { if (debugDetails) it else friendlyIwaraError(it) }
-                        ?: "无法播放该视频"
-                    Toast.makeText(context, text, Toast.LENGTH_SHORT).show()
-                    resolveError = text
-                } else {
-                    onlinePlayUrl = result.url
-                    onlineLiked = result.liked
-                    onlineQualities = result.qualities
-                    onlineQualityName = result.qualityName
-                    resolveError = null
-                }
-            }
-        }
-
-        /**
-         * 点开即播：先用列表数据秒开播放页（播放区显示加载提示），
-         * 播放地址在后台解析，解析完成自动开播；解析失败提示后退回。
-         * [startMs] = 观看历史的续播起点（普通入口走默认 0）。
-         */
-        fun resolveAndPlay(item: IwaraVideoItem, startMs: Long = 0L) {
-            // 本地已有同 id 视频（下载过/关联过）时直接播本地版本，省去解析与流量。
-            vm.findLocalByIwaraId(item.id)?.let { local ->
-                currentVideo = local
-                currentOnline = item
-                onlineLiked = item.liked == true
-                onlinePlayUrl = null
-                onlineQualities = emptyList()
-                onlineQualityName = null
-                // 开播放页一律走 openPlayer()（拿到新的层序号 = 画在最上面）。
-                openPlayer(startMs = startMs)
-                return
-            }
-            currentVideo = cvm.buildEntity(item)
-            currentOnline = item
-            onlineLiked = item.liked == true
-            onlinePlayUrl = null
-            onlineQualities = emptyList()
-            onlineQualityName = null
-            openPlayer(startMs = startMs)
-            startResolve(item, closeOnFailure = true)
-        }
-
-        /**
-         * 观看历史：从历史行点开。
-         * 本地条目先查现库（元数据取最新；有 iwaraId 的话播放页在线互动也接得上），
-         * 文件已不在库 → 有 iwaraId 转在线、否则提示。在线条目 → 用存档字段重建最小
-         * IwaraVideoItem 走 [resolveAndPlay]（它本来就优先播本地副本，下载/关联过的自然合流）。
-         * 续播起点由 [resumeStartMs] 决定（进度 ≥5s 且不足 95% 才续，否则从头）。
-         */
-        fun playHistoryItem(entry: WatchHistoryEntity) {
-            val startMs = resumeStartMs(entry.positionMs, entry.durationMs)
-            if (entry.isLocal) {
-                val local = vm.findLocalByUri(entry.localUri)
-                if (local != null) {
-                    currentVideo = local
-                    currentOnline = null
-                    openPlayer(startMs = startMs)
-                    return
-                }
-                if (entry.iwaraId == null) {
-                    Toast.makeText(context, "文件已不在库中", Toast.LENGTH_SHORT).show()
-                    return
-                }
-                // 本地文件没了但 iwaraId 还在 → 落到下面的在线分支
-            }
-            val item = IwaraVideoItem(
-                id = entry.iwaraId,
-                title = entry.title,
-                user = IwaraAccount(id = entry.authorId, username = entry.authorId, name = entry.author),
-                file = IwaraFileRef(id = thumbnailFileIdFromUrl(entry.thumbnail))
-            )
-            resolveAndPlay(item, startMs)
+            prs.clearPlayback()
         }
 
         val navActions = IwaraNavActions(
             playVideo = { item ->
                 val top = overlays.lastOrNull()?.overlay
                 if (top is IwaraOverlay.VideoActions || top is IwaraOverlay.ImageActions) popOverlay()
-                resolveAndPlay(item)
+                prs.resolveAndPlay(item)
             },
             // 唯一入口：一律把账号对象里已有的 UUID 带进作者页。
             // 若只带 handle，作者页要多打一次 `GET /profile/{username}` 才能开始拉内容。
@@ -862,13 +887,13 @@ class MainActivity : ComponentActivity() {
             openDownloads = { pushOverlay(IwaraOverlay.Downloads) },
             openFollowing = { pushOverlay(IwaraOverlay.Following) },
             openWatchHistory = { pushOverlay(IwaraOverlay.WatchHistory) },
-            playHistory = { playHistoryItem(it) },
+            playHistory = { prs.playHistoryItem(it) },
             playLocalVideo = { video ->
                 // 作者页「视频」栏的本地条目：与本地库点卡片走完全同一条路径。
                 val top = overlays.lastOrNull()?.overlay
                 if (top is IwaraOverlay.VideoActions || top is IwaraOverlay.ImageActions) popOverlay()
-                currentVideo = video
-                currentOnline = null
+                prs.currentVideo = video
+                prs.currentOnline = null
                 openPlayer()
             },
             openRelations = { uid, kind -> pushOverlay(IwaraOverlay.Relations(uid, kind)) },
@@ -1010,8 +1035,8 @@ class MainActivity : ComponentActivity() {
                             backEnabled = overlays.isEmpty() && !playerOnScreen &&
                                 !settingsOnScreen && !showingFilter,
                             onOpenVideo = { video ->
-                                currentVideo = video
-                                currentOnline = null
+                                prs.currentVideo = video
+                                prs.currentOnline = null
                                 openPlayer()
                             },
                             onImport = { folderPicker.launch(null) },
@@ -1231,7 +1256,7 @@ class MainActivity : ComponentActivity() {
             enter = EnterTransition.None,
             exit = ExitTransition.None
         ) {
-            currentVideo?.let { video ->
+            prs.currentVideo?.let { video ->
                 // 本地视频匹配到 iwara（有 iwaraId）时后台拉一次在线状态，
                 // 把「点赞 / 评论 / 关注作者」接入本地播放页。连上服务器前整行隐藏（LOADING）、
                 // 拉取失败置灰（UNAVAILABLE），网络不佳时不给出注定失败的操作入口。
@@ -1254,14 +1279,14 @@ class MainActivity : ComponentActivity() {
                 }
                 val localFollowing = localAuthorId?.let { cvm.followStates[it] } ?: false
 
-                val curOnline = currentOnline
+                val curOnline = prs.currentOnline
 
                 // 「相关推荐」静默预取：在线视频拉 related 接口（失败=空=不显示该区）；
                 // 本地视频用本地同作者/同标签（无网络）。换片（relatedId 变化）自动重取。
                 val relatedId = curOnline?.id
                 LaunchedEffect(relatedId) {
-                    relatedVideos = emptyList()
-                    if (relatedId != null) cvm.loadRelatedVideos(relatedId) { relatedVideos = it }
+                    prs.relatedVideos = emptyList()
+                    if (relatedId != null) cvm.loadRelatedVideos(relatedId) { prs.relatedVideos = it }
                 }
                 // 本地推荐按视频实体缓存（播放期间库变化不重算，与列表冻结一致）。
                 // 放到后台线程：1700+ 条库上这是全表扫描 + 排序，若直接跑在组合相位，
@@ -1273,7 +1298,7 @@ class MainActivity : ComponentActivity() {
                     value = withContext(Dispatchers.Default) { vm.localRelatedOf(video) }
                 }
                 val relatedList: List<RelatedVideo> = when {
-                    curOnline != null -> relatedVideos.map { RelatedVideo.Online(it) }
+                    curOnline != null -> prs.relatedVideos.map { RelatedVideo.Online(it) }
                     else -> localRelated.map { RelatedVideo.Local(it) }
                 }
                 val onlineExtras: OnlineVideoExtras? = when {
@@ -1281,14 +1306,14 @@ class MainActivity : ComponentActivity() {
                     curOnline != null -> {
                         val item = curOnline
                         OnlineVideoExtras(
-                            liked = onlineLiked,
-                            mediaUrl = onlinePlayUrl,
+                            liked = prs.onlineLiked,
+                            mediaUrl = prs.onlinePlayUrl,
                             // 简介 + 作者头像（列表 DTO 已带，零额外请求）。
                             description = item.body,
                             avatarUrl = IwaraClient.thumbnailUrl(item.user?.avatar?.id),
-                            qualities = onlineQualities,
-                            currentQuality = onlineQualityName,
-                            onRetry = { startResolve(item, closeOnFailure = false) },
+                            qualities = prs.onlineQualities,
+                            currentQuality = prs.onlineQualityName,
+                            onRetry = { prs.startResolve(item, closeOnFailure = false) },
                             canFollow = item.user?.id != null && sessionState.loggedIn,
                             following = item.user?.id?.let { cvm.followStates[it] } ?: false,
                             onToggleFollow = {
@@ -1311,12 +1336,12 @@ class MainActivity : ComponentActivity() {
                             onToggleLike = {
                                 val id = item.id ?: return@OnlineVideoExtras
                                 // 乐观更新：先翻转界面，失败再回滚，点赞反馈更跟手。
-                                val previous = onlineLiked
-                                onlineLiked = !previous
+                                val previous = prs.onlineLiked
+                                prs.onlineLiked = !previous
                                 cvm.toggleLike("video", id, previous) { ok, err ->
-                                    if (ok != null) onlineLiked = ok
+                                    if (ok != null) prs.onlineLiked = ok
                                     else {
-                                        onlineLiked = previous
+                                        prs.onlineLiked = previous
                                         // 页面已关不再弹孤立错误
                                         if (!showingPlayer) return@toggleLike
                                         Toast.makeText(
@@ -1342,8 +1367,8 @@ class MainActivity : ComponentActivity() {
                                 Toast.makeText(context, "已加入下载队列，可在通知栏查看进度", Toast.LENGTH_SHORT).show()
                             },
                             onSelectQuality = { q ->
-                                onlineQualityName = q.name
-                                onlinePlayUrl = q.url
+                                prs.onlineQualityName = q.name
+                                prs.onlinePlayUrl = q.url
                             }
                         )
                     }
@@ -1414,7 +1439,7 @@ class MainActivity : ComponentActivity() {
                         // 点作者名 = 直接进作者二级页（信息流/播放页统一走这条）。
                         // buildEntity 的 authorId 优先是 handle，只有 handle 缺失时才回退成 UUID，
                         // 那时用 userId 兜底，作者页照样能拉内容。
-                        val u = currentOnline?.user
+                        val u = prs.currentOnline?.user
                         val uuid = isIwaraUserUuid(id)
                         closePlayer()
                         pushOverlay(
@@ -1427,7 +1452,7 @@ class MainActivity : ComponentActivity() {
                     },
                     onSelectTag = { tag ->
                         // 在线视频的 tag：视频页内就地筛选（不弹页）；本地视频的 tag 保持管理器筛选。
-                        if (currentOnline != null) {
+                        if (prs.currentOnline != null) {
                             closePlayer()
                             navActions.openTagVideos(tag)
                         } else {
@@ -1440,27 +1465,27 @@ class MainActivity : ComponentActivity() {
                         closePlayer()
                     },
                     online = onlineExtras,
-                    // 相关推荐 + 点击分流（在线 = resolveAndPlay，本地已下载则播本地；
+                    // 相关推荐 + 点击分流（在线 = prs.resolveAndPlay，本地已下载则播本地；
                     // 本地 = 与本地库点卡片同通路）。
                     related = relatedList,
                     onOpenRelated = { relatedItem ->
                         when (relatedItem) {
-                            is RelatedVideo.Online -> resolveAndPlay(relatedItem.item)
+                            is RelatedVideo.Online -> prs.resolveAndPlay(relatedItem.item)
                             is RelatedVideo.Local -> {
-                                currentVideo = relatedItem.video
-                                currentOnline = null
+                                prs.currentVideo = relatedItem.video
+                                prs.currentOnline = null
                                 openPlayer()
                             }
                         }
                     },
                     // 观看历史：从历史页点开时带上续播起点（普通入口恒 0）。
-                    startPositionMs = playerStartMs,
+                    startPositionMs = prs.playerStartMs,
                     // 被更新的层（后开的二级页）盖住 → 让位（左移 + 压暗 + 收圆角），并让出返回键。
                     covered = playerCovered,
                     backEnabled = ownsBack(showingPlayer, playerSeq),
                     // 地址解析失败 → 页内提示（不关页）；重试走"留在页面"的分支。
-                    resolveError = resolveError,
-                    onRetryResolve = { currentOnline?.let { startResolve(it, closeOnFailure = false) } },
+                    resolveError = prs.resolveError,
+                    onRetryResolve = { prs.currentOnline?.let { prs.startResolve(it, closeOnFailure = false) } },
                     // 「收藏」（网站"添加到"）→ 动作面板直达"加入播放列表"模式。
                     // 在线用现成 DTO；本地构造最小载荷（sheet 只用 id/title）。面板是独立窗口，
                     // 盖在播放页之上；未登录时面板内提示。
