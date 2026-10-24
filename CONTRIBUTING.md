@@ -76,18 +76,43 @@ existing installations can no longer be updated in place.
 
 ## Releasing
 
-Maintainers publish a release by pushing a tag:
+Releases go out in two stages: a **pre-release (RC)** for testing, then the **stable**
+release. Both are published by pushing a tag; the workflow picks the stage from the tag
+itself — a tag with a semver pre-release suffix (e.g. `v0.2.0-rc.1`) publishes as a GitHub
+pre-release, while a plain `vMAJOR.MINOR.PATCH` tag publishes as stable.
+
+**1. Pre-release (RC).** Bump `app.versionName` in `gradle.properties` to the suffixed
+version through a normal PR, then tag:
 
 ```bash
-# Bump app.versionName in gradle.properties, move the CHANGELOG entries out of [Unreleased], then:
-git tag v0.1.1
-git push origin v0.1.1
+git tag v0.2.0-rc.1
+git push origin v0.2.0-rc.1
 ```
+
+The workflow runs the tests, builds the signed APK and publishes it as a GitHub
+**pre-release**. Pre-releases are excluded from the "Latest" badge and the
+`/releases/latest` install link, and the app shows the suffixed version name
+(`0.2.0-rc.1`) so testers can see what they run. If the RC has problems, fix them on
+`main` and tag `v0.2.0-rc.2`; repeat until testing passes.
+
+**2. Stable.** Once an RC passes testing, bump `app.versionName` to the final version,
+move the CHANGELOG entries out of `[Unreleased]`, then:
+
+```bash
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+The stable release is published and automatically becomes the latest release — there is no
+manual promotion step. Testers can upgrade in place from the RC: a pre-release shares the
+stable release's `versionCode` (derived from the numeric base, ignoring the suffix) and the
+same signing key, so the stable APK installs straight over the RC.
 
 `gradle.properties` is the single source of truth for the version: the tag must match
 `app.versionName` there (the workflow fails the build on a mismatch), and `versionCode` is
-derived from `versionName` automatically (major\*10000 + minor\*100 + patch). The workflow runs
-the unit tests, builds the signed APK on the tag, verifies the signature with `apksigner` and
-uploads the APK plus its `.sha256` checksum to a GitHub Release.
-It needs these repository secrets: `KEYSTORE_BASE64` (the keystore file, base64-encoded),
-`STORE_PASSWORD`, `KEY_ALIAS` and `KEY_PASSWORD`.
+derived from `versionName` automatically (major\*10000 + minor\*100 + patch, any pre-release
+suffix ignored). The workflow runs the unit tests, builds the signed APK on the tag, verifies
+the signature with `apksigner` and uploads the APK plus its `.sha256` checksum to a GitHub
+Release. Generated release notes always compare against the previous stable tag, so RC tags
+do not truncate them. It needs these repository secrets: `KEYSTORE_BASE64` (the keystore
+file, base64-encoded), `STORE_PASSWORD`, `KEY_ALIAS` and `KEY_PASSWORD`.
