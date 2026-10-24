@@ -6,10 +6,20 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
-// App version — single source of truth. CI may override it from the release tag,
-// e.g. ./gradlew assembleRelease -Papp.versionName=0.2.0 -Papp.versionCode=2
-val appVersionCode: Int = (findProperty("app.versionCode") as String?)?.toIntOrNull() ?: 1
-val appVersionName: String = (findProperty("app.versionName") as String?) ?: "0.1.0"
+// App version — single source of truth. CI may override the name from the release tag,
+// e.g. ./gradlew assembleRelease -Papp.versionName=0.2.0
+val appVersionName: String = findProperty("app.versionName") as String?
+    ?: error("app.versionName is not set; define it in gradle.properties or pass -Papp.versionName=")
+
+// versionCode derives from versionName (major * 10000 + minor * 100 + patch) so the
+// numeric code can never drift from the single version source in gradle.properties.
+val appVersionCode: Int = appVersionName.split(".").let { parts ->
+    require(parts.size == 3) { "app.versionName must be major.minor.patch, got \"$appVersionName\"" }
+    val (major, minor, patch) = parts.map { part ->
+        part.toIntOrNull() ?: error("Non-numeric part in app.versionName: \"$appVersionName\"")
+    }
+    major * 10000 + minor * 100 + patch
+}
 
 // Release signing material is read from a git-ignored keystore.properties.
 // The file is optional: debug and test builds work without it, only `assembleRelease` requires it.
@@ -83,6 +93,12 @@ android {
             )
         }
     }
+}
+
+// Export Room's schema JSON per database version so future migrations can be
+// regression-tested against the exact historical schema.
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
 }
 
 composeCompiler {

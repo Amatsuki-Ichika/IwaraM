@@ -10,7 +10,8 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 @Database(
     entities = [VideoEntity::class, TagEntity::class, VideoTagCrossRef::class, WatchHistoryEntity::class],
     version = 2,
-    exportSchema = false
+    // schema 导出到 app/schemas/，供后续版本的迁移回归测试比对（见 app/build.gradle.kts 的 ksp 配置）
+    exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun videoDao(): VideoDao
