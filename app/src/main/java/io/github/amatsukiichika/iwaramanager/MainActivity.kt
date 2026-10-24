@@ -146,6 +146,14 @@ import io.github.amatsukiichika.iwaramanager.ui.browse.OverlayEntry
 import io.github.amatsukiichika.iwaramanager.ui.browse.drawOrderSeqs
 import io.github.amatsukiichika.iwaramanager.ui.browse.zIndexOf
 import io.github.amatsukiichika.iwaramanager.ui.browse.layerStillOnScreen
+import io.github.amatsukiichika.iwaramanager.ui.browse.buildEntity
+import io.github.amatsukiichika.iwaramanager.ui.browse.downloadVideo
+import io.github.amatsukiichika.iwaramanager.ui.browse.loadPlaylists
+import io.github.amatsukiichika.iwaramanager.ui.browse.loadRelatedVideos
+import io.github.amatsukiichika.iwaramanager.ui.browse.loadVideoOnlineState
+import io.github.amatsukiichika.iwaramanager.ui.browse.resolveOnlineUrl
+import io.github.amatsukiichika.iwaramanager.ui.browse.toggleFollow
+import io.github.amatsukiichika.iwaramanager.ui.browse.toggleLike
 import io.github.amatsukiichika.iwaramanager.ui.theme.IwaraTheme
 import io.github.amatsukiichika.iwaramanager.ui.theme.resolveDarkTheme
 import kotlinx.coroutines.flow.distinctUntilChanged
