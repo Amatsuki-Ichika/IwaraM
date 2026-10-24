@@ -22,6 +22,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import io.github.amatsukiichika.iwaramanager.ui.DiagLog
 import java.util.concurrent.atomic.AtomicBoolean
+import io.github.amatsukiichika.iwaramanager.data.countVideos
+import io.github.amatsukiichika.iwaramanager.data.fetchAllMissing
+import io.github.amatsukiichika.iwaramanager.data.importFolder
 
 /** 前台服务与 UI 共享的扫描进度；null 代表当前未在扫描。 */
 object ScanState {

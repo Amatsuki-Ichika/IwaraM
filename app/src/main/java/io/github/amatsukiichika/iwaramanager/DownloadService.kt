@@ -31,6 +31,12 @@ import io.github.amatsukiichika.iwaramanager.data.IwaraClient
 import io.github.amatsukiichika.iwaramanager.data.IwaraSign
 import io.github.amatsukiichika.iwaramanager.data.PendingDownload
 import io.github.amatsukiichika.iwaramanager.data.VideoEntity
+import io.github.amatsukiichika.iwaramanager.data.addDownloadHistory
+import io.github.amatsukiichika.iwaramanager.data.fetchAndApplyMetadata
+import io.github.amatsukiichika.iwaramanager.data.generateLocalThumbnail
+import io.github.amatsukiichika.iwaramanager.data.loadPendingDownloads
+import io.github.amatsukiichika.iwaramanager.data.removePendingDownload
+import io.github.amatsukiichika.iwaramanager.data.savePendingDownload
 import io.github.amatsukiichika.iwaramanager.ui.DiagLog
 import okhttp3.Request
 import java.util.concurrent.CopyOnWriteArraySet

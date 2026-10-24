@@ -60,6 +60,8 @@ import io.github.amatsukiichika.iwaramanager.data.OkHttpDataSource
 import io.github.amatsukiichika.iwaramanager.data.friendlyHttpError
 import io.github.amatsukiichika.iwaramanager.data.VideoEntity
 import io.github.amatsukiichika.iwaramanager.data.watchHistoryKey
+import io.github.amatsukiichika.iwaramanager.data.recordWatch
+import io.github.amatsukiichika.iwaramanager.data.updateWatchProgress
 import io.github.amatsukiichika.iwaramanager.ui.components.LocalDebugDetails
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers

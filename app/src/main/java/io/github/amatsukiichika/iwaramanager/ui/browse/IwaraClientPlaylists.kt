@@ -29,6 +29,8 @@ import io.github.amatsukiichika.iwaramanager.data.describeIwaraError
 import io.github.amatsukiichika.iwaramanager.data.ensureIwaraSuccess
 import io.github.amatsukiichika.iwaramanager.data.GlobalFilterHolder
 import io.github.amatsukiichika.iwaramanager.data.parseIwaraDate
+import io.github.amatsukiichika.iwaramanager.data.loadPlaylistsCache
+import io.github.amatsukiichika.iwaramanager.data.savePlaylistsCache
 import io.github.amatsukiichika.iwaramanager.ui.DiagLog
 import io.github.amatsukiichika.iwaramanager.ui.QualityOption
 import kotlinx.coroutines.CancellationException
