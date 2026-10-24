@@ -54,4 +54,40 @@ class IwaraSignTest {
         assertEquals(40, a.length)
         assertTrue(a.all { it.isDigit() || it in 'a'..'f' })
     }
+
+    // ---------- pickViewUrl：实现里有 `!!`，这些用例锁死"过滤保证非空"的前提 ----------
+
+    private fun quality(name: String?, view: String?) =
+        IwaraQualitySource(name = name, src = IwaraQualitySrc(view = view))
+
+    @Test
+    fun `pickViewUrl prefers exact quality name match`() {
+        val list = listOf(quality("360p", "//h/360"), quality("Source", "//h/src"))
+        assertEquals("Source" to "https://h/src", IwaraSign.pickViewUrl(list, "Source"))
+    }
+
+    @Test
+    fun `pickViewUrl falls back to first usable when no preferred match`() {
+        val list = listOf(quality("540p", "//h/540"), quality("360p", "//h/360"))
+        assertEquals("540p" to "https://h/540", IwaraSign.pickViewUrl(list, "Source"))
+    }
+
+    @Test
+    fun `pickViewUrl skips entries whose view url is blank or missing`() {
+        // 偏好项地址为空白时必须被过滤掉，否则 `src!!.view!!` 会崩
+        val list = listOf(quality("Source", "  "), quality(null, null), quality("360p", "//h/360"))
+        assertEquals("360p" to "https://h/360", IwaraSign.pickViewUrl(list, "Source"))
+    }
+
+    @Test
+    fun `pickViewUrl returns null when nothing is usable`() {
+        assertNull(IwaraSign.pickViewUrl(emptyList(), "Source"))
+        assertNull(IwaraSign.pickViewUrl(listOf(quality("Source", null)), "Source"))
+        assertNull(IwaraSign.pickViewUrl(listOf(quality("Source", "")), null))
+    }
+
+    @Test
+    fun `pickViewUrl tolerates missing quality name`() {
+        assertEquals("" to "https://h/v", IwaraSign.pickViewUrl(listOf(quality(null, "//h/v")), null))
+    }
 }
