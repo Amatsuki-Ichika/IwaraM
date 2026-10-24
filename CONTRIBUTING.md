@@ -65,9 +65,9 @@ To create your own key (contributors do not need one — only maintainers publis
 keytool -genkeypair -v \
   -keystore keystore/release.jks \
   -storetype PKCS12 \
-  -alias iwara-manager \
+  -alias iwaram \
   -keyalg RSA -keysize 4096 -validity 10000 \
-  -dname "CN=Iwara Manager, O=iwara-manager"
+  -dname "CN=IwaraM, O=IwaraM"
 ```
 
 `keystore.properties` and `keystore/` are ignored by git; `keystore.properties.example` shows

@@ -5,7 +5,7 @@ This document describes how the app is put together. It is meant to be read alon
 
 ## Overview
 
-Iwara Manager is a **single-activity Jetpack Compose app**. There is deliberately no dependency
+IwaraM is a **single-activity Jetpack Compose app**. There is deliberately no dependency
 injection framework and no navigation library: screens are composed directly, and navigation is a
 small hand-written overlay stack. State is held in `StateFlow`s, most of which live in
 `IwaraRepository`, which acts as the single source of truth for both data and settings.

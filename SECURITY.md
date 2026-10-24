@@ -26,7 +26,7 @@ Every release APK is signed with the project's release certificate, and the same
 is used for every version so builds can be updated in place. To verify a downloaded APK:
 
 ```bash
-apksigner verify --print-certs iwara-manager-<version>-arm64-v8a.apk
+apksigner verify --print-certs IwaraM-<version>-arm64-v8a.apk
 ```
 
 Compare the printed SHA-256 digest with the fingerprint below. If they differ, the file did
@@ -36,7 +36,7 @@ Every release also ships a `.sha256` checksum file next to the APK; use it to ch
 integrity (before worrying about signatures):
 
 ```bash
-sha256sum -c iwara-manager-<version>-arm64-v8a.apk.sha256
+sha256sum -c IwaraM-<version>-arm64-v8a.apk.sha256
 ```
 
 Current release certificate SHA-256 fingerprint:

@@ -79,15 +79,31 @@ jobs:
 
       - name: Rename and checksum
         run: |
-          cp app/build/outputs/apk/release/app-release.apk "iwara-manager-$VERSION-arm64-v8a.apk"
-          sha256sum "iwara-manager-$VERSION-arm64-v8a.apk" > "iwara-manager-$VERSION-arm64-v8a.apk.sha256"
+          cp app/build/outputs/apk/release/app-release.apk "IwaraM-$VERSION-arm64-v8a.apk"
+          sha256sum "IwaraM-$VERSION-arm64-v8a.apk" > "IwaraM-$VERSION-arm64-v8a.apk.sha256"
+
+      # Curated release body: the CHANGELOG section for this version, so the published page
+      # leads with user-facing highlights; generate_release_notes appends the auto-generated
+      # "What's Changed" list after it. Falls back to a pointer if the section is missing.
+      - name: Extract changelog section for the release body
+        run: |
+          BODY="$(awk -v ver="$VERSION" 'index($0, "## [" ver "]") == 1 { flag = 1; next } /^## / { flag = 0 } flag' CHANGELOG.md)"
+          if [ -z "$BODY" ]; then
+            BODY="See [CHANGELOG.md](https://github.com/Amatsuki-Ichika/IwaraM/blob/main/CHANGELOG.md) for what is new in this release."
+          fi
+          {
+            echo "RELEASE_BODY<<EOF"
+            echo "$BODY"
+            echo "EOF"
+          } >> "$GITHUB_ENV"
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v3
         with:
           files: |
-            iwara-manager-*.apk
-            iwara-manager-*.apk.sha256
+            IwaraM-*.apk
+            IwaraM-*.apk.sha256
+          body: ${{ env.RELEASE_BODY }}
           generate_release_notes: true
           previous_tag: ${{ env.PREVIOUS_TAG }}
           # A semver pre-release suffix in the tag (e.g. v0.2.0-rc.1) publishes as a GitHub

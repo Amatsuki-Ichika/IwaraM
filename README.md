@@ -1,4 +1,4 @@
-# Iwara Manager
+# IwaraM
 
 [![CI](https://github.com/Amatsuki-Ichika/IwaraM/actions/workflows/ci.yml/badge.svg)](https://github.com/Amatsuki-Ichika/IwaraM/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/Amatsuki-Ichika/IwaraM?sort=semver)](https://github.com/Amatsuki-Ichika/IwaraM/releases/latest)
@@ -6,82 +6,75 @@
 [![Min SDK](https://img.shields.io/badge/minSdk-26-blue.svg)](https://developer.android.com/about/versions/oreo)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.4-7F52FF.svg?logo=kotlin&logoColor=white)](https://kotlinlang.org)
 
-English · [简体中文](README.zh-CN.md)
+[English](README.en.md) · 简体中文
 
-An unofficial Android client for [iwara.tv](https://iwara.tv), written in Kotlin and Jetpack
-Compose: browse the site, keep a searchable local library, and play videos with optional
-GPU-accelerated super resolution.
+[iwara.tv](https://iwara.tv) 的非官方 Android 客户端，Kotlin + Jetpack Compose 编写：浏览站点内容、
+维护可搜索的本地库，并支持可选的 GPU 超分辨率播放。
 
-> **Not affiliated with iwara.tv.** This is a community project and an independent client.
-> The service may contain adult material — see [DISCLAIMER.md](DISCLAIMER.md) before using it.
+> **与 iwara.tv 无任何隶属关系。** 本项目是社区独立客户端。站点可能包含成人内容，
+> 使用前请阅读 [DISCLAIMER.md](DISCLAIMER.md)。
 
-## Features
+## 功能
 
-- **Online browsing** — trending and latest feeds, tag browsing, search and author pages.
-- **Local library** — import and scan media folders, fetch metadata, then browse by folder,
-  author, date or tag with search and sorting.
-- **Playback** — swipe to seek, double-tap to seek, fullscreen, quality selection and
-  resume from where you left off.
-- **Super resolution** — optional Anime4K shader models running on the GPU.
-- **Downloads** — background downloads with resume.
-- **Watch history** — automatic history with one-tap resume.
-- **Favourites and playlists** — browse and manage your account's collections.
-- **Content filter** — global include/exclude rules for titles and tags, plus an R18 toggle.
-- **Material 3 UI** — light and dark themes with a choice of accent colours, and an optional
-  frosted-glass treatment for the bars.
+- **在线浏览** —— 热门/最新信息流、标签浏览、搜索、作者页。
+- **本地库** —— 导入并扫描媒体目录、抓取元数据，再按文件夹 / 作者 / 日期 / 标签浏览，
+  支持搜索与排序。
+- **播放** —— 左右滑动定位、双击定位、全屏、清晰度选择、从上次进度续播。
+- **超分辨率** —— 可选的 Anime4K 着色器模型，运行在 GPU 上。
+- **下载** —— 后台下载并支持断点续传。
+- **观看历史** —— 自动记录，一键续播。
+- **收藏与播放列表** —— 浏览并管理账号下的收藏与播放列表。
+- **内容筛选** —— 针对标题与标签的全局包含/排除规则，以及 R18 显示开关。
+- **Material 3 界面** —— 浅色/深色主题与可选主题色，顶栏/底栏可选磨砂玻璃材质。
 
-## Install
+## 安装
 
-Download the latest APK from the [releases page](https://github.com/Amatsuki-Ichika/IwaraM/releases/latest)
-and install it. The build targets **arm64-v8a** devices running **Android 8.0 (API 26)** or newer.
+前往 [Releases 页面](https://github.com/Amatsuki-Ichika/IwaraM/releases/latest) 下载最新 APK 安装。
+构建目标为 **arm64-v8a**、**Android 8.0（API 26）** 及以上。
 
-Testing builds (RCs) are published to the [releases page](https://github.com/Amatsuki-Ichika/IwaraM/releases)
-marked as pre-releases; the download link above always points at the latest stable.
+测试版（RC）也会发布在 [Releases 页面](https://github.com/Amatsuki-Ichika/IwaraM/releases)并标注为
+pre-release；上面的下载链接始终指向最新的正式版。
 
-Because each release is signed with the same certificate, newer versions can be installed over
-older ones. Builds signed by anyone else cannot — uninstall first if you are coming from a
-different build. Verify a download as described in [SECURITY.md](SECURITY.md).
+每个版本都用同一张证书签名，因此新版本可以直接覆盖安装旧版本；由他人签名的包则不能——
+若你之前用的是别的签名包，请先卸载。校验下载文件的完整性与签名见 [SECURITY.md](SECURITY.md)。
 
-## Build from source
+## 从源码构建
 
-Requirements:
+前置条件：
 
 - JDK 17
-- Android SDK with platform `android-37.2` and build-tools `36.0.0`
+- Android SDK：平台 `android-37.2`、build-tools `36.0.0`
 
 ```bash
-# Point Gradle at your SDK (local.properties is git-ignored).
+# 让 Gradle 找到你的 SDK（local.properties 已被 git 忽略）
 echo "sdk.dir=$ANDROID_HOME" > local.properties
 
-./gradlew :app:test            # unit tests
-./gradlew :app:assembleDebug   # debug APK
-./gradlew :app:assembleRelease # signed release APK; needs keystore.properties, see CONTRIBUTING.md
+./gradlew :app:test            # 单元测试
+./gradlew :app:assembleDebug   # Debug APK
+./gradlew :app:assembleRelease # 签名 Release APK，需要 keystore.properties，见 CONTRIBUTING.md
 ```
 
-The app version has a single source of truth in `gradle.properties` (`app.versionCode`,
-`app.versionName`) and can be overridden per build: `./gradlew assembleRelease -Papp.versionName=0.2.0`.
+版本号以 `gradle.properties` 里的 `app.versionCode` / `app.versionName` 为唯一来源，也可在构建时覆盖：
+`./gradlew assembleRelease -Papp.versionName=0.2.0`。
 
-## Architecture
+## 架构
 
-A single-activity Compose app with a hand-written overlay stack, a repository layer over Room
-and Retrofit, and per-screen ViewModels — deliberately without a DI framework or a navigation
-library. See [docs/architecture.md](docs/architecture.md) for the module map and the
-conventions used in this codebase.
+单 Activity 的 Compose 应用，配手写的覆盖层栈；数据层由 Repository 封装 Room 与 Retrofit，
+各页面各自持有 ViewModel —— 有意不引入 DI 框架与 Navigation 库。模块地图与代码约定见
+[docs/architecture.md](docs/architecture.md)。
 
-## Contributing
+## 参与贡献
 
-Bug reports and pull requests are welcome — please read [CONTRIBUTING.md](CONTRIBUTING.md)
-first. This project follows the [Contributor Covenant](CODE_OF_CONDUCT.md).
+欢迎提交 issue 与 PR，请先阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。本项目遵循
+[贡献者公约](CODE_OF_CONDUCT.md)。
 
-## License
+## 许可
 
-[MIT](LICENSE) © Iwara Manager contributors.
+[MIT](LICENSE) © IwaraM contributors。
 
-Bundled Anime4K shaders are MIT-licensed by their authors; see [NOTICE.md](NOTICE.md) for the
-full list of third-party components.
+打包的 Anime4K 着色器由其作者以 MIT 许可发布；完整的三方组件清单见 [NOTICE.md](NOTICE.md)。
 
-## Acknowledgements
+## 致谢
 
-- [Anime4K](https://github.com/bloc97/Anime4K) by bloc97 for the super-resolution shaders.
-- [AndroidLiquidGlass](https://github.com/Kyant0/AndroidLiquidGlass) by Kyant0 for the
-  backdrop effect used by the frosted-glass bars.
+- [Anime4K](https://github.com/bloc97/Anime4K)（bloc97）—— 超分辨率着色器。
+- [AndroidLiquidGlass](https://github.com/Kyant0/AndroidLiquidGlass)（Kyant0）—— 磨砂玻璃栏所用的背景效果。
