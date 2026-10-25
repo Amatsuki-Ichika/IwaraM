@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Defaults for **new installs** (existing installations keep their saved values): material
+  opacity 78% → 80%, material preset 半透明 (translucent) → 磨砂 (frosted liquid glass), and
+  fullscreen orientation 自动 (follow system) → 智能识别 (pick landscape/portrait from the
+  video's aspect ratio).
+
 ### Added
 
 - Settings → General → 「本地库」 gains a "隐藏未匹配的视频" (hide unmatched videos) switch:
