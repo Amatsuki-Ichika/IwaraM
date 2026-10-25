@@ -1,0 +1,8 @@
+{
+  "$comment": "Word-equivalent ceilings for standing docs. One unit = one Latin word or two CJK characters. These numbers live only here: docs/AGENTS.md states the policy, never the digits. Lower freely with --ratchet; raise only with the reason stated in the PR. Reference docs (CONTRIBUTING, CHANGELOG, README) are deliberately unbudgeted: they are exhaustive by nature.",
+  "budgets": {
+    "AGENTS.md": 680,
+    "docs/AGENTS.md": 720,
+    "docs/architecture.md": 560
+  }
+}
