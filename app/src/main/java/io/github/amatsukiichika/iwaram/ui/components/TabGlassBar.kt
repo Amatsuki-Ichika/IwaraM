@@ -9,7 +9,6 @@ import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import android.os.Build
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -338,17 +337,14 @@ fun TabGlassBar(
                     scaleY = 1f - stretch * 0.6f
                     transformOrigin = TransformOrigin(0.5f, 1f)
                 }
-                // 双层柔光投影：远距主色调柔光 + 近距常规黑。
-                // 浅色下柔影减半 —— 浅色玻璃贴浅底，投影过重会显脏。
+                // 单层黑色柔影：只给"悬浮深度"，不带任何色相 —— 此前的双层主色调柔光，
+                //   环境光分量沿药丸外缘绕一圈，深色主题下是一圈可见的主色光环，
+                //   看起来就像底栏多了一道"外边框"（已按反馈去除）。黑色低透明度
+                //   在深色底上不可见、浅色底上留一点落影，悬浮感还在。
                 .shadow(
-                    14.dp, shape, clip = false,
-                    ambientColor = cs.primary.copy(alpha = if (isLight) 0.10f else 0.18f),
-                    spotColor = cs.primary.copy(alpha = if (isLight) 0.12f else 0.22f)
-                )
-                .shadow(
-                    5.dp, shape, clip = false,
-                    ambientColor = Color.Black.copy(alpha = if (isLight) 0.14f else 0.24f),
-                    spotColor = Color.Black.copy(alpha = if (isLight) 0.16f else 0.28f)
+                    8.dp, shape, clip = false,
+                    ambientColor = Color.Black.copy(alpha = if (isLight) 0.12f else 0.16f),
+                    spotColor = Color.Black.copy(alpha = if (isLight) 0.14f else 0.18f)
                 )
                 .clip(shape)
                 // 液态玻璃 = AndroidLiquidGlass 的 drawBackdrop ——
@@ -490,17 +486,8 @@ fun TabGlassBar(
                     }
                 }
             }
-            // **只在浅色**补一道极淡描边 —— 浅玻璃贴浅底需要一条边界才不"糊成一片"；
-            //   深色下不画（深色下描边会显出"边缘白线"）。
-            //   液态玻璃激活时**不画** —— 玻璃自带折射边界感，再叠一道灰描边会多出灰色边缘线。
-            //   画成最后一个子节点 = 压在图标/文字之上，但 1dp 内缘不会碰到内容。
-            if (isLight && !glassActive) {
-                Box(
-                    Modifier
-                        .matchParentSize()
-                        .border(1.dp, cs.outlineVariant.copy(alpha = 0.5f), shape)
-                )
-            }
+            // 浅色下不再补描边 —— 半透明表面一概不画外圈线（与深色/玻璃档一致），
+            //   边界感由 fill 的不透明度与落影承担（描边在浅玻璃上就是"外边框"，已按反馈去除）。
         }
     }
 }

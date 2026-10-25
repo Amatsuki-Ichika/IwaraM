@@ -12,7 +12,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
@@ -249,13 +248,10 @@ fun ScrollToTopButton(
         dark = !isLight,
         backdropActive = glassActive
     )
-    // 主题自适应配色 —— 浅色主题玻璃=亮雾面 ⇒ 深色图标/浅描边；
-    //   深色主题玻璃=黑雾面 ⇒ 白图标。半透明/关档的黑底路径维持白字不变。
-    val iconTint = if (glassActive && isLight) cs.onSurface.copy(alpha = 0.9f)
+    // 主题自适应配色 —— 浅色主题（玻璃亮雾面 / 半透明亮雾面 / 关档实心 surface）⇒ 深色图标；
+    //   深色主题（黑雾面 / 实心 surface）⇒ 白图标。fill 已全档跟随深浅色，图标同轨。
+    val iconTint = if (isLight) cs.onSurface.copy(alpha = 0.9f)
     else Color.White.copy(alpha = 0.92f)
-    // 描边只在**非玻璃档**画，与底栏同一判据（玻璃激活时不描边）。
-    //   玻璃自带边界感，再叠一圈线就是"外轮廓描边"。半透明/关档保留（浅色下需要一条边界才不糊成一片）。
-    val borderColor = Color.White.copy(alpha = material.edgeHighlight)
     AnimatedVisibility(
         visible = visible,
         modifier = modifier,
@@ -290,8 +286,8 @@ fun ScrollToTopButton(
             )
         Box(
             modifier = baseModifier
-                // 玻璃档不描边（见上面 borderColor 注释）。
-                .then(if (glassActive) Modifier else Modifier.border(1.dp, borderColor, shape))
+                // 不描边 —— 半透明表面一概不画外圈线（与底栏同一口径，已按反馈去除）；
+                //   玻璃自带边界感，非玻璃档靠 fill 与图标对比度即可分清轮廓。
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,

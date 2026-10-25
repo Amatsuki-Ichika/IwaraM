@@ -158,7 +158,9 @@ fun glassMaterialFor(
                 tints = emptyList(), blurRadius = 0.dp, noise = 0f, edgeHighlight = 0.18f
             )
             GlassMode.TRANSLUCENT -> GlassMaterial(
-                fill = Color.Black.copy(alpha = t),
+                // 主题感知（与液态玻璃档同口径）：深色 = 黑雾面（白图标），浅色 = surface 亮雾面
+                //   （深色图标）。此前写死黑罩，浅色主题下回顶按钮是一颗黑圆 —— 已按反馈适配。
+                fill = if (dark) Color.Black.copy(alpha = t) else surface.copy(alpha = t),
                 tints = emptyList(), blurRadius = 0.dp, noise = 0f, edgeHighlight = 0.12f
             )
         }
