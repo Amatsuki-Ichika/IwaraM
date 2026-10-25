@@ -359,6 +359,24 @@ class IwaraRepository(
         _localRating.value = value
     }
 
+    /**
+     * 隐藏未匹配的本地视频：开启后本地库主列表不显示还没匹配到 Iwara id 的条目
+     * （文件名解析不出 id 且未手动指定的）。判据只看 [VideoEntity.iwaraId] 是否为空 ——
+     * 「有 id 但元数据还没拉到」是瞬态（下载后/弱网重试期间），不能算未匹配，否则列表会闪。
+     * 单一真源同 [defaultR18]：StateFlow + prefs 双写。
+     */
+    fun getHideUnmatched(): Boolean = prefs.getBoolean("hide_unmatched", false)
+
+    private val _hideUnmatched = MutableStateFlow(getHideUnmatched())
+
+    /** 「隐藏未匹配的视频」的单一真源。 */
+    val hideUnmatched: StateFlow<Boolean> = _hideUnmatched.asStateFlow()
+
+    fun setHideUnmatched(value: Boolean) {
+        prefs.edit().putBoolean("hide_unmatched", value).apply()
+        _hideUnmatched.value = value
+    }
+
     fun getQualityPref(): String = prefs.getString("iwara_quality", "Source") ?: "Source"
 
     private val _qualityPref = MutableStateFlow(getQualityPref())

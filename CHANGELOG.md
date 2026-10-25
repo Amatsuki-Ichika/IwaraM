@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Settings → General → 「本地库」 gains a "隐藏未匹配的视频" (hide unmatched videos) switch:
+  when on, the library grid hides local videos that never resolved to an Iwara id (filename
+  could not be parsed and none was assigned manually). Videos that have an id but whose metadata
+  has not been fetched yet still show - that state is transient (right after a download or while
+  retrying on a bad network). Hidden entries are counted into the "N hidden" empty-state line.
+  Author buckets and author pages are unaffected.
+
 ### Fixed
 
 - Secondary pages (overlay stack, player, settings and its category pages) stuttered when a
