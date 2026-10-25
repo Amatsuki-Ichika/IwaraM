@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Secondary pages (overlay stack, player, settings and its category pages) stuttered when a
+  swipe-back gesture was released: the exit animation used a fixed 320 ms tween with a
+  zero-initial-slope easing and inherited none of the finger's momentum. Release velocity is now
+  estimated from the back-gesture progress stream, and the exit tween covers only the remaining
+  distance at a duration derived from that velocity with a fast-out easing, so the page keeps
+  gliding at the speed the finger left it at.
+
 - The detail pane's scroll-back-to-top animation when switching to a recommended video never
   actually played: clearing the previous video's recommendations collapsed the list below the
   viewport, so LazyColumn clamped the scroll position straight to 0. The previous video's

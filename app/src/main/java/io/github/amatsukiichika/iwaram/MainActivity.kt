@@ -21,8 +21,10 @@ import androidx.compose.animation.Crossfade
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.animateFloatAsState
@@ -101,6 +103,7 @@ import io.github.amatsukiichika.iwaram.data.thumbnailFileIdFromUrl
 import io.github.amatsukiichika.iwaram.ui.COVER_DIM_ALPHA
 import io.github.amatsukiichika.iwaram.ui.COVER_MOTION_MS
 import io.github.amatsukiichika.iwaram.ui.COVER_SHIFT_DP
+import io.github.amatsukiichika.iwaram.ui.BackMomentum
 import io.github.amatsukiichika.iwaram.ui.LibraryScreen
 import io.github.amatsukiichika.iwaram.ui.LibraryTopBar
 import io.github.amatsukiichika.iwaram.ui.OnlineNetState
@@ -110,6 +113,7 @@ import io.github.amatsukiichika.iwaram.ui.QualityOption
 import io.github.amatsukiichika.iwaram.ui.RelatedVideo
 import io.github.amatsukiichika.iwaram.ui.SettingsScreen
 import io.github.amatsukiichika.iwaram.ui.VideoViewModel
+import io.github.amatsukiichika.iwaram.ui.exitDurationMs
 import io.github.amatsukiichika.iwaram.ui.rememberAdaptivePageShape
 import io.github.amatsukiichika.iwaram.ui.DiagLog
 import io.github.amatsukiichika.iwaram.ui.browse.GlobalFilterSheet
@@ -158,6 +162,7 @@ import io.github.amatsukiichika.iwaram.ui.browse.toggleFollow
 import io.github.amatsukiichika.iwaram.ui.browse.toggleLike
 import io.github.amatsukiichika.iwaram.ui.theme.IwaraTheme
 import io.github.amatsukiichika.iwaram.ui.theme.resolveDarkTheme
+import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 
@@ -549,6 +554,10 @@ class MainActivity : ComponentActivity() {
         // 播放页作为覆盖层叠在主页之上：返回时主页始终在下方，滑出即可露出真实主页内容。
         var showingPlayer by remember { mutableStateOf(false) }
         var showingSettings by remember { mutableStateOf(false) }
+        // 两个二级页各自"手势松手动量"（冻结进度 + 松手速度）：手势松手时由页面回调写入，
+        // 退场动画按"剩余距离 / 速度"换算时长、带动量衔接；开页时清空，非手势关闭读不到就是默认规格。
+        var playerBackMomentum by remember { mutableStateOf<BackMomentum?>(null) }
+        var settingsBackMomentum by remember { mutableStateOf<BackMomentum?>(null) }
         // mpv 试验播放页的独立状态槽（debug 开关下的开发者入口）。日常播放不走这里：
         // 引擎开关下 PlayerScreen 直接以 mpv 引擎打开（单页同细节），本槽只服务「试验页」（自选源）。
         // 全局筛选面板（顶栏刷新键旁入口）的开关：它是 ModalBottomSheet（独立窗口），
@@ -623,6 +632,8 @@ class MainActivity : ComponentActivity() {
         var playerExitPending by remember { mutableStateOf(false) }
         var playerSliding by remember { mutableStateOf(false) }
         val playerMounted = showingPlayer || playerExitPending
+        // 播放页退场动画（下面的 LaunchedEffect）也要用屏宽换算"剩余距离"，声明提到它前面。
+        val screenWidthPx = with(LocalDensity.current) { LocalConfiguration.current.screenWidthDp.dp.toPx() }
         LaunchedEffect(showingPlayer) {
             if (showingPlayer) {
                 // 重新进场：撤销"待摘页"，并把位移补间回 0（打断退场时就是从当前位置接着滑回来）。
@@ -638,7 +649,26 @@ class MainActivity : ComponentActivity() {
             } else if (playerExitPending) {
                 playerSliding = true
                 try {
-                    playerSlide.animateTo(1f, tween(PAGE_SLIDE_MS, easing = FastOutSlowInEasing))
+                    // 手势松手 → 带动量退场：页内跟手位移（backProgress）冻在松手位置，
+                    // 外层滑出只补"可见剩余距离"，时长 = 剩余距离 / 松手速度，缓动用快出慢停的
+                    // LinearOutSlowIn —— FastOutSlowIn 起始斜率为 0，松手瞬间急减速再缓滑，
+                    // 手感就是"顿一下"。非手势关闭（按钮/返回键）没有动量，保持原 320ms 规格。
+                    val momentum = playerBackMomentum
+                    playerBackMomentum = null
+                    val exitSpec: AnimationSpec<Float> =
+                        if (momentum != null && momentum.velocityFrac > 0f && momentum.progress < 1f) {
+                            tween(
+                                exitDurationMs(
+                                    (1f - momentum.progress) * screenWidthPx,
+                                    momentum.velocityFrac * screenWidthPx,
+                                    PAGE_SLIDE_MS
+                                ),
+                                easing = LinearOutSlowInEasing
+                            )
+                        } else {
+                            tween(PAGE_SLIDE_MS, easing = FastOutSlowInEasing)
+                        }
+                    playerSlide.animateTo(1f, exitSpec)
                 } finally {
                     playerSliding = false
                 }
@@ -656,6 +686,8 @@ class MainActivity : ComponentActivity() {
             // 层序号决定绘制顺序，由这里分配；入场"要不要补"由单一时序源的值决定
             //（值停在 1 必然滑入；值已是 0 则零帧不动）。
             playerSeq = nextOverlaySeq()
+            // 上一次手势的退场动量已消费/失效，开新页必须清掉。
+            playerBackMomentum = null
             // **全新打开**（播放页当前没挂着）不沿用上一次会话的相关推荐；
             // 换片（showingPlayer 已 true）绝不在这里清 —— 旧推荐要保留到新推荐到达，
             // 否则详情列表瞬间变矮，"滚回顶部"动画会被 LazyColumn 的位置钳制吃掉（见相关推荐预取处的注释）。
@@ -667,6 +699,7 @@ class MainActivity : ComponentActivity() {
         /** 打开设置页（同上）。 */
         fun openSettings() {
             settingsSeq = nextOverlaySeq()
+            settingsBackMomentum = null
             showingSettings = true
         }
 
@@ -702,7 +735,6 @@ class MainActivity : ComponentActivity() {
             },
             label = "cover"
         )
-        val screenWidthPx = with(LocalDensity.current) { LocalConfiguration.current.screenWidthDp.dp.toPx() }
         val coverShiftPx = with(LocalDensity.current) { COVER_SHIFT_DP.toPx() }
 
         // ---- 底栏真磨砂的背景录制 ----
@@ -1224,7 +1256,25 @@ class MainActivity : ComponentActivity() {
             // 进入只滑不淡：淡入那 200ms 页面是半透明的，会透出底下被让位左移的主内容与黑垫。
             enter = slideInHorizontally(tween(320)) { it },
             // 退场只滑不淡：二级页下面压着"栈底黑垫"+ 压暗层，页面一旦淡出就会透出那块黑。
-            exit = slideOutHorizontally(tween(320)) { it }
+            // 手势松手 → 只补"可见剩余距离"（跟手位移冻结在页内 graphicsLayer，与这里的滑出叠加），
+            // 时长按剩余距离 / 松手速度缩放，缓动 LinearOutSlowIn 快出慢停 —— 消除"松手顿一下"；
+            // 非手势关闭（返回箭头）没有动量，保持原 320ms 规格。
+            exit = run {
+                val m = settingsBackMomentum
+                if (m != null && m.velocityFrac > 0f && m.progress < 1f) {
+                    slideOutHorizontally(
+                        tween(
+                            exitDurationMs(
+                                (1f - m.progress) * screenWidthPx,
+                                m.velocityFrac * screenWidthPx
+                            ),
+                            easing = LinearOutSlowInEasing
+                        )
+                    ) { it - (m.progress * screenWidthPx).roundToInt() }
+                } else {
+                    slideOutHorizontally(tween(320)) { it }
+                }
+            }
         ) {
             SettingsScreen(
                 vm = vm,
@@ -1232,6 +1282,10 @@ class MainActivity : ComponentActivity() {
                 onPickFolder = { folderPicker.launch(null) },
                 onPickDownloadFolder = { downloadFolderPicker.launch(null) },
                 onBackProgress = { settingsGesture = it },
+                // 手势松手动量回传（与播放页同款）：松手 → 退场动画带动量衔接。
+                onBackReleased = { progress, velocity ->
+                    settingsBackMomentum = BackMomentum(progress, velocity)
+                },
                 pageAnimating = !settingsVisible.isIdle,
                 // 被更新的层盖住 → 让位（左移 + 压暗 + 收圆角）；此时让出返回键。
                 covered = settingsCovered,
@@ -1452,6 +1506,10 @@ class MainActivity : ComponentActivity() {
                     onBack = { closePlayer() },
                     // 手势进度回传：拖动中让主内容实时回位（与覆盖层/设置页同一套让位动效）
                     onBackProgress = { playerGesture = it },
+                    // 手势松手动量回传：退场动画按"剩余距离 / 速度"衔接，消除"松手顿一下"。
+                    onBackReleased = { progress, velocity ->
+                        playerBackMomentum = BackMomentum(progress, velocity)
+                    },
                 // 进出场动画状态由单一时序源给出（playerSlide 在跑 = 在动）：
                 // enter/exit 都置 None 后 AnimatedVisibility 恒为 idle，只能读滑动本身。
                 pageAnimating = playerSliding,

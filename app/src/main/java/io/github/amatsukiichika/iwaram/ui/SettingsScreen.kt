@@ -3,6 +3,7 @@ package io.github.amatsukiichika.iwaram.ui
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
@@ -52,6 +53,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import io.github.amatsukiichika.iwaram.ui.browse.coverTargetFor
 import io.github.amatsukiichika.iwaram.ui.components.AppEntryCard
+import kotlin.math.roundToInt
 import kotlinx.coroutines.CancellationException
 
 /**
@@ -92,6 +94,11 @@ fun SettingsScreen(
     onPickDownloadFolder: () -> Unit,
     /** 预测式返回手势进度：拖动中回调 0f..1f，松手/取消回调 null（主界面据此实时让位）。 */
     onBackProgress: (Float?) -> Unit = {},
+    /**
+     * 预测式返回**松手完成**：回调（冻结的跟手进度, 松手速度 进度/秒），在 [onBack] 之前同步调用。
+     * 宿主据此让退场滑出按"剩余距离 / 速度"换算时长、带动量衔接（按钮/返回键关闭不回调）。
+     */
+    onBackReleased: (Float, Float) -> Unit = { _, _ -> },
     /** 进出场动画是否正在播（宿主 visibleState 下发）：动画中圆角可见，静止后收成直角。 */
     pageAnimating: Boolean = false,
     /** 被更新的层盖住 → 与其它二级页一样让位（左移 + 压暗 + 收圆角）。 */
@@ -122,14 +129,19 @@ fun SettingsScreen(
         }.value
     )
     PredictiveBackHandler(enabled = backEnabled) { flow ->
+        // 每次手势一个新实例：对 progress 事件做时间差分，估算松手瞬间的跟手速度。
+        val velocity = BackVelocityTracker()
         try {
             flow.collect { event ->
                 backProgress = event.progress.coerceIn(0f, 1f)
+                velocity.onEvent(backProgress, System.nanoTime())
                 onBackProgress(backProgress)
             }
             // 松手完成：**不复位** backProgress —— 冻结的位移留在原地，
             // 交给外层 AnimatedVisibility 的滑出动画（p×w → (p+1)×w，与二级页/播放页一致）。
+            // 先上报动量（冻结进度 + 松手速度），宿主的退场滑出据此按剩余距离衔接时长。
             onBackProgress(null)
+            onBackReleased(backProgress, velocity.velocity())
             onBack()
         } catch (e: CancellationException) {
             backProgress = 0f
@@ -149,6 +161,9 @@ fun SettingsScreen(
     // 子页返回手势联动：子页拉住返回时主页实时回位（c = 1 − p）+ 变亮，语义与覆盖层栈的
     // gestureCover 一致（复用 [coverTargetFor]：手势中 snap、松手 tween 320ms）。
     var subBackProgress by remember { mutableStateOf<Float?>(null) }
+    // 子页手势松手的动量（冻结进度 + 松手速度）：松手回传后供子页退场滑出按剩余距离衔接；
+    // 打开新分类时清空，非手势关闭读不到就是默认规格。
+    var subBackMomentum by remember { mutableStateOf<BackMomentum?>(null) }
     val mainCover = animateFloatAsState(
         targetValue = coverTargetFor(
             gestureCover = openCategory?.let { 1f - (subBackProgress ?: 0f) },
@@ -217,17 +232,37 @@ fun SettingsScreen(
                     AppEntryCard(
                         title = category.title,
                         icon = category.icon,
-                        onClick = { openCategory = category }
+                        onClick = {
+                            subBackMomentum = null
+                            openCategory = category
+                        }
                     )
                 }
             }
         }
 
         // —— 二级分类子页：整页横滑盖上来（只滑不淡，淡入会透出底页让位的边） ——
+        // 退场规格与外层宿主同款：手势松手 → 只补"可见剩余距离"（子页内冻住的跟手位移与这里叠加），
+        // 时长按剩余距离 / 松手速度缩放、LinearOutSlowIn 快出慢停；非手势关闭保持 320ms。
         AnimatedVisibility(
             visibleState = subVisible,
             enter = slideInHorizontally(tween(320)) { it },
-            exit = slideOutHorizontally(tween(320)) { it }
+            exit = run {
+                val m = subBackMomentum
+                if (m != null && m.velocityFrac > 0f && m.progress < 1f) {
+                    slideOutHorizontally(
+                        tween(
+                            exitDurationMs(
+                                (1f - m.progress) * screenWidthPx,
+                                m.velocityFrac * screenWidthPx
+                            ),
+                            easing = LinearOutSlowInEasing
+                        )
+                    ) { it - (m.progress * screenWidthPx).roundToInt() }
+                } else {
+                    slideOutHorizontally(tween(320)) { it }
+                }
+            }
         ) {
             (openCategory ?: lastCategory)?.let { category ->
                 key(category) {
@@ -242,7 +277,11 @@ fun SettingsScreen(
                         // 只在动画起止两个布尔翻转点重组）。
                         animating = !subVisible.isIdle,
                         // 手势进度上抛 → 主页 mainCover 实时联动回位。
-                        onBackProgress = { subBackProgress = it }
+                        onBackProgress = { subBackProgress = it },
+                        // 手势松手动量上抛 → 子页退场滑出带动量衔接。
+                        onBackReleased = { progress, velocity ->
+                            subBackMomentum = BackMomentum(progress, velocity)
+                        }
                     )
                 }
             }

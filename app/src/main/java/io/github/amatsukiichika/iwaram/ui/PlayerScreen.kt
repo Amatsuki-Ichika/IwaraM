@@ -110,6 +110,12 @@ fun PlayerScreen(
     onBack: () -> Unit,
     /** 预测式返回手势进度：拖动中回调 0f..1f，松手/取消回调 null（主界面据此实时让位）。 */
     onBackProgress: (Float?) -> Unit = {},
+    /**
+     * 预测式返回**松手完成**：回调（冻结的跟手进度, 松手速度 进度/秒），在 [onBack] 之前同步调用。
+     * 宿主据此让退场动画按"剩余距离 / 速度"换算时长、从冻结位置带着动量滑出
+     * （按钮/返回键关闭不会回调，退场走默认规格）。
+     */
+    onBackReleased: (Float, Float) -> Unit = { _, _ -> },
     /** 进出场动画是否正在播（宿主 visibleState 下发）：动画中圆角可见，静止后收成直角。 */
     pageAnimating: Boolean = false,
     onSelectAuthor: (String) -> Unit = {},
@@ -780,16 +786,21 @@ fun PlayerScreen(
     // 块未按回调作 key 重启，宿主下发的 lambda 经 rememberUpdatedState 读最新。
     val currentOnBack by rememberUpdatedState(onBack)
     val currentOnBackProgress by rememberUpdatedState(onBackProgress)
+    val currentOnBackReleased by rememberUpdatedState(onBackReleased)
     PredictiveBackHandler(enabled = !isFullscreen && backEnabled) { flow: Flow<BackEventCompat> ->
+        // 每次手势一个新实例：对 progress 事件做时间差分，估算松手瞬间的跟手速度。
+        val velocity = BackVelocityTracker()
         try {
             flow.collect { ev ->
                 backProgress = ev.progress.coerceIn(0f, 1f)
+                velocity.onEvent(backProgress, System.nanoTime())
                 currentOnBackProgress(backProgress)
             }
-            // 手势完成：直接交给外层 AnimatedVisibility 做滑出动画并关闭播放页。
+            // 手势完成：先上报动量（冻结进度 + 松手速度），再交给外层退场动画（见下）。
             // 不在此处加 animateTo，以避免该挂起点被打断导致 onBack 不执行、状态停留在播放页；
             // 也不复位 backProgress（冻结位移留在原地，从松手位置继续滑出）。
             currentOnBackProgress(null)
+            currentOnBackReleased(backProgress, velocity.velocity())
             currentOnBack()
         } catch (e: CancellationException) {
             // 取消返回：同步复位（普通状态写入，无协程/锁），杜绝与下一次手势争抢造成错乱。
