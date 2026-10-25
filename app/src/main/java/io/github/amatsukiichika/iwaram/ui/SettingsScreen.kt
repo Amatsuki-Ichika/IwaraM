@@ -224,8 +224,8 @@ fun SettingsScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(innerPadding),
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 // 一条目一卡（AppEntryCard，「我的」页同款），大卡内分隔线与行距空白取消。
                 items(SettingsCategory.entries) { category ->

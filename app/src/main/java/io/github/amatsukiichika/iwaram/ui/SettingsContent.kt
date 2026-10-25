@@ -78,7 +78,8 @@ private val QUALITY_OPTIONS = listOf(
  */
 @Composable
 private fun SettingsSection(title: String, content: @Composable ColumnScope.() -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    // 区块标题与卡片组之间 8dp（原 12dp，随设置页整体收紧）。
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(
             text = title,
             style = MaterialTheme.typography.labelLarge,
@@ -184,21 +185,15 @@ private fun AppearanceContent(
         }
     }
     // ---- 半透明材质（原在开发者页，已移入外观页）----
-    // 一根不透明度条 + 一个磨砂方案：底栏玻璃 / 所有角标胶囊 / 回顶按钮统一生效
+    // 先选「材质」档位、再调「材质不透明度」：档位决定材质系统开不开，不透明度只在开着时有意义，
+    // 从上往下正好是"先定性、后定量"。底栏玻璃 / 所有角标胶囊 / 回顶按钮统一生效
     //（实现在 ui/components/GlassMaterial.kt，一处定义）。
-    // 滑条右侧有实时百分比显示，副标题不再解释"0% = 完全透明"；作用范围保留列举。
-    BarTuningCard(
-        title = "材质不透明度",
-        subtitle = "底栏 · 顶栏 · 悬浮条 · 回顶按钮",
-        value = vm.glassOpacityFlow.collectAsStateWithLifecycle().value,
-        onValueChange = vm::setGlassOpacity
-    )
     val glassMode = GlassMode.of(vm.glassModeFlow.collectAsStateWithLifecycle().value)
     // 当前档位由下方 chips 高亮表达，副标题不再复述档位名。
     AppEntryCard(
         title = "材质",
-        info = "「关」= 实心不透明，材质系统整体关闭；「透明」= 半透明色罩、无模糊（零成本，默认）；" +
-            "「磨砂」= 真实背景模糊 + 边缘折射（AndroidLiquidGlass，需要 Android 12+，折射部分 13+）。",
+        info = "「关」= 实心不透明，材质系统整体关闭；「透明」= 半透明色罩、无模糊（零成本）；" +
+            "「磨砂」= 真实背景模糊 + 边缘折射（AndroidLiquidGlass，需要 Android 12+，折射部分 13+，默认）。",
         onInfo = onInfo
     ) {
         Box(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
@@ -209,6 +204,13 @@ private fun AppearanceContent(
             )
         }
     }
+    // 滑条右侧有实时百分比显示，副标题不再解释"0% = 完全透明"；作用范围保留列举。
+    BarTuningCard(
+        title = "材质不透明度",
+        subtitle = "底栏 · 顶栏 · 悬浮条 · 回顶按钮",
+        value = vm.glassOpacityFlow.collectAsStateWithLifecycle().value,
+        onValueChange = vm::setGlassOpacity
+    )
 }
 
 @Composable
