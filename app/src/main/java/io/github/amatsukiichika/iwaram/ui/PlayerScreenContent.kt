@@ -2,6 +2,8 @@ package io.github.amatsukiichika.iwaram.ui
 
 import android.content.Context
 import androidx.annotation.OptIn
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -18,6 +20,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -25,6 +28,7 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
+
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -63,7 +67,11 @@ internal fun PlayerContent(
     controlsVisible: Boolean,
     isPlaying: Boolean,
     isSeeking: Boolean,
-    isBuffering: Boolean,
+    /** 换片/装片空窗的加载提示（转圈）开关与文案 —— 条件在 PlayerScreen 算好。 */
+    showSwitchLoading: Boolean,
+    /** 黑场垫底开关：仅换片空窗压黑画面；播放中网络卡顿只转圈。 */
+    switchBlackout: Boolean,
+    switchLoadingText: String,
     durationMs: Long,
     positionMs: () -> Long,
     scrubTargetMs: () -> Long?,
@@ -165,6 +173,18 @@ internal fun PlayerContent(
                 )
             }
 
+            // 换片加载提示的两条 alpha（转圈层 / 黑场垫底层，180ms 淡入淡出）。
+            val loadingAlpha by animateFloatAsState(
+                targetValue = if (showSwitchLoading) 1f else 0f,
+                animationSpec = tween(180),
+                label = "switchLoadingAlpha"
+            )
+            val blackoutAlpha by animateFloatAsState(
+                targetValue = if (switchBlackout) 1f else 0f,
+                animationSpec = tween(180),
+                label = "switchBlackoutAlpha"
+            )
+
             VideoSurfaceBox(
                 player = player,
                 currentPlayer = currentPlayer,
@@ -177,20 +197,28 @@ internal fun PlayerContent(
                 onVideoDrag = onVideoDrag,
                 onVideoDragEnd = onVideoDragEnd
             ) {
-                // 在线视频地址解析中：中央加载提示。
-                // 解析失败时（resolveError 非空）不再转圈，改由下面的错误面板接手，
-                // 否则会一直显示"正在获取播放地址…"。
-                if (video.localUri.isBlank() && online?.mediaUrl == null && playError == null && resolveError == null) {
-                    CenterLoadingOverlay("正在获取播放地址…", modifier = Modifier.align(Alignment.Center))
-                }
-                // 在线视频拖动进度条之后的加载给同款加载动画：
-                // 外观与上面"进入时"的完全一致（同一个 CircularProgressIndicator），
-                // 只是文案换成"正在加载…"（此时地址已就绪，是在重新定位/缓冲）。
-                // `!isSeeking`：拖动过程中由居中时间提示负责，松手后才显示这个转圈。
-                if (video.localUri.isBlank() && online?.mediaUrl != null &&
-                    playError == null && isBuffering && !isSeeking
-                ) {
-                    CenterLoadingOverlay("正在加载…", modifier = Modifier.align(Alignment.Center))
+                // 换片/装片空窗：黑场 + 中央加载提示（本地/在线统一，条件在 PlayerScreen 算好）。
+                //   黑底整块淡入淡出 —— 淡出与新片首帧衔接成"渐显"，本地换片不再冻在旧片最后一帧；
+                //   解析失败（resolveError）与播放错误（playError）面板在屏时不叠加。
+                //   黑场垫底（switchBlackout）单独一层：播放中网络卡顿只转圈、不压黑画面。
+                //   alpha 动画读在绘制相位（graphicsLayer），逐帧只重绘不重组。
+                //   不用 AnimatedVisibility：overlay 槽位处于 BoxScope 嵌外层 ColumnScope 的
+                //   双接收者环境，扩展重载会被误解析（编译器报"implicit receiver"）。
+                if (loadingAlpha > 0.01f) {
+                    Box(Modifier.fillMaxSize().graphicsLayer { alpha = loadingAlpha }) {
+                        if (blackoutAlpha > 0.01f) {
+                            Box(
+                                Modifier
+                                    .fillMaxSize()
+                                    .graphicsLayer { alpha = blackoutAlpha }
+                                    .background(Color.Black)
+                            )
+                        }
+                        CenterLoadingOverlay(
+                            switchLoadingText,
+                            modifier = Modifier.align(Alignment.Center)
+                        )
+                    }
                 }
                 // 在线地址解析失败（断连 / 私密 403 / 外嵌）→ 在页内给出说明 + 「重试 / 退出」，
                 // 绝不自动关页。私密与外嵌这两类大概率打不开，文案里直接点明，

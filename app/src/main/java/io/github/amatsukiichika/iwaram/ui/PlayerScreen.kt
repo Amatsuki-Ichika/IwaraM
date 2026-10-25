@@ -197,8 +197,10 @@ fun PlayerScreen(
     var durationMs by remember { mutableLongStateOf(0L) }
     // 就地换片（点「相关推荐」）时视频实体会换 —— 清掉上一片的进度/时长，
     //   免得换片瞬间进度条残留旧值（装片后 400ms 轮询会立刻刷回真值）。
-    //   按 localUri 作 key：SR 换模型等重建（同片）不触发，换片才触发。
-    LaunchedEffect(video.localUri) {
+    //   按「视频身份」作 key（iwaraId + localUri，与观看历史同口径）：在线互切时两侧
+    //   localUri 都是 ""，只看 localUri 永远不触发 → 新片会从旧片的进度起播
+    //   （超过新片时长直接 EOS）。同片换清晰度/切模型不触发。
+    LaunchedEffect(video.iwaraId, video.localUri) {
         positionMs = 0L
         durationMs = 0L
     }
@@ -296,8 +298,11 @@ fun PlayerScreen(
     // 本地视频清晰度标签的依据：播放器上报的分辨率高度（在线视频用 currentQuality）。
     var videoHeight by remember { mutableStateOf<Int?>(null) }
     var videoWidth by remember { mutableStateOf<Int?>(null) }
-    // 首帧是否已渲染。本地文件分辨率的读取顺延到它之后（见下面的 LaunchedEffect）。
-    var firstFrameSeen by remember(video.localUri) { mutableStateOf(false) }
+    // 首帧是否已渲染（当前代实例）。本地文件分辨率的读取顺延到它之后（见下面的 LaunchedEffect）。
+    //   按 playerEpoch 作 key：任何换代（换片/换清晰度/切模型/错误恢复）都归零 ——
+    //   换片加载提示要靠它区分"新片还没出首帧"与"播放中网络卡顿"；在线互切时
+    //   localUri 不变，旧 key 清不掉，新片缓冲期会没有转圈。
+    var firstFrameSeen by remember(playerEpoch) { mutableStateOf(false) }
     // 播放源统一入口：本地取 localUri，在线取后台解析出的 mediaUrl；
     // 键变化（含重试时先清空再赋值）即重新装片，本地/在线只有这一条装片路径。
     val mediaUrl = video.localUri.ifBlank { online?.mediaUrl.orEmpty() }
@@ -318,6 +323,29 @@ fun PlayerScreen(
     // 续播起点同样经 rememberUpdatedState 读 —— 装片 effect 未把它列入
     //   key，lambda 捕获的是组合那刻的值（本页每次打开都新建组合，实际不会命中，但保持一致）。
     val currentStartPositionMs by rememberUpdatedState(startPositionMs)
+    // 当前实例装着的片属于哪个视频（watchHistoryKey 口径；按 playerEpoch 归零）。
+    //   换代前用它判断"是不是同一部片"：同片换代（换清晰度/重试重装/切模型/错误恢复）
+    //   要精确续播；换了视频（推荐互切）则从续播起点（通常 0）起播。
+    var preparedVideoKey by remember(playerEpoch) { mutableStateOf<String?>(null) }
+    // 同片换代置 true，装片 effect 消费后清零（见装片 effect 的 resumePos 决策）。
+    var resumeOnRebuild by remember { mutableStateOf(false) }
+
+    // 换代重建的统一出口：同片则捕获旧实例此刻的进度/时长 → 记下播放状态 → playerEpoch++。
+    //   换片重建绝不热替换特效、绝不在旧实例上重装片 —— media3 1.4.1 特效管线"运行中折腾"
+    //   的三条死路（热替换→1000 dropFrame 空队列；热替换+重装→1003 detach 超时；
+    //   换特效+seek→flush 死等 #1535）全部由此绕开。旧实例在下一帧组合时释放。
+    fun prepareRebuild(reason: String) {
+        // 只有"装的还是同一部片"才捕获进度：换片时页面进度属于旧片，
+        //   由视频身份 effect 清零，装片走续播起点。watchKey 经组合刷新读最新视频。
+        if (preparedVideoKey != null && preparedVideoKey == watchKey) {
+            positionMs = player.currentPosition.coerceAtLeast(0L)
+            player.duration.takeIf { it > 0 }?.let { durationMs = it }
+            resumeOnRebuild = true
+        }
+        playOnNextPrepare = player.isPlaying
+        DiagLog.log(TAG, "$reason → 重建播放器实例（第 ${playerEpoch + 1} 代）")
+        playerEpoch++
+    }
     // 播放诊断面板（右上角 ⋮ 打开）。
     var showDiagnostics by remember { mutableStateOf(false) }
 
@@ -432,18 +460,20 @@ fun PlayerScreen(
                     recoverAtCurrentPosition(player, currentMediaUrl)
                     return
                 }
-                // 切模型重装片的兜底 —— media3 1.4.1 在热替换特效后
-                //   `VideoFrameRenderControl.dropFrame` 会对空帧队列 remove
-                //   （NoSuchElementException → ERROR 1000）。
-                //   装片路径已在切模型时改为重装片；这里兜住残余路径：从当前进度
-                //   重装片即可恢复（与 7001/1003 同策略），连发 2 次仍失败才落错误面板。
+                // 帧队列错位（1000 + NoSuchElementException）的兜底 —— media3 1.4.1 特效
+                //   管线在 flush/换片/teardown 时机错位时，`VideoFrameRenderControl.dropFrame`
+                //   会对空帧队列 remove（上游 androidx/media#1506 家族）。
+                //   不再同实例重装片：坏掉的是特效管线的内部状态，re-prepare 不重建管线，
+                //   SR 开着必然复发（0.1.0 的"重装片第1次→第2次→错误面板"循环就是这么来的）。
+                //   改走换代重建 —— 同片换代，进度经 prepareRebuild 的 resumeOnRebuild 通路
+                //   精确续播；连发 2 次仍失败才落错误面板（防死循环）。
                 if (error.errorCode == PlaybackException.ERROR_CODE_UNSPECIFIED &&
                     chainMsg.contains("NoSuchElementException") && modelRetries < 2
                 ) {
                     modelRetries++
-                    DiagLog.log(TAG, "1000 dropFrame 队列错位 → 从当前进度重装片（第 $modelRetries 次）")
+                    DiagLog.log(TAG, "1000 dropFrame 队列错位 → 重建播放器实例恢复（第 $modelRetries 次）")
                     playError = null
-                    recoverAtCurrentPosition(player, currentMediaUrl)
+                    prepareRebuild("1000 dropFrame 队列错位恢复")
                     return
                 }
                 // 解包 HTTP 层异常得到服务器状态码（如 403），便于精确定位；
@@ -475,47 +505,53 @@ fun PlayerScreen(
     // media3 官方文档明确写了两条 ——
     //   ① `setVideoEffects` 必须在**首次 prepare 之前**至少调一次才会建立特效管线；
     //   ② 管线建立后 "effects can be changed during playback by subsequent calls"。
-    //   所以切 SR **不需要重装片**。若在 SR 变化时连同 `setMediaItem + prepare` 一起跑，
-    //   在线源每次都要重新联网缓冲 → 黑屏（本地是文件、几乎瞬时，所以只有在线看得出来）。
-    //   因此两者拆开：SR 变化只换特效（**不 seek**，见下方说明）；只有播放源变了才重装片。
+    //   但 ②在 1.4.1 实测不可依赖（运行中折腾管线 = 下面三条死路），所以本工程一律走 ①：
+    //   特效只在**全新实例**上、prepare 前建立；任何 media 变化都走换代重建。
     LaunchedEffect(mediaUrl, srEnabled, srModel, playerEpoch) {
         // 「切模型经常性卡死」的根因（上游 issue #1535 / #1139）：
         //   在**换特效之后立刻 `seekTo(currentPosition)`** 去"强制重绘一帧"时，seek 会触发
         //   `DefaultVideoFrameProcessor.flush()`：flush 期间 SurfaceTexture 的 onFrameAvailable 回调
         //   会被吞掉 → 队列里那帧永远不被消费 → flush 等的 latch **永不归零** → 帧处理线程干等，
         //   播放**永久卡死**（不抛错、不出错面板，就是不动）。上游复现条件正是"setVideoEffects +
-        //   多次 seek"，Android 14 上必现。
-        //   ⇒ 换特效**绝不 seek**：media3 官方明确"管线建立后 effects 可在播放中随时更换"，
-        //     新特效从**下一帧**起自然生效（播放中 ≤1 帧，肉眼无感）。
+        //   多次 seek"，Android 14 上必现。⇒ 换特效**绝不 seek**，换代后新特效随首次 prepare 建立。
         //
-        // 分支顺序重排 —— **绝不在已活的旧实例上热替换管线**。
-        //   若在同片换档时先对旧实例 setVideoEffects、再 epoch++ 重建：那次热替换白建一条
-        //   渲染管线，且正是 1000/1003 的"已活管线运行中折腾"路径。现在同片换档
-        //   直接重建；本 effect 因 playerEpoch 变化重跑，在新实例上走下面的标准装片分支
-        //   （特效在**首次 prepare 前**建立 = media3 官方标准路径）。
-        //   地址还没解析出来时也不预建管线 —— 免得 URL 到达后再白重建一次（在线首播少一次管线构建）。
+        // 分支总纲 —— **绝不在已活的旧实例上折腾管线**：
+        //   ① 热替换特效 → 1000 dropFrame 空队列；
+        //   ② 热替换 + 重装片 → 1003 detach 超时 + 黑屏无报错；
+        //   ③ 换特效 + seek → flush 死等（#1535）。
+        //   任何"要换片/换特效，但实例上还装着上一片"的情况一律走 [prepareRebuild] 换代
+        //   （旧实例释放 = 黑场过渡的画面来源）；只有全新实例才走到下面的标准装片分支。
+        // 本实例上是否还装着上一片（活管线）。preparedUrl 按 playerEpoch 归零 —— 换代即视为全新。
+        val hasLiveMedia = preparedUrl != null
+
         if (mediaUrl.isBlank()) {
-            preparedUrl = null
-            // pipelineFailed 时保留"SR 自动停用"提醒，其余残留状态清零。
-            if (!srEnabled && !SuperResStatus.pipelineFailed) SuperResStatus.reset()
+            // 地址还没解析出来（在线首装前 / 换片瞬间 onlinePlayUrl 先清空再后台解析）。
+            if (hasLiveMedia) {
+                // 换片瞬间：旧片还装在当前实例上 → 立即换代释放，杜绝"新地址解析出来后
+                //   装进还带着旧特效管线的实例"这条 1000 路径。同片地址重试（过期自动
+                //   重解析）也走这里，按"同片"捕获进度续播。
+                prepareRebuild("换片待解析，旧实例释放")
+            } else {
+                preparedUrl = null
+                // pipelineFailed 时保留"SR 自动停用"提醒，其余残留状态清零。
+                if (!srEnabled && !SuperResStatus.pipelineFailed) SuperResStatus.reset()
+            }
             return@LaunchedEffect
         }
         val isMediaChanged = preparedUrl != mediaUrl
         if (!isMediaChanged) {
-            // 切 SR / 模型 = **重建整个播放器实例**（playerEpoch++）。
-            //   本 effect 因 key 变化重跑：preparedUrl 按 epoch 归零 ⇒ 走下面正常装片分支
+            // 同片切 SR / 模型 = **重建整个播放器实例**（playerEpoch++）。
+            //   本 effect 因 key 变化重跑：preparedUrl 按 epoch 归零 ⇒ 走下面标准装片分支
             //   （新实例上特效在**首次 prepare 前**建立 = media3 官方标准路径）。
-            //   为什么必须重建：media3 1.4.1 的特效管线"运行中折腾"三条路都有问题——
-            //   ① 热替换 → 1000 dropFrame 空队列；
-            //   ② 热替换 + 重装片 → 1003 detach 超时 + 黑屏无报错；
-            //   ③ 换特效 + seek → flush 死等（#1535）。
-            //   三条路都是"已活管线的状态 bug"；全新实例一并绕开。
-            //   代价：切模型 = 一次重建（本地近瞬时、在线重缓冲一次），进度经 positionMs 状态保住。
+            //   代价：切模型 = 一次重建（本地近瞬时、在线重缓冲一次），进度经 prepareRebuild 保住。
             //   同片换档把连续点击折叠成一次重建：delay 会被下一次按键取消 ⇒ 天然防抖。
             delay(200)
-            DiagLog.log(TAG, "切模型 sr=$srEnabled/$srModel → 重建播放器实例（第 ${playerEpoch + 1} 代）")
-            playOnNextPrepare = player.isPlaying
-            playerEpoch++
+            prepareRebuild("切模型 sr=$srEnabled/$srModel")
+            return@LaunchedEffect
+        }
+        if (hasLiveMedia) {
+            // 同一实例上换地址（本地换本地 / 换清晰度 / 自动重试重装）→ 换代重建，不热替换。
+            prepareRebuild("换片")
             return@LaunchedEffect
         }
         // 管线替换失败也绝不把异常抛进组合（那会连带整页 UI 一起挂）：降级记录 + 原因进诊断面板。
@@ -533,6 +569,7 @@ fun PlayerScreen(
         // 重新打开 SR（buildEffects 会 reset）或换视频时才真正清零。
         if (!srEnabled && !SuperResStatus.pipelineFailed) SuperResStatus.reset()
         preparedUrl = mediaUrl
+        preparedVideoKey = watchKey
         playError = null
         autoRetried = false
         modelRetries = 0
@@ -541,9 +578,12 @@ fun PlayerScreen(
         // 换片/换清晰度时连超分的实测分辨率一起清掉 —— 否则诊断面板会继续显示
         // 上一部视频的"源分辨率"，看起来就像"分辨率识别错了"。
         SuperResStatus.reset()
-        // 换清晰度/自动重试重装片时保住当前进度；**首装**用观看历史的续播起点
-        // （从历史点开时 startPositionMs 非 0；正常入口恒 0）。
-        val resumePos = if (durationMs > 0) positionMs else currentStartPositionMs
+        // 续播决策：同片换代（换清晰度/重试重装/切模型/错误恢复）→ prepareRebuild 已捕获
+        //   进度，精确续播；换了视频 → 从续播起点起播（推荐切换 = 0；从历史点开 = 历史进度）。
+        //   页面 positionMs/durationMs 不能当判据：400ms 轮询/事件写入与视频身份切换存在
+        //   竞态，换片瞬间可能残留旧片的值 —— 它们只用于进度条显示，不用于装片决策。
+        val resumePos = if (resumeOnRebuild && durationMs > 0) positionMs else currentStartPositionMs
+        resumeOnRebuild = false
         if (resumePos > 0) {
             player.setMediaItem(MediaItem.fromUri(Uri.parse(mediaUrl)), resumePos)
         } else {
@@ -758,6 +798,18 @@ fun PlayerScreen(
         }
     }
 
+    // 换片/装片空窗的统一加载提示（本地/在线一致，条件在此算好、UI 只管画）：
+    //   转圈覆盖三种情况 —— 地址解析中（在线）、地址已到但还没装进当前实例（换代空窗）、
+    //   缓冲中（含播放中网络卡顿，老行为）。拖动 seek 时由居中时间提示负责，不叠加；
+    //   错误面板（playError/resolveError）在屏时也不叠加。
+    val showSwitchLoading = playError == null && resolveError == null && !isSeeking &&
+        (mediaUrl.isBlank() || preparedUrl != mediaUrl || isBuffering)
+    // 黑场垫底只跟"换片空窗"走：解析中 / 换代空窗 / 已装片但还没出过首帧。
+    //   播放中的网络卡顿只转圈、不压黑画面（画面保持，老行为不变）。
+    val switchBlackout = showSwitchLoading &&
+        (mediaUrl.isBlank() || preparedUrl != mediaUrl || !firstFrameSeen)
+    val switchLoadingText = if (mediaUrl.isBlank()) "正在获取播放地址…" else "正在加载…"
+
     PlayerContent(
         player = player,
         currentPlayer = { currentPlayer },
@@ -775,7 +827,9 @@ fun PlayerScreen(
         controlsVisible = controlsVisible,
         isPlaying = isPlaying,
         isSeeking = isSeeking,
-        isBuffering = isBuffering,
+        showSwitchLoading = showSwitchLoading,
+        switchBlackout = switchBlackout,
+        switchLoadingText = switchLoadingText,
         durationMs = durationMs,
         positionMs = { positionMs },
         scrubTargetMs = { scrubTargetMs },
