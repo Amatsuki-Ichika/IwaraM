@@ -103,7 +103,10 @@ internal fun videoSection(v: VideoEntity, sortMode: SortMode): String = when (so
     SortMode.NAME_ASC, SortMode.NAME_DESC -> nameSection(v.title)
     SortMode.COUNT_ASC, SortMode.COUNT_DESC -> countTier(v.viewCount ?: 0)
     SortMode.NEWEST, SortMode.OLDEST -> v.createdAt?.let(::monthLabel) ?: "未知"
-    SortMode.ADDED_NEW, SortMode.ADDED_OLD -> dayLabel(v.addedAt)
+    // 下载时间排序按天分节，取值键与 VideoSorter 的比较器同源：
+    // 文件修改日期（0 = 未知时退回入库时刻），否则分节会与排序键错位。
+    SortMode.ADDED_NEW, SortMode.ADDED_OLD ->
+        dayLabel(if (v.fileModifiedAt > 0L) v.fileModifiedAt else v.addedAt)
 }
 
 /** 作者/文件夹分组：数量排序→档位，其余（名称、时间均回退为名称）→首字母。 */

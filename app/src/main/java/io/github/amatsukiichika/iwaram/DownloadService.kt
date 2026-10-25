@@ -563,6 +563,8 @@ class DownloadService : Service() {
                 fileName = doc.name ?: job.fileName,
                 iwaraId = existingRow.iwaraId?.takeIf { it.isNotBlank() } ?: job.videoId,
                 localThumbnailPath = existingRow.localThumbnailPath ?: repo.generateLocalThumbnail(doc.uri),
+                // 文件刚落盘，刷新修改日期（也顺带把旧数据的 0 回填成真值）。
+                fileModifiedAt = doc.lastModified().coerceAtLeast(0L),
                 // 强制重拉一次元数据（刚下完，服务端信息最全）。
                 metaFetched = false
             )
@@ -584,7 +586,9 @@ class DownloadService : Service() {
                 relPath = null,
                 tagsCsv = null,
                 metaFetched = false,
-                addedAt = System.currentTimeMillis()
+                addedAt = System.currentTimeMillis(),
+                // 文件修改日期 = "下载时间"排序的排序键（provider 不上报时为 0，排序垫底）。
+                fileModifiedAt = doc.lastModified().coerceAtLeast(0L)
             )
         }
         dao.upsert(entity)

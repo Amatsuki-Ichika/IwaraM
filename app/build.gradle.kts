@@ -56,6 +56,18 @@ android {
         }
     }
 
+    testOptions {
+        unitTests.all {
+            // Robolectric registers Conscrypt (OpenSSL) as the JVM-wide JCA provider by default.
+            // After any Robolectric class has run, the first JCE jar verification in the same JVM
+            // (javax.crypto.JarVerifier) fails with "ASN.1 DIGEST_AND_KEY_TYPE_NOT_SUPPORTED",
+            // so crypto tests like TokenCryptoTest pass or fail depending on class order.
+            // The app never uses Conscrypt (Android devices ship their own provider), so turn it
+            // off to make the suite order-independent.
+            it.systemProperty("robolectric.conscryptMode", "OFF")
+        }
+    }
+
     signingConfigs {
         create("release") {
             if (keystorePropertiesFile.exists()) {

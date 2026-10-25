@@ -12,7 +12,8 @@ class VideoSorterTest {
         title: String = uri,
         createdAt: Long? = null,
         addedAt: Long = 0L,
-        viewCount: Int? = null
+        viewCount: Int? = null,
+        fileModifiedAt: Long = 0L
     ) = VideoEntity(
         localUri = uri,
         fileName = "$uri.mp4",
@@ -30,7 +31,8 @@ class VideoSorterTest {
         relPath = null,
         tagsCsv = null,
         metaFetched = true,
-        addedAt = addedAt
+        addedAt = addedAt,
+        fileModifiedAt = fileModifiedAt
     )
 
     private val a = video("a", title = "beta", createdAt = 100L, addedAt = 300L, viewCount = 50)
@@ -54,6 +56,39 @@ class VideoSorterTest {
 
     @Test
     fun `added old sorts by download time ascending`() {
+        assertEquals(listOf(b, c, a), VideoSorter.sortVideos(listOf(a, c, b), SortMode.ADDED_OLD))
+    }
+
+    // 「下载时间 = 文件修改日期」的两段式比较器回归：取得到修改日期的行按其排，
+    // 取不到（0，未匹配/SAF provider 不上报）的**恒垫底**、组内退回 addedAt 同方向排。
+    // 未匹配视频（mtime=0）若被排到最顶部（单键升序置顶）即为回归。
+    private val m1 = video("m1", fileModifiedAt = 500L, addedAt = 1L)
+    private val m2 = video("m2", fileModifiedAt = 300L, addedAt = 999L)
+    private val u1 = video("u1", fileModifiedAt = 0L, addedAt = 10_000L)
+    private val u2 = video("u2", fileModifiedAt = 0L, addedAt = 20L)
+
+    @Test
+    fun `added new sorts by file mtime and keeps unknown mtime last`() {
+        // mtime 优先于 addedAt（m1 的 addedAt 最小却最新）；未知组内按 addedAt 降序。
+        assertEquals(
+            listOf(m1, m2, u1, u2),
+            VideoSorter.sortVideos(listOf(u1, m2, u2, m1), SortMode.ADDED_NEW)
+        )
+    }
+
+    @Test
+    fun `added old sorts by file mtime ascending and keeps unknown mtime last`() {
+        // 已知组按 mtime 升序（m2 < m1）；未知组垫底、按 addedAt 升序（u2 < u1）。
+        assertEquals(
+            listOf(m2, m1, u2, u1),
+            VideoSorter.sortVideos(listOf(u1, m2, u2, m1), SortMode.ADDED_OLD)
+        )
+    }
+
+    @Test
+    fun `added sorts fall back to addedAt when no mtime known`() {
+        // 三条都没有修改日期 → 完全退化为旧行为（按 addedAt）。
+        assertEquals(listOf(a, c, b), VideoSorter.sortVideos(listOf(b, c, a), SortMode.ADDED_NEW))
         assertEquals(listOf(b, c, a), VideoSorter.sortVideos(listOf(a, c, b), SortMode.ADDED_OLD))
     }
 

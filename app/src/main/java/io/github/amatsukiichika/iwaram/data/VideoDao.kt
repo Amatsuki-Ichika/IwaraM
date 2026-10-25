@@ -8,11 +8,12 @@ import androidx.room.Query
 import androidx.room.Transaction
 import kotlinx.coroutines.flow.Flow
 
-/** videos 表的最小投影（导入判重 / 老条目补 ID 用）。 */
+/** videos 表的最小投影（导入判重 / 老条目补 ID / 文件修改日期回填用）。 */
 data class VideoRefRow(
     val localUri: String,
     val iwaraId: String?,
-    val fileName: String
+    val fileName: String,
+    val fileModifiedAt: Long
 )
 
 @Dao
@@ -45,10 +46,10 @@ interface VideoDao {
     suspend fun getAllUris(): List<String>
 
     /**
-     * 导入判重 + 老条目补 ID 只需要这三个字段 —— 不必把整行
+     * 导入判重 + 老条目补 ID + 修改日期回填只需要这四个字段 —— 不必把整行
      * （含缩略图路径、tagsCsv）都读出来。
      */
-    @Query("SELECT localUri, iwaraId, fileName FROM videos")
+    @Query("SELECT localUri, iwaraId, fileName, fileModifiedAt FROM videos")
     suspend fun getAllRefs(): List<VideoRefRow>
 
     /**
@@ -57,6 +58,19 @@ interface VideoDao {
      */
     @Query("UPDATE videos SET iwaraId = :iwaraId, metaFetched = 0 WHERE localUri = :localUri")
     suspend fun setIwaraId(localUri: String, iwaraId: String)
+
+    /** 回填单个条目的文件修改日期（值不变时不调用 —— 见扫描循环的判等跳过）。 */
+    @Query("UPDATE videos SET fileModifiedAt = :mtime WHERE localUri = :localUri")
+    suspend fun setFileModifiedAt(localUri: String, mtime: Long)
+
+    /**
+     * 批量回填文件修改日期 —— 单个事务一次提交，Room 只发**一次**失效通知
+     * （旧库首扫回填可达千行，逐行 UPDATE 会让 observeAll 重发射上千次）。
+     */
+    @Transaction
+    suspend fun setFileModifiedAtBatch(items: List<Pair<String, Long>>) {
+        for ((uri, mtime) in items) setFileModifiedAt(uri, mtime)
+    }
 
     @Query("SELECT * FROM videos WHERE iwaraId = :iwaraId LIMIT 1")
     suspend fun byIwaraId(iwaraId: String): VideoEntity?

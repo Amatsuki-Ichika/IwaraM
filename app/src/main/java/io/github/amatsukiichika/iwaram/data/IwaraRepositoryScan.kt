@@ -55,6 +55,9 @@ suspend fun IwaraRepository.importFolder(treeUri: Uri, onProgress: (done: Int, t
                 }
                 batch.clear()
             }
+            // 旧数据回填「文件修改日期」的待写列表（fileModifiedAt == 0 的已入库行）。
+            //   攒批最后用一个事务提交 —— 逐行 UPDATE 会让 observeAll 重发射上千次。
+            val mtimeBackfill = ArrayList<Pair<String, Long>>()
             for ((f, rel) in files) {
                 val name = f.name ?: continue
                 val uri = f.uri.toString()
@@ -83,26 +86,39 @@ suspend fun IwaraRepository.importFolder(treeUri: Uri, onProgress: (done: Int, t
                         relPath = rel.ifBlank { null },
                         tagsCsv = null,
                         metaFetched = false,
-                        addedAt = System.currentTimeMillis()
+                        addedAt = System.currentTimeMillis(),
+                        // 新文件取文件修改日期 —— "下载时间"排序的排序键
+                        //   （部分 provider 返回 0 = 未知，排序中垫底、组内退回 addedAt）。
+                        fileModifiedAt = f.lastModified().coerceAtLeast(0L)
                     )
                     batch.add(local to id)
                     if (batch.size >= importBatchSize) flushBatch()
-                } else if (row.iwaraId.isNullOrBlank()) {
-                    // 老条目补救：更早的解析器要求 ID 必须含数字，纯字母 ID 全被拒 ⇒ 这些文件早已入库、
-                    //   iwaraId 为 null、metaFetched=false。而导入判重是按 URI 命中的，
-                    //   所以**只修解析器、重扫一遍也不会重新解析它们**。
-                    //   这里对"已存在但没 ID"的条目就地补一次解析 ⇒ 重扫一次即可，
-                    //   历史数据自动修复，不需要删库重来。
-                    parseIwaraId(row.fileName)?.let { fixedId ->
-                        dao.setIwaraId(uri, fixedId)
-                        // 重新读出完整实体（upsert 需要整行），再补元数据。
-                        dao.byUri(uri)?.let { fetchAndApplyMetadata(it) }
+                } else {
+                    // 已入库行的修改日期一次性回填（旧数据全是 0）。已有值的不再重读 ——
+                    //   省一次每文件 SAF binder 往返，稳态重扫零额外成本（代价：文件被原地
+                    //   覆盖后修改日期不刷新；下载完成路径会刷新，覆盖下载走不到这里）。
+                    if (row.fileModifiedAt == 0L) {
+                        val mtime = f.lastModified()
+                        if (mtime > 0) mtimeBackfill.add(uri to mtime)
+                    }
+                    if (row.iwaraId.isNullOrBlank()) {
+                        // 老条目补救：更早的解析器要求 ID 必须含数字，纯字母 ID 全被拒 ⇒ 这些文件早已入库、
+                        //   iwaraId 为 null、metaFetched=false。而导入判重是按 URI 命中的，
+                        //   所以**只修解析器、重扫一遍也不会重新解析它们**。
+                        //   这里对"已存在但没 ID"的条目就地补一次解析 ⇒ 重扫一次即可，
+                        //   历史数据自动修复，不需要删库重来。
+                        parseIwaraId(row.fileName)?.let { fixedId ->
+                            dao.setIwaraId(uri, fixedId)
+                            // 重新读出完整实体（upsert 需要整行），再补元数据。
+                            dao.byUri(uri)?.let { fetchAndApplyMetadata(it) }
+                        }
                     }
                 }
                 done++
                 onProgress(done, files.size)
             }
             flushBatch()
+            if (mtimeBackfill.isNotEmpty()) dao.setFileModifiedAtBatch(mtimeBackfill)
         }
     }
 
