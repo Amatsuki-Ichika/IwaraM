@@ -9,7 +9,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [VideoEntity::class, TagEntity::class, VideoTagCrossRef::class, WatchHistoryEntity::class],
-    version = 3,
+    version = 4,
     // schema 导出到 app/schemas/，供后续版本的迁移回归测试比对（见 app/build.gradle.kts 的 ksp 配置）
     exportSchema = true
 )
@@ -64,6 +64,20 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * 3→4 迁移：`videos` 新增 `fileModifiedAt`（文件修改日期，epoch ms，0 = 未知）。
+         * 「下载时间」排序改用它 —— 此前只有入库时刻 `addedAt`，最近一次扫描导入的一批
+         * （往往是未匹配元数据的本地文件）会整批置顶。纯加列，不动任何旧数据；
+         * DDL 的 DEFAULT 0 必须与实体上的 `@ColumnInfo(defaultValue = "0")` 逐字一致
+         * （Room 打开库时按实体期望校验 schema），回归测试见
+         * [io.github.amatsukiichika.iwaram.data.FileModifiedMigrationTest]。
+         */
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `videos` ADD COLUMN `fileModifiedAt` INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
@@ -74,7 +88,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "iwara_manager.db"
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                     .build().also { INSTANCE = it }
             }
     }

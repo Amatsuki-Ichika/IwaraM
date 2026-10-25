@@ -32,8 +32,19 @@ object VideoSorter {
     fun sortVideos(list: List<VideoEntity>, mode: SortMode): List<VideoEntity> = when (mode) {
         SortMode.NEWEST -> list.sortedByDescending { it.createdAt ?: Long.MIN_VALUE }
         SortMode.OLDEST -> list.sortedBy { it.createdAt ?: Long.MAX_VALUE }
-        SortMode.ADDED_NEW -> list.sortedByDescending { it.addedAt }
-        SortMode.ADDED_OLD -> list.sortedBy { it.addedAt }
+        // 下载时间 = 文件修改日期（fileModifiedAt，0 = 取不到，如部分 SAF provider 不上报）。
+        //   两段式比较器：取得到修改日期的行按其排序，取不到的**恒垫底**、组内退回入库时刻
+        //   addedAt 同方向排 —— 与 NEWEST/OLDEST 的"缺失恒排末尾"同一纪律。
+        //   禁止写成单键 `sortedBy { it.fileModifiedAt }`：升序时 0 值会置顶，
+        //   正是"未匹配视频排在最顶部"的经典成因。
+        SortMode.ADDED_NEW -> list.sortedWith(
+            compareByDescending<VideoEntity> { it.fileModifiedAt > 0L }
+                .thenByDescending { if (it.fileModifiedAt > 0L) it.fileModifiedAt else it.addedAt }
+        )
+        SortMode.ADDED_OLD -> list.sortedWith(
+            compareByDescending<VideoEntity> { it.fileModifiedAt > 0L }
+                .thenBy { if (it.fileModifiedAt > 0L) it.fileModifiedAt else it.addedAt }
+        )
         SortMode.NAME_ASC -> list.sortedWith(nameOrder(VideoEntity::title, desc = false))
         SortMode.NAME_DESC -> list.sortedWith(nameOrder(VideoEntity::title, desc = true))
         SortMode.COUNT_DESC -> list.sortedByDescending { it.viewCount ?: -1 }

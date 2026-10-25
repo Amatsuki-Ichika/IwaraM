@@ -1,5 +1,6 @@
 package io.github.amatsukiichika.iwaram.data
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -36,5 +37,15 @@ data class VideoEntity(
     val relPath: String?,
     val tagsCsv: String?,
     val metaFetched: Boolean,
-    val addedAt: Long
+    val addedAt: Long,
+    /**
+     * 文件修改日期（epoch ms；0 = 未知，部分 SAF provider 不上报）。
+     *
+     * 「下载时间」排序的排序键（此前只有入库时刻 [addedAt]，最近一次扫描导入的一批
+     * —— 往往是未匹配元数据的本地文件 —— 会整批置顶）。取不到修改日期的行在排序中
+     * 恒垫底、组内退回 [addedAt]（见 VideoSorter 的两段式比较器）。
+     * 写入点：扫描导入（[IwaraRepositoryScan.importFolder]）与下载完成（DownloadService）。
+     */
+    @ColumnInfo(defaultValue = "0")
+    val fileModifiedAt: Long = 0L
 )
