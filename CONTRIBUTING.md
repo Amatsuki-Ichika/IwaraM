@@ -6,7 +6,8 @@ are all welcome.
 ## Getting started
 
 1. Fork the repository and clone your fork.
-2. Install **JDK 17** and the **Android SDK** (platform `android-37.2`, build-tools `36.0.0`).
+2. Install **JDK 17**, the **Android SDK** (platform `android-37.2`, build-tools `36.0.0`) and
+   **Node.js 18+** (only for the documentation and repository gates; the app does not need it).
 3. Point Gradle at your SDK:
 
    ```bash
@@ -18,7 +19,20 @@ are all welcome.
    ```bash
    ./gradlew :app:test
    ./gradlew :app:assembleDebug
+   node scripts/check.mjs
    ```
+
+## Definition of done
+
+A change is ready when all of these hold, not when it compiles:
+
+- `./gradlew verify` passes (unit tests, lint, debug build).
+- `node scripts/check.mjs` passes (documentation budgets, links, text hygiene, decision records,
+  APK size, tracked-file hygiene).
+- New pure logic has a JVM unit test; changed behavior has a test that would have failed before.
+- A user-visible change has a `CHANGELOG.md` entry under `[Unreleased]`.
+- A non-obvious decision has a record under [docs/decisions](docs/decisions/README.md).
+- The pull request description states what was run and what it proved.
 
 ## Reporting bugs
 
@@ -30,16 +44,29 @@ attach the log from the file described in `CrashLogger.kt` if you can retrieve i
 
 - Direct pushes to `main` are blocked by branch rules — always open a pull request;
   CI must pass before merging.
-- Keep changes focused; one topic per pull request.
+- Keep changes focused; one topic per pull request, and delete the branch when it merges.
 - Follow the existing code style (official Kotlin conventions, 4-space indentation) and keep
   comments in Kotlin sources in Simplified Chinese, consistent with the rest of the codebase
   (build scripts keep English comments).
 - Add or update JVM unit tests for any pure logic you change. `./gradlew :app:test` must pass.
-- Update [CHANGELOG.md](CHANGELOG.md) under `[Unreleased]` when the change is user-visible.
+- Update `CHANGELOG.md` under `[Unreleased]` when the change is user-visible.
 - Run the checks locally before requesting review:
-  `./gradlew :app:test :app:assembleDebug :app:lintDebug`.
+  `./gradlew verify && node scripts/check.mjs`.
+- Fill in the pull request template, including the AI usage table when an agent did part of the
+  work. It tells reviewers how much of the diff to verify rather than skim.
 
-Please read the [Code of Conduct](CODE_OF_CONDUCT.md) before participating.
+## Decision records
+
+Choices that the code cannot explain — a rejected alternative, a deliberately accepted cost, a
+change to persisted data — get a short record in [docs/decisions](docs/decisions/README.md).
+Records are reviewed for accuracy, not for length. Agent scratch plans do not belong in the
+repository; keep them in the tool's own git-ignored directory.
+
+## Documentation
+
+Documentation rules live in [docs/AGENTS.md](docs/AGENTS.md). Standing docs have word ceilings in
+`scripts/doc-budgets.json`; over budget means relocate, condense, or raise the ceiling with the
+reason in the pull request. The numbers live only in that file — do not restate them in prose.
 
 ## Dependencies
 
@@ -90,10 +117,10 @@ git push origin v0.2.0-rc.1
 ```
 
 The workflow runs the tests, builds the signed APK and publishes it as a GitHub
-**pre-release**. Pre-releases are excluded from the "Latest" badge and the
-`/releases/latest` install link, and the app shows the suffixed version name
-(`0.2.0-rc.1`) so testers can see what they run. If the RC has problems, fix them on
-`main` and tag `v0.2.0-rc.2`; repeat until testing passes.
+**pre-release**. Pre-releases are excluded from the "Latest" badge and the `/releases/latest`
+install link, and the app shows the suffixed version name (`0.2.0-rc.1`) so testers can see what
+they run. If the RC has problems, fix them on `main` and tag `v0.2.0-rc.2`; repeat until testing
+passes.
 
 **2. Stable.** Once an RC passes testing, bump `app.versionName` to the final version,
 move the CHANGELOG entries out of `[Unreleased]`, then:
@@ -116,3 +143,8 @@ the signature with `apksigner` and uploads the APK plus its `.sha256` checksum t
 Release. Generated release notes always compare against the previous stable tag, so RC tags
 do not truncate them. It needs these repository secrets: `KEYSTORE_BASE64` (the keystore
 file, base64-encoded), `STORE_PASSWORD`, `KEY_ALIAS` and `KEY_PASSWORD`.
+
+**Before tagging a stable release**, check that the repository gates pass on the tagged commit
+(`node scripts/check.mjs`), and that a persisted-data change has both a decision record and a
+`### Changed` CHANGELOG entry that tells existing users what will happen to their data.
+

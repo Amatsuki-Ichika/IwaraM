@@ -26,6 +26,15 @@ jobs:
           java-version: '17'
           cache: gradle
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # Fast gate first: docs and repository hygiene fail in seconds, before Gradle warms up.
+      - name: Repository gates
+        run: node scripts/check.mjs
+
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
 
@@ -40,3 +49,14 @@ jobs:
 
       - name: Lint
         run: ./gradlew :app:lintDebug --no-daemon
+
+      # Size ratchet reads app/build/outputs/apk/debug; it must run after assembleDebug.
+      - name: APK size ratchet
+        run: node scripts/verify-apk-size.mjs
+
+      # Phase 3 (optional): enable unit-test coverage in app/build.gradle.kts, then:
+      # - name: Coverage report
+      #   run: ./gradlew :app:createDebugUnitTestCoverageReport --no-daemon
+      # - uses: actions/upload-artifact@v4
+      #   with: { name: coverage, path: app/build/reports/coverage/** }
+      # Gate on a recorded baseline, not on an absolute target: fail only when coverage drops.

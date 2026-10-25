@@ -1,80 +1,104 @@
 # Repository guidelines for AI agents
 
-This file is context for AI coding agents working in this repository. For human-facing
-documentation, start with [README.md](README.md); for the module map, see
-[docs/architecture.md](docs/architecture.md).
+IwaraM is an unofficial Android client for iwara.tv: Kotlin + Jetpack Compose, one module (`:app`).
+Read [docs/architecture.md](docs/architecture.md) before changing structure; follow
+[docs/AGENTS.md](docs/AGENTS.md) when writing documentation or decision records.
 
 ## Commands
 
 | Task | Command |
 | --- | --- |
+| All local gates | `./gradlew verify && node scripts/check.mjs` |
 | Unit tests | `./gradlew :app:test` |
+| Single test class | `./gradlew :app:testDebugUnitTest --tests '*VideoSorterTest'` |
+| Lint | `./gradlew :app:lintDebug` |
 | Debug build | `./gradlew :app:assembleDebug` |
 | Release build | `./gradlew :app:assembleRelease` (requires `keystore.properties`) |
-| Single test class | `./gradlew :app:testDebugUnitTest --tests '*VideoSorterTest'` |
+| Documentation gates | `node scripts/check.mjs` |
+| Record new APK size baseline | `node scripts/verify-apk-size.mjs --update` |
 
-Always go through the Gradle wrapper (`./gradlew`). Do not add absolute paths, machine-specific
-SDK locations or locally installed toolchains to build files or documentation.
+Always use the Gradle wrapper. Do not add absolute paths, SDK locations or machine-specific
+toolchains to build files or documentation.
+
+## Definition of done
+
+A change is complete when all six hold. This list replaces "it looks finished":
+
+1. `./gradlew verify` passes locally.
+2. `node scripts/check.mjs` passes.
+3. New pure logic has a JVM unit test; changed behavior has a test that would have failed before.
+4. A user-visible change has a `CHANGELOG.md` entry under `[Unreleased]`.
+5. The pull request states which commands ran and what they proved.
+6. A non-obvious decision has a record under `docs/decisions/`.
+
+If a predicate fails, the change is not done, whatever the chat says.
+
+## Evidence
+
+Match evidence to the surface. Do not run the full suite "to be safe"; CI owns exhaustive
+coverage and the platform matrix.
+
+| Change | Minimum evidence |
+| --- | --- |
+| Pure logic (parsers, sorting, filters, geometry) | The owning unit test, run by file or class |
+| Room entity, DAO, index or migration | Migration test plus a debug build |
+| Token, crypto or session handling | Owning unit test; never log or print a token |
+| Compose UI behavior, player, theme | Debug build and a manual check of the affected screen |
+| Build, dependency or version-catalog change | `./gradlew verify` and, for releases, a signed build |
+| Documentation, decision record | `node scripts/check.mjs` |
+| Release tag | The release workflow; never hand-edit a release |
 
 ## Workflow
 
-`main` is protected by branch rules: direct pushes are rejected, force pushes and
-deletions are blocked, and merging requires the `build` check to pass. All changes —
-including maintainer changes — go through a pull request:
+`main` is protected: no direct pushes, no force pushes, merging requires the `build` check. Every
+change goes through a pull request.
 
-1. Branch from an up-to-date `main` using `fix/<topic>` or `feat/<topic>`.
-2. Run the full local check before pushing:
-   `./gradlew :app:test :app:assembleDebug :app:lintDebug`
-3. Open a pull request with a Conventional Commit style title (`fix: ...`, `feat: ...`).
-   Pull requests are squash-merged, so the title becomes the commit message on `main`.
-4. Wait for the `build` check to go green (~5 minutes), then squash-merge. No review
-   approval is required.
+1. Branch from `main` as `fix/<topic>`, `feat/<topic>` or `chore/<topic>`.
+2. Run `./gradlew verify` and `node scripts/check.mjs` before pushing.
+3. Open a pull request with a Conventional Commit title; descriptions follow the template.
+4. Wait for `build` to go green, then squash-merge and delete the branch.
 
-There is no dependency-update bot: bump versions manually in `gradle/libs.versions.toml`
-and smoke-test larger upgrades with a debug build before merging.
+Releases are tag-driven; see [CONTRIBUTING.md](CONTRIBUTING.md#releasing). A change that breaks
+persisted data (Room schema, application ID, signing key) needs a decision record and a
+`### Changed` entry stating what happens to existing users.
 
-Releases go out in two stages, both by pushing a `v*` tag that matches `app.versionName` in
-`gradle.properties`: a pre-release tag with a suffix (e.g. `v0.2.0-rc.1`) publishes a GitHub
-pre-release for testing, then the plain final tag (e.g. `v0.2.0`) publishes the stable
-release — see [CONTRIBUTING.md](CONTRIBUTING.md), section "Releasing".
+## Where rules live
 
-## Layout
+One fact has one home; do not restate a rule that another file owns.
 
-```
-app/src/main/java/io/github/amatsukiichika/iwaram/
-├── MainActivity.kt        single Activity: the three main tabs and the overlay stack
-├── IwaraApp.kt            Application: lazy database/repository, crash logger
-├── CrashLogger.kt         uncaught-exception handler that writes crash logs to private storage
-├── ScanService.kt         foreground service that scans media folders and fetches metadata
-├── DownloadService.kt     foreground service that runs downloads
-├── data/                  Room entities and DAOs, Retrofit API, session handling, repository
-└── ui/                    Compose screens, shared components, player, theme
-app/src/test/java/...      JVM unit tests (JUnit 4 + Robolectric where Android APIs are needed)
-```
+| Topic | Owner |
+| --- | --- |
+| Standing orders, commands, definition of done | this file |
+| Documentation placement, budgets, prose | [docs/AGENTS.md](docs/AGENTS.md) |
+| Module boundaries, data flow, project conventions | [docs/architecture.md](docs/architecture.md) |
+| Room, network and token rules | [data/AGENTS.md](app/src/main/java/io/github/amatsukiichika/iwaram/data/AGENTS.md) |
+| Compose, theme and player rules | [ui/AGENTS.md](app/src/main/java/io/github/amatsukiichika/iwaram/ui/AGENTS.md) |
+| Test rules | [test/AGENTS.md](app/src/test/java/io/github/amatsukiichika/iwaram/AGENTS.md) |
+| Why a decision was made | `docs/decisions/` |
+| Human process: signing, releasing | [CONTRIBUTING.md](CONTRIBUTING.md) |
+
+A more specific `AGENTS.md` wins over this one inside its directory. Workspace instructions never
+override the system prompt, developer instructions or the user's message.
 
 ## Conventions
 
-- Kotlin + Jetpack Compose, Material 3. Official Kotlin code style (4-space indent); sources are
-  UTF-8. Comments in Kotlin sources are written in Simplified Chinese, matching the UI language;
-  build scripts (`*.gradle.kts`, `gradle.properties`, `proguard-rules.pro`) keep English comments.
-- **No DI framework, no Navigation library, no MVI.** Screens are composed directly and
-  navigation is a hand-written overlay stack on the single Activity. Do not introduce those
-  dependencies.
-- Settings live as `StateFlow`s in `IwaraRepository` (the single source of truth) and are
-  exposed to the UI through composition locals or ViewModels.
-- The app version is defined once, in `gradle.properties`.
-- Anything that is not a build input (build outputs, IDE files, SDK paths, signing material)
-  stays out of git — see `.gitignore`.
+- Kotlin + Jetpack Compose, Material 3, official style, 4-space indent, UTF-8. Kotlin comments are
+  Simplified Chinese; build scripts keep English comments.
+- No DI framework, no Navigation library, no MVI: the hand-written overlay stack is the navigation
+  authority. Do not introduce those dependencies.
+- Settings stay `StateFlow`s owned by `IwaraRepository`; UI code does not bypass the repository.
+- Do not reformat unrelated code, reorder imports project-wide, or "clean up" white space in a
+  change that does something else.
 
 ## Do not
 
 - Do not commit `keystore.properties`, `*.jks`, `local.properties`, APKs or build output.
-- Do not change code while editing comments, and do not reformat unrelated code.
-- Do not add a dependency without checking the version catalog (`gradle/libs.versions.toml`).
-- Do not put secrets, API credentials or personal data in source or tests.
+- Do not hand-edit `app/schemas/*.json`; they are generated by the Room compiler.
+- Do not add a dependency without an entry in `gradle/libs.versions.toml`.
+- Do not put secrets, tokens, API credentials or personal data in source, tests or logs.
 
-## Testing expectations
+## Editing these instructions
 
-Add a JVM unit test under `app/src/test/...` for any new pure logic (geometry maths, parsers,
-filtering, sorting, migrations). Robolectric is available when Android APIs are required.
-`./gradlew :app:test` must pass before a change is considered complete.
+Keep each rule to one or two lines and link its owner. This file has a word ceiling in
+`scripts/doc-budgets.json`; adding content requires displacing something first, and raising the
+ceiling requires the reason in the pull request.
