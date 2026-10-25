@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The detail pane's scroll-back-to-top animation when switching to a recommended video never
+  actually played: clearing the previous video's recommendations collapsed the list below the
+  viewport, so LazyColumn clamped the scroll position straight to 0. The previous video's
+  recommendations are now kept until the new list arrives (guarded against stale responses),
+  keeping the list tall and the animation visible.
+
 ### Changed
 
 - **Breaking:** the application ID changed from `io.github.amatsukiichika.iwaramanager` to
