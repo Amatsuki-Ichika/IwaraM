@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-25
+
 ### Changed
 
 - Settings pages tightened vertically: list edge padding and card/section gaps 12 dp → 8 dp,
@@ -49,14 +51,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   viewport, so LazyColumn clamped the scroll position straight to 0. The previous video's
   recommendations are now kept until the new list arrives (guarded against stale responses),
   keeping the list tall and the animation visible.
-
-### Changed
-
-- **Breaking:** the application ID changed from `io.github.amatsukiichika.iwaramanager` to
-  `io.github.amatsukiichika.iwaram` (Kotlin package renamed to match). Android treats this as a
-  different app: existing installations cannot update in place and must uninstall first, and
-  local data (library index, watch history, settings) does not carry over. Downloaded media in
-  user-chosen folders is unaffected.
 
 ## [0.2.0-rc.1] - 2026-10-24
 
@@ -111,6 +105,8 @@ First public release.
   frosted-glass treatment for the bars.
 - **Crash log capture** — uncaught exceptions are written to a file for troubleshooting.
 
-[Unreleased]: https://github.com/Amatsuki-Ichika/IwaraM/compare/v0.2.0-rc.1...HEAD
+[Unreleased]: https://github.com/Amatsuki-Ichika/IwaraM/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Amatsuki-Ichika/IwaraM/compare/v0.2.0-rc.2...v0.2.0
+[0.2.0-rc.2]: https://github.com/Amatsuki-Ichika/IwaraM/compare/v0.2.0-rc.1...v0.2.0-rc.2
 [0.2.0-rc.1]: https://github.com/Amatsuki-Ichika/IwaraM/compare/v0.1.0...v0.2.0-rc.1
 [0.1.0]: https://github.com/Amatsuki-Ichika/IwaraM/releases/tag/v0.1.0
