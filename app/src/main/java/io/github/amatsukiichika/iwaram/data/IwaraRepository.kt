@@ -66,8 +66,11 @@ class IwaraRepository(
      * （那里是不提供设置时的兜底，这里是读不到 pref 时的兜底）。
      */
     private companion object {
-        /** 与 `GlassMaterial.DEFAULT_GLASS_OPACITY` 同值（0–100% 语义，默认 78%）。 */
-        const val DEFAULT_GLASS_OPACITY = 0.78f
+        /** 与 `GlassMaterial.DEFAULT_GLASS_OPACITY` 同值（0–100% 语义，默认 80%）。 */
+        const val DEFAULT_GLASS_OPACITY = 0.80f
+
+        /** 与 `GlassMaterial` 的默认材质档位一致：2 = 液态玻璃（磨砂）。 */
+        const val DEFAULT_GLASS_MODE = 2
     }
 
     internal val gson = Gson()
@@ -136,7 +139,7 @@ class IwaraRepository(
     }
 
     fun getFullscreenOrientation(): String =
-        prefs.getString("fs_orientation", "auto") ?: "auto"
+        prefs.getString("fs_orientation", "smart") ?: "smart"
 
     private val _fullscreenOrientation = MutableStateFlow(getFullscreenOrientation())
 
@@ -215,11 +218,12 @@ class IwaraRepository(
     val glassOpacity: StateFlow<Float> = _glassOpacity.asStateFlow()
 
     /**
-     * 材质方案（外观页）：三档 —— **0 关（实心不透明）/ 1 半透明（默认）/ 2 液态玻璃**。
+     * 材质方案（外观页）：三档 —— **0 关（实心不透明）/ 1 半透明 / 2 液态玻璃（磨砂，默认）**。
      *
      * 历史值一次性迁移（读旧键 `glass_mode` → 映射 → 写新键 `glass_mode_v2`）：
-     * 旧 1/2（省电/精细真模糊）→ **2 液态玻璃**（意图最接近）；旧 0（关闭=色罩）/ 3（模拟磨砂）/ 缺省 → **1 半透明**
-     * （视觉等价，且新能力不作默认）。新键落地后旧键不再读，改档写的是新值域 0..2。
+     * 旧 1/2（省电/精细真模糊）→ **2 液态玻璃**（意图最接近）；旧 0（关闭=色罩）/ 3（模拟磨砂）→ **1 半透明**
+     * （视觉等价）。**全新安装**（两键都没有）直接落默认档 2，不进迁移分支。
+     * 新键落地后旧键不再读，改档写的是新值域 0..2。
      */
     fun setGlassMode(value: Int) {
         val v = value.coerceIn(0, 2)
@@ -228,13 +232,17 @@ class IwaraRepository(
     }
 
     fun getGlassMode(): Int {
-        if (!prefs.contains("glass_mode_v2")) {
-            val legacy = prefs.getInt("glass_mode", 0)
-            val migrated = if (legacy == 1 || legacy == 2) 2 else 1
-            prefs.edit().putInt("glass_mode_v2", migrated).apply()
-            return migrated
+        if (prefs.contains("glass_mode_v2")) {
+            return prefs.getInt("glass_mode_v2", DEFAULT_GLASS_MODE)
         }
-        return prefs.getInt("glass_mode_v2", 1)
+        if (!prefs.contains("glass_mode")) {
+            // 全新安装（没有旧值）→ 直接用新默认，不写脏数据。
+            return DEFAULT_GLASS_MODE
+        }
+        val legacy = prefs.getInt("glass_mode", 0)
+        val migrated = if (legacy == 1 || legacy == 2) 2 else 1
+        prefs.edit().putInt("glass_mode_v2", migrated).apply()
+        return migrated
     }
 
     private val _glassMode = MutableStateFlow(getGlassMode())

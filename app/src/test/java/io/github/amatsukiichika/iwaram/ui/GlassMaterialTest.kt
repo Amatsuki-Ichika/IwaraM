@@ -127,16 +127,15 @@ class GlassMaterialTest {
     }
 
     @Test
-    fun `默认不透明度是 78 而不是 55`() {
-        // 78% 对应的实际透明度正好等于旧 55 档（旧公式浅色 lerp(0.55,0.96,0.55)≈0.7755），
-        // 所以升级后不动滑条观感不变（旧值由 IwaraRepository 一次性迁移到新值域）。
-        assertEquals(0.78f, GlassSettings().opacity, 1e-4f)
+    fun `默认不透明度是 80`() {
+        // 80% 是新版默认（旧 78% 的"对应旧 55 档观感"约束已随迁移期结束移除）。
+        assertEquals(0.80f, GlassSettings().opacity, 1e-4f)
     }
 
     @Test
-    fun `默认档是半透明 新能力不作默认`() {
-        // GlassSettings 默认 = 半透明（历史默认观感，液态玻璃不能是默认）。
-        assertEquals(GlassMode.TRANSLUCENT, GlassSettings().mode)
+    fun `默认档是磨砂`() {
+        // GlassSettings 默认 = 液态玻璃（磨砂），与 IwaraRepository.DEFAULT_GLASS_MODE = 2 一致。
+        assertEquals(GlassMode.LIQUID_GLASS, GlassSettings().mode)
     }
 
     @Test

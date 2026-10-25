@@ -35,9 +35,9 @@ enum class GlassRole {
  * 材质（外观页可选）：关 / 透明 / 磨砂三档。
  *
  * - [OFF] 关：材质系统整体关闭 —— **实心不透明**底（栏 / 药丸 / 回顶按钮都是实底），零玻璃感；
- * - [TRANSLUCENT] 透明：半透明色罩、无模糊（零录制成本，**默认档**）；
+ * - [TRANSLUCENT] 透明：半透明色罩、无模糊（零录制成本）；
  * - [LIQUID_GLASS] 磨砂：Kyant0/AndroidLiquidGlass —— 真背景模糊 + 边缘折射（lens）+ vibrancy，
- *   由各消费点的 `drawBackdrop` 施加（API 31+；lens 部分 API 33+，之下自动退化成纯模糊）。
+ *   由各消费点的 `drawBackdrop` 施加（API 31+；lens 部分 API 33+，之下自动退化成纯模糊）。**默认档**。
  */
 enum class GlassMode(val label: String) {
     OFF("关"),
@@ -50,7 +50,8 @@ enum class GlassMode(val label: String) {
     companion object {
         /**
          * 由持久化 Int 还原档位。历史值已在仓库读取处一次性迁移（见 IwaraRepository.getGlassMode
-         * 的 glass_mode_v2 逻辑），这里只处理新值域：越界一律回退 [TRANSLUCENT]（默认档）。
+         * 的 glass_mode_v2 逻辑），这里只处理新值域：越界一律回退 [TRANSLUCENT]
+         * （安全兜底，非默认档 —— 默认档是 [LIQUID_GLASS]，见 IwaraRepository.DEFAULT_GLASS_MODE）。
          */
         fun of(index: Int): GlassMode = entries.getOrElse(index) { TRANSLUCENT }
 
@@ -64,14 +65,15 @@ enum class GlassMode(val label: String) {
 data class GlassSettings(
     /** 材质不透明度 0f..1f（外观页滑条；越大越实、越小越透）。 */
     val opacity: Float = DEFAULT_GLASS_OPACITY,
-    /** 材质方案（外观页）。默认 = 半透明（历史默认观感，液态玻璃不作默认）。 */
-    val mode: GlassMode = GlassMode.TRANSLUCENT
+    /** 材质方案（外观页）。默认 = 磨砂（液态玻璃），与 IwaraRepository 的默认档一致。 */
+    val mode: GlassMode = GlassMode.LIQUID_GLASS
 )
 
-/** 不透明度是 0%..100% 的线性值，默认 78%。取 78 而非整数 55，是因为它对应的实际透明度等于旧 55 档的
- *  观感（旧公式浅色 ≈ lerp(0.55, 0.96, 0.55) = 0.7755），不动滑条时观感不变。
- *  落在 SharedPreferences 里的旧值由 IwaraRepository 一次性迁移（键 `glass_opacity_v2`）。 */
-const val DEFAULT_GLASS_OPACITY = 0.78f
+/**
+ * 不透明度是 0%..100% 的线性值，默认 80%。
+ * 落在 SharedPreferences 里的旧值由 IwaraRepository 一次性迁移（键 `glass_opacity_v2`）。
+ */
+const val DEFAULT_GLASS_OPACITY = 0.80f
 
 /**
  * 把"半透明材质设置"下发到整棵树。
