@@ -152,4 +152,19 @@ class GlassMaterialTest {
         )
         assertEquals(Color.Black, dark.fill.copy(alpha = 1f))
     }
+
+    @Test
+    fun `PILL半透明档主题感知 浅色不再写死黑罩`() {
+        // 浅色主题下回顶按钮此前是一颗黑圆（半透明档写死 Color.Black）——
+        //   已改为与液态玻璃档同口径：浅色 = surface 亮雾面，深色 = 黑雾面。
+        val lightSurface = Color(0xFFF7F8FA)
+        val light = glassMaterialFor(
+            GlassRole.PILL, GlassSettings(0.55f, GlassMode.TRANSLUCENT), lightSurface, dark = false, backdropActive = false
+        )
+        assertEquals(lightSurface, light.fill.copy(alpha = 1f))
+        val dark = glassMaterialFor(
+            GlassRole.PILL, GlassSettings(0.55f, GlassMode.TRANSLUCENT), surface, dark = true, backdropActive = false
+        )
+        assertEquals(Color.Black, dark.fill.copy(alpha = 1f))
+    }
 }

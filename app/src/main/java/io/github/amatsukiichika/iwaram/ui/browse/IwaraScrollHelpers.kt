@@ -248,9 +248,9 @@ fun ScrollToTopButton(
         dark = !isLight,
         backdropActive = glassActive
     )
-    // 主题自适应配色 —— 浅色主题玻璃=亮雾面 ⇒ 深色图标/浅描边；
-    //   深色主题玻璃=黑雾面 ⇒ 白图标。半透明/关档的黑底路径维持白字不变。
-    val iconTint = if (glassActive && isLight) cs.onSurface.copy(alpha = 0.9f)
+    // 主题自适应配色 —— 浅色主题（玻璃亮雾面 / 半透明亮雾面 / 关档实心 surface）⇒ 深色图标；
+    //   深色主题（黑雾面 / 实心 surface）⇒ 白图标。fill 已全档跟随深浅色，图标同轨。
+    val iconTint = if (isLight) cs.onSurface.copy(alpha = 0.9f)
     else Color.White.copy(alpha = 0.92f)
     AnimatedVisibility(
         visible = visible,
