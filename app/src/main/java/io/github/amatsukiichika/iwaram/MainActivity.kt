@@ -656,6 +656,10 @@ class MainActivity : ComponentActivity() {
             // 层序号决定绘制顺序，由这里分配；入场"要不要补"由单一时序源的值决定
             //（值停在 1 必然滑入；值已是 0 则零帧不动）。
             playerSeq = nextOverlaySeq()
+            // **全新打开**（播放页当前没挂着）不沿用上一次会话的相关推荐；
+            // 换片（showingPlayer 已 true）绝不在这里清 —— 旧推荐要保留到新推荐到达，
+            // 否则详情列表瞬间变矮，"滚回顶部"动画会被 LazyColumn 的位置钳制吃掉（见相关推荐预取处的注释）。
+            if (!showingPlayer) prs.relatedVideos = emptyList()
             showingPlayer = true
         }
         prs.onOpenPlayer = { openPlayer(it) }
@@ -1283,23 +1287,39 @@ class MainActivity : ComponentActivity() {
 
                 // 「相关推荐」静默预取：在线视频拉 related 接口（失败=空=不显示该区）；
                 // 本地视频用本地同作者/同标签（无网络）。换片（relatedId 变化）自动重取。
+                //
+                // 换片时**不清空旧列表**：详情列表里"相关推荐"是一个装着全部推荐行的超高 item，
+                // 若换片第一拍先清空，剩余内容会瞬间矮于视口，LazyColumn 在 measure 阶段直接把
+                // 滚动位置钳制成 0 —— IntroColumn 的 animateScrollToItem(0) 虽然启动了却一帧
+                // 可见位移都没有，"滚回顶部动画"就失效了（表现为瞬移回顶）。保留旧列表到新列表
+                // 到达，列表不变矮，上滚动画全程可见；加载期间短暂显示上一片的推荐（黑场过渡
+                // 盖着视频区，与主流视频应用一致）。回调带串台守卫：快速连点两片时，
+                // 旧请求的迟到结果不覆盖新片。
                 val relatedId = curOnline?.id
                 LaunchedEffect(relatedId) {
-                    prs.relatedVideos = emptyList()
-                    if (relatedId != null) cvm.loadRelatedVideos(relatedId) { prs.relatedVideos = it }
+                    if (relatedId != null) {
+                        cvm.loadRelatedVideos(relatedId) { result ->
+                            if (prs.currentOnline?.id == relatedId) prs.relatedVideos = result
+                        }
+                    } else {
+                        // 切到本地视频：清掉在线推荐（relatedList 会走 localRelated 分支，
+                        // 这里只是把状态收干净，给下一个在线视频留一份空表）。
+                        prs.relatedVideos = emptyList()
+                    }
                 }
                 // 本地推荐按视频实体缓存（播放期间库变化不重算，与列表冻结一致）。
                 // 放到后台线程：1700+ 条库上这是全表扫描 + 排序，若直接跑在组合相位，
                 // 会和入场滑入动画抢同一段时间。
-                val localRelated by produceState(
-                    initialValue = emptyList<VideoEntity>(),
-                    key1 = video.localUri
-                ) {
-                    value = withContext(Dispatchers.Default) { vm.localRelatedOf(video) }
+                // 用 remember + LaunchedEffect 而不是 produceState：后者在 key 变化时会把值重置回
+                // initialValue（空列表）→ 换片瞬间推荐区塌掉 → LazyColumn 钳制滚动位置为 0，
+                // 滚回顶部的动画同样失效。这里保留上一片的列表直到新片的计算完成。
+                val localRelated = remember { mutableStateOf<List<VideoEntity>>(emptyList()) }
+                LaunchedEffect(video.localUri) {
+                    localRelated.value = withContext(Dispatchers.Default) { vm.localRelatedOf(video) }
                 }
                 val relatedList: List<RelatedVideo> = when {
                     curOnline != null -> prs.relatedVideos.map { RelatedVideo.Online(it) }
-                    else -> localRelated.map { RelatedVideo.Local(it) }
+                    else -> localRelated.value.map { RelatedVideo.Local(it) }
                 }
                 val onlineExtras: OnlineVideoExtras? = when {
                     // 在线视频：netState 恒 AVAILABLE，含「下载」入口。
