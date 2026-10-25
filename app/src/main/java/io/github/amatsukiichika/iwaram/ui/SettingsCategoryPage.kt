@@ -143,12 +143,12 @@ internal fun CategoryPage(
                     modifier = Modifier
                         .fillMaxSize()
                         .navigationBarsPadding(),
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    // 一设置项一卡（AppEntryCard），选项间距与主页同为 12dp。
+                    // 一设置项一卡（AppEntryCard），区块/卡片间距与主页同为 8dp。
                     item {
-                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             when (category) {
                                 // 通用 = 原「外观」+「内容分级」（页内两个集合区块）。
                                 SettingsCategory.GENERAL -> GeneralContent(

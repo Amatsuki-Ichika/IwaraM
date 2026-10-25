@@ -27,7 +27,7 @@ import androidx.compose.ui.unit.dp
 /**
  * 全仓库**唯一**的"独立条目卡"（「我的」页 MeEntryCard 规格升为公共组件）。
  *
- * 视觉规格：M3 填充 Card 默认（12dp 圆角 + surfaceContainerHighest）+ 行内边距 16×14 +
+ * 视觉规格：M3 填充 Card 默认（12dp 圆角 + surfaceContainerHighest）+ 行内边距 16×10 +
  * 图标 22dp 主色 + 右箭头 onSurfaceVariant。设置页一、三级全部用它（一设置项一卡，取代大卡+分隔线）。
  *
  * 用法：
@@ -52,7 +52,8 @@ fun AppEntryCard(
             .fillMaxWidth()
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
     ) {
-        Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+        // 卡内上下 10dp（原 14dp）：设置页反馈"上下留白太多"后整体收紧；左右触控留白不动。
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (icon != null) {
                     Icon(
@@ -102,7 +103,7 @@ fun AppEntryCard(
                 }
             }
             if (content != null) {
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(8.dp))
                 content()
             }
         }

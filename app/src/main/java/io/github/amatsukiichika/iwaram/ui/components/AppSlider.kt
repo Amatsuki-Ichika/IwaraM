@@ -52,7 +52,7 @@ import androidx.compose.ui.unit.dp
  * 值（[value] / `onValueChange`）即时跟手，只有画出来的位置用短弹簧追上
  * （`dampingRatio = 1f, stiffness = 1400f`）；两个动画值只在 `drawBehind` 的 lambda 里读。
  *
- * 交互与 M3 一致：按下即生效（点哪跳哪）、可拖、值域 0f..1f；触控高度 ≥44dp。
+ * 交互与 M3 一致：按下即生效（点哪跳哪）、可拖、值域 0f..1f；触控高度 ≥32dp。
  */
 @Composable
 fun AppSlider(
@@ -109,8 +109,9 @@ fun AppSlider(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            // 触控高度：轨道虽薄，整条都要能按住、拖住。
-            .heightIn(min = 44.dp)
+            // 触控高度：轨道虽薄，整条都要能按住、拖住（32dp = 收紧后的设置页行高，
+            // 仍高于 Material 对密集列表里滑条的实用下限）。
+            .heightIn(min = 32.dp)
             .onSizeChanged { widthPx = it.width }
             .semantics { progressBarRangeInfo = ProgressBarRangeInfo(fraction, 0f..1f) }
             .pointerInput(Unit) {

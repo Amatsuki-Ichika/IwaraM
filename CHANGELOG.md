@@ -9,10 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Settings pages tightened vertically: list edge padding and card/section gaps 12 dp → 8 dp,
+  in-card vertical padding 14 dp → 10 dp, title-to-control gap 12 dp → 8 dp, and the opacity
+  slider row min height 44 dp → 32 dp. Top bar, switch rows and chips keep their sizes (touch
+  targets preserved). The material preset row now sits above the opacity slider (pick the mode
+  first, then fine-tune). Note: `AppEntryCard` is shared, so the 「我的」 page tightens with it.
+
 - Defaults for **new installs** (existing installations keep their saved values): material
   opacity 78% → 80%, material preset 半透明 (translucent) → 磨砂 (frosted liquid glass), and
   fullscreen orientation 自动 (follow system) → 智能识别 (pick landscape/portrait from the
   video's aspect ratio).
+
+- **Breaking:** the application ID changed from `io.github.amatsukiichika.iwaramanager` to
+  `io.github.amatsukiichika.iwaram` (Kotlin package renamed to match). Android treats this as a
+  different app: existing installations cannot update in place and must uninstall first, and
+  local data (library index, watch history, settings) does not carry over. Downloaded media in
+  user-chosen folders is unaffected.
 
 ### Added
 
