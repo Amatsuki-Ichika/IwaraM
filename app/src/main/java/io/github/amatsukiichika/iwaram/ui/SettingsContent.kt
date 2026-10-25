@@ -130,7 +130,8 @@ private fun AppearanceContent(
     showTags: Boolean,
     onInfo: (String, String) -> Unit
 ) {
-    AppEntryCard(title = "主题模式", subtitle = "浅色 / 深色 / 跟随系统") {
+    // 选项 chips 已自明（浅色/深色/跟随系统），不再用副标题复述一遍。
+    AppEntryCard(title = "主题模式") {
         ChoiceChips(
             options = ThemeOption.entries.map { it.label to it.value },
             current = themeMode,
@@ -139,10 +140,11 @@ private fun AppearanceContent(
     }
     AppEntryCard(
         title = "卡片显示标签",
-        subtitle = "在视频卡片底部显示标签，关闭以保持简洁",
+        subtitle = "在视频卡片底部显示标签",
         trailing = { Switch(checked = showTags, onCheckedChange = vm::setShowTags) }
     )
-    AppEntryCard(title = "主题色", subtitle = "应用强调色，全局生效") {
+    // 强调色块本身自明，去掉"应用强调色，全局生效"这类复述。
+    AppEntryCard(title = "主题色") {
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             THEME_COLOR_OPTIONS.forEach { opt ->
                 val selected = themeColor == opt.value
@@ -176,16 +178,17 @@ private fun AppearanceContent(
     // ---- 半透明材质（原在开发者页，已移入外观页）----
     // 一根不透明度条 + 一个磨砂方案：底栏玻璃 / 所有角标胶囊 / 回顶按钮统一生效
     //（实现在 ui/components/GlassMaterial.kt，一处定义）。
+    // 滑条右侧有实时百分比显示，副标题不再解释"0% = 完全透明"；作用范围保留列举。
     BarTuningCard(
         title = "材质不透明度",
-        subtitle = "底栏 · 顶栏 · 悬浮条 · 回顶按钮 统一生效（0% = 完全透明）",
+        subtitle = "底栏 · 顶栏 · 悬浮条 · 回顶按钮",
         value = vm.glassOpacityFlow.collectAsStateWithLifecycle().value,
         onValueChange = vm::setGlassOpacity
     )
     val glassMode = GlassMode.of(vm.glassModeFlow.collectAsStateWithLifecycle().value)
+    // 当前档位由下方 chips 高亮表达，副标题不再复述档位名。
     AppEntryCard(
         title = "材质",
-        subtitle = glassMode.label,
         info = "「关」= 实心不透明，材质系统整体关闭；「透明」= 半透明色罩、无模糊（零成本，默认）；" +
             "「磨砂」= 真实背景模糊 + 边缘折射（AndroidLiquidGlass，需要 Android 12+，折射部分 13+）。",
         onInfo = onInfo
@@ -209,8 +212,9 @@ private fun ContentRatingContent(
 ) {
     AppEntryCard(
         title = "默认 R18",
-        subtitle = "只显示 R18 内容（在线与本地）",
-        info = "开启后隐藏分级筛选项，在线与本地都只显示 R18 内容；关闭后恢复手动分级筛选。",
+        // 开关的唯一效果就是"只显示 R18"，副标题原是标题的同义复述 → 删；
+        // info 只留开关之外的行为变化（隐藏筛选/恢复手动筛选）。
+        info = "开启后只显示 R18 内容（在线与本地），并隐藏分级筛选项；关闭后恢复手动分级筛选。",
         onInfo = onInfo,
         trailing = { Switch(checked = defaultR18, onCheckedChange = vm::setDefaultR18) }
     )
@@ -263,7 +267,8 @@ internal fun PlaybackContent(
         AppEntryCard(
             title = "下载分辨率",
             subtitle = "下载在线视频优先使用的清晰度",
-            info = "与在线播放的「默认分辨率」互相独立；该档位不可用时自动回退到最高可用档。",
+            // 回退规则与「默认分辨率」一致，不再逐字重复；两者各管播放/下载自明。
+            info = "该档位不可用时自动回退到最高可用档。",
             onInfo = onInfo
         ) {
             Box(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
@@ -299,16 +304,18 @@ private fun SuperResContent(
 ) {
     AppEntryCard(
         title = "默认启用超分",
-        subtitle = "播放时默认应用，本地 / 在线通用",
-        info = "决定播放页打开时的默认超分状态；播放中可随时在超分菜单临时切换，不影响此默认值。",
+        subtitle = "本地 / 在线通用",
+        // 副标题与 info 原有一半逐字重复（"播放时默认应用"≈"决定播放页打开时的默认状态"），
+        //   info 只留开关之外的行为说明。
+        info = "播放页打开时的默认状态；播放中可随时在超分菜单临时切换，不影响此默认值。",
         onInfo = onInfo,
         trailing = { Switch(checked = srEnabled, onCheckedChange = vm::setSrEnabled) }
     )
     // 把每个方案的适用场景收进弹窗，菜单/chip 上只放模型名。
+    //   ⓘ 是弹窗唯一入口，info 保留作引导；"按模型名选择"与 chip 自明 → 删。
     AppEntryCard(
-        title = "方案",
-        subtitle = "按模型名选择",
-        info = "查看每个模型的适用场景",
+        title = "超分方案",
+        info = "查看各方案的适用场景",
         onInfo = { _, _ -> onShowModels() }
     ) {
         Box(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
@@ -344,7 +351,7 @@ internal fun StorageContent(
             Text("重新选择文件夹")
         }
     }
-    AppEntryCard(title = "下载目录", subtitle = "在线视频的保存位置；默认与管理器根目录相同") {
+    AppEntryCard(title = "下载目录", subtitle = "在线视频的保存位置") {
         Text(
             text = downloadRootName.ifBlank { "默认（管理器根目录）" },
             style = MaterialTheme.typography.bodyMedium,
