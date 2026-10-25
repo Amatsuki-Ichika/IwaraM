@@ -4,6 +4,8 @@ import androidx.activity.BackEventCompat
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.FiniteAnimationSpec
+import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
@@ -34,12 +36,16 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import io.github.amatsukiichika.iwaram.ui.COVER_DIM_ALPHA
 import io.github.amatsukiichika.iwaram.ui.COVER_MOTION_MS
 import io.github.amatsukiichika.iwaram.ui.COVER_SHIFT_DP
+import io.github.amatsukiichika.iwaram.ui.BackVelocityTracker
 import io.github.amatsukiichika.iwaram.ui.VideoViewModel
+import io.github.amatsukiichika.iwaram.ui.exitDurationMs
 import io.github.amatsukiichika.iwaram.ui.rememberAdaptivePageShape
+import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -110,6 +116,9 @@ fun IwaraOverlayHost(
     // 否则会"瞬移回屏幕中央再滑出"；动画播完由 onExited 移除。
     // 用 map（key = seq）而非单个变量：允许上一页还在退场时立刻对下一层发起新手势，互不干扰。
     val frozenGesture = remember { mutableStateMapOf<Long, Float>() }
+    // 与 frozenGesture 配对的松手速度（进度/秒）：退场动画按"剩余距离 / 该速度"换算时长、
+    // 用快出慢停缓动衔接，消除"松手先停一下"的手感。0 = 没有可用速度（慢松手/非手势退出）。
+    val frozenVelocity = remember { mutableStateMapOf<Long, Float>() }
 
     // ---- 退场页生命周期 ----
     // 上一帧的栈快照：与当前栈**同步**做差（不走 effect），退场页当帧就进渲染列表 → 不闪帧。
@@ -168,6 +177,8 @@ fun IwaraOverlayHost(
                     // 退场一律播标准动画（含手势层）：松手后从冻结位移继续滑出，与设置页/播放页一致。
                     animateExit = isLeaving,
                     gestureTranslationPx = translationFraction * screenWidthPx,
+                    // 手势弹出的页带着松手速度退场（px/s）；按钮关闭 = 0 → 走默认规格。
+                    exitVelocityPxPerS = (frozenVelocity[entry.seq] ?: 0f) * screenWidthPx,
                     covered = covered,
                     gestureCover = gestureCover,
                     coverShiftPx = coverShiftPx,
@@ -179,6 +190,7 @@ fun IwaraOverlayHost(
                     onExited = {
                         leavingPages.removeAll { it.seq == entry.seq }
                         frozenGesture.remove(entry.seq)
+                        frozenVelocity.remove(entry.seq)
                     }
                 )
             }
@@ -203,12 +215,15 @@ fun IwaraOverlayHost(
     // 取消则同步复位。两条路径都不含挂起点，避免协程被打断导致状态卡住。
     PredictiveBackHandler(enabled = overlays.isNotEmpty() && backEnabled) { flow: Flow<BackEventCompat> ->
         var completed = false
+        // 每次手势一个新实例：对 progress 事件做时间差分，估算松手瞬间的跟手速度。
+        val velocity = BackVelocityTracker()
         try {
             flow.collect { event ->
                 // 若上一页还在退场（已不在栈里），本次手势重新绑定到当前栈顶。
                 gestureSeq = gestureSeq?.takeIf { s -> overlays.any { it.seq == s } }
                     ?: overlays.lastOrNull()?.seq
                 gestureProgress = event.progress.coerceIn(0f, 1f)
+                velocity.onEvent(gestureProgress, System.nanoTime())
                 onBackProgress(gestureProgress)
             }
             completed = true
@@ -218,8 +233,12 @@ fun IwaraOverlayHost(
             //   ⇒ "复位不完全、底页位置错位"。finally 里不挂起，安全。
             val target = gestureSeq
             if (completed) {
-                // 手势完成：先冻结位移（退场页要按冻结值继续滑出，不跳回屏幕中央），再清空绑定。
-                if (target != null) frozenGesture[target] = gestureProgress
+                // 手势完成：先冻结位移与速度（退场页要按冻结值带着动量继续滑出，不跳回屏幕中央），
+                // 再清空绑定。
+                if (target != null) {
+                    frozenGesture[target] = gestureProgress
+                    frozenVelocity[target] = velocity.velocity()
+                }
                 gestureSeq = null
                 gestureProgress = 0f
             } else {
@@ -253,6 +272,8 @@ private fun OverlayPage(
     animateEnter: Boolean,
     animateExit: Boolean,
     gestureTranslationPx: Float,
+    /** 松手速度（px/s，仅手势弹出的页 > 0）：退场按"剩余距离 / 该速度"换算时长、带动量滑出。 */
+    exitVelocityPxPerS: Float = 0f,
     covered: Boolean,
     gestureCover: Float?,
     coverShiftPx: Float,
@@ -262,17 +283,35 @@ private fun OverlayPage(
     onPop: () -> Unit,
     onExited: () -> Unit
 ) {
+    val screenWidthPx = with(LocalDensity.current) { LocalConfiguration.current.screenWidthDp.dp.toPx() }
     // 进入动画用初值直接触发：首帧即开始滑入，不会先空一帧。
-    // 退场由 animateExit 翻 true 触发（该页此前已组合过，翻转后 LaunchedEffect 重跑）。
+    // 退场由 animateExit 翻 true 触发。用 **SideEffect**（组合提交后同步执行）而不是 LaunchedEffect：
+    //   后者要等协程派发，松手到退场起播会多出一帧静止，正好落在"顿一下"的手感上。
     val visibleState = remember {
         MutableTransitionState(!animateEnter).apply { if (animateEnter) targetState = true }
     }
-    LaunchedEffect(animateExit) { if (animateExit) visibleState.targetState = false }
+    SideEffect { if (animateExit) visibleState.targetState = false }
 
     // 退场动画跑完（已隐藏且动画空闲）→ 通知宿主移出渲染列表。动画时长即生命周期，无定时器。
     LaunchedEffect(visibleState.currentState, visibleState.isIdle) {
         if (visibleState.isIdle && !visibleState.currentState) onExited()
     }
+
+    // 退场规格：手势弹出的页**只补剩余距离**（从冻结位移滑到恰好出屏），时长 = 剩余距离 / 松手速度
+    // （钳制 150..320ms），缓动用快出慢停的 LinearOutSlowIn —— FastOutSlowIn 起始斜率为 0，
+    //   松手瞬间页面急减速再缓滑，就是"顿一下"的来源。非手势退出（按钮关闭）没有动量，
+    //   保持原 320ms FastOutSlowIn。spec 只在退场开始的那个组合算一次（之后入参不再变化）。
+    val exitSpec: FiniteAnimationSpec<IntOffset> =
+        remember(animateExit, gestureTranslationPx, exitVelocityPxPerS) {
+            if (animateExit && exitVelocityPxPerS > 0f && gestureTranslationPx < screenWidthPx) {
+                tween(
+                    exitDurationMs(screenWidthPx - gestureTranslationPx, exitVelocityPxPerS, EXIT_SLIDE_MS),
+                    easing = LinearOutSlowInEasing
+                )
+            } else {
+                tween(EXIT_SLIDE_MS, easing = FastOutSlowInEasing)
+            }
+        }
 
     // 让位进度：0 = 完全露出（原位/原亮度），1 = 被上层完全盖住。
     // 用**声明式补间** —— 目标值唯一决定终态，animateFloatAsState 内部是一条长驻协程
@@ -311,7 +350,8 @@ private fun OverlayPage(
         // 进入与退场都**只滑不淡** —— 淡入会让页面在前 200ms 半透明，
         //   透出底下被让位左移的底页（右边那条边）与黑垫。
         enter = slideInHorizontally(tween(ENTER_SLIDE_MS)) { it },
-        exit = slideOutHorizontally(tween(EXIT_SLIDE_MS)) { it }
+        // 退场目标 = 剩余距离（fullWidth − 冻结位移）：非手势退出位移为 0，目标 = 全宽，与旧行为一致。
+        exit = slideOutHorizontally(exitSpec) { it - gestureTranslationPx.roundToInt() }
     ) {
         Surface(
             Modifier

@@ -56,7 +56,9 @@ internal fun CategoryPage(
     /** 宿主下发：子页进出场动画正在播（圆角自适应判据，同设置页本体的 pageAnimating）。 */
     animating: Boolean,
     /** 手势进度上抛（拖动中 0f..1f / 松手与取消 null）→ 设置主页实时联动回位。 */
-    onBackProgress: (Float?) -> Unit = {}
+    onBackProgress: (Float?) -> Unit = {},
+    /** 手势松手完成：回调（冻结进度, 松手速度 进度/秒），上抛给设置主页供子页退场衔接动量。 */
+    onBackReleased: (Float, Float) -> Unit = { _, _ -> }
 ) {
     // —— 窄流（从 SettingsScreen 移入：只有分类页需要这些值） ——
     val showTags by vm.showTagsFlow.collectAsStateWithLifecycle()
@@ -96,15 +98,20 @@ internal fun CategoryPage(
         }.value
     )
     PredictiveBackHandler(enabled = backEnabled) { flow ->
+        // 每次手势一个新实例：对 progress 事件做时间差分，估算松手瞬间的跟手速度。
+        val velocity = BackVelocityTracker()
         try {
             flow.collect { event ->
                 backProgress = event.progress.coerceIn(0f, 1f)
+                velocity.onEvent(backProgress, System.nanoTime())
                 // 上抛给宿主：设置主页按 c = 1 − p 实时联动回位。
                 onBackProgress(backProgress)
             }
             // 松手完成：不复位 backProgress —— 冻结位移留给退场滑出动画（与设置页本体一致）；
             // 进度上报置 null → 主页让位切回 tween 规格（随弹栈滑出同步回位）。
+            // 动量先于弹栈上抛：子页退场滑出按"剩余距离 / 松手速度"衔接时长。
             onBackProgress(null)
+            onBackReleased(backProgress, velocity.velocity())
             onBack()
         } catch (e: CancellationException) {
             backProgress = 0f
