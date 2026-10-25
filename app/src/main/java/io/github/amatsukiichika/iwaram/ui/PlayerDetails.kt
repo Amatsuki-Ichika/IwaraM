@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
@@ -217,7 +218,14 @@ private fun IntroColumn(
             video.viewCount?.let { add(Icons.Filled.Visibility to "${formatCount(it)} 播放") }
         }
     }
+    // 换片（点相关推荐）时滚回顶部：remember 的滚动位置跨视频保留，不复位的话
+    //   新片的详情区会停在旧片滚到的位置，看起来像"换了个壳还是旧内容"。
+    val listState = rememberLazyListState()
+    LaunchedEffect(video.iwaraId, video.localUri) {
+        listState.scrollToItem(0)
+    }
     LazyColumn(
+        state = listState,
         modifier = Modifier.fillMaxSize(),
         // 顶部 padding 归零：药丸条自己已经留了 8dp，再叠加会造成上下间隙不对称。
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = topPadding, bottom = 16.dp),
