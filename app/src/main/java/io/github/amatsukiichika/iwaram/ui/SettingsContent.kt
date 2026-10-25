@@ -100,6 +100,7 @@ internal fun GeneralContent(
     showTags: Boolean,
     defaultR18: Boolean,
     showR18Tag: Boolean,
+    hideUnmatched: Boolean,
     onInfo: (String, String) -> Unit
 ) {
     SettingsSection("外观") {
@@ -109,6 +110,13 @@ internal fun GeneralContent(
             themeColor = themeColor,
             showTags = showTags,
             onInfo = onInfo
+        )
+    }
+    SettingsSection("本地库") {
+        AppEntryCard(
+            title = "隐藏未匹配的视频",
+            subtitle = "本地视频尚未匹配 Iwara id 时不显示",
+            trailing = { Switch(checked = hideUnmatched, onCheckedChange = vm::setHideUnmatched) }
         )
     }
     SettingsSection("内容分级") {

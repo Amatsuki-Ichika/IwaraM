@@ -48,6 +48,7 @@ class VideoViewModel(private val app: IwaraApp) : ViewModel() {
     private var ratingFilter = repo.getLocalRating()
     private var defaultR18 = repo.getDefaultR18()
     private var showR18Tag = repo.getShowR18Tag()
+    private var hideUnmatched = repo.getHideUnmatched()
 
     private val _uiState = MutableStateFlow(UiState())
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
@@ -70,6 +71,9 @@ class VideoViewModel(private val app: IwaraApp) : ViewModel() {
 
     /** 「默认 R18」的窄出口（真源 [IwaraRepository.defaultR18]），设置页专用。 */
     val defaultR18Flow: StateFlow<Boolean> = repo.defaultR18
+
+    /** 「隐藏未匹配的视频」的窄出口（真源 [IwaraRepository.hideUnmatched]），设置页专用。 */
+    val hideUnmatchedFlow: StateFlow<Boolean> = repo.hideUnmatched
 
     /**
      * Debug 模式开关的**窄出口**（真源 [IwaraRepository.debugDetails]，不复制状态）。
@@ -277,6 +281,14 @@ class VideoViewModel(private val app: IwaraApp) : ViewModel() {
                 }
             }
         }
+        viewModelScope.launch {
+            repo.hideUnmatched.collect { v ->
+                if (v != hideUnmatched) {
+                    hideUnmatched = v
+                    recompute()
+                }
+            }
+        }
         // 全局筛选器：筛选状态一变就重算本地库列表 ——
         //   本地库与在线各页共用同一份状态，这里让"本地"这条通路跟上。
         //   丢掉首个发射（订阅时的当前值）：进程启动时它必然是默认态，而 DB 首拉紧接着就会算一遍。
@@ -415,6 +427,14 @@ class VideoViewModel(private val app: IwaraApp) : ViewModel() {
     /** 卡片是否显示 R18 角标（独立开关）。同样只写单一真源。 */
     fun setShowR18Tag(value: Boolean) {
         repo.setShowR18Tag(value)
+    }
+
+    /**
+     * 隐藏未匹配的本地视频（本地库主列表只藏，作者桶/作者页不受影响）。
+     * 只写 repo 的单一真源；内存快照由 init 里的订阅更新后触发重算。
+     */
+    fun setHideUnmatched(value: Boolean) {
+        repo.setHideUnmatched(value)
     }
 
     /** Debug 模式开关（开发者细节）。只写单一真源，UI 端经 [debugDetailsFlow] 生效。 */
@@ -615,6 +635,11 @@ class VideoViewModel(private val app: IwaraApp) : ViewModel() {
         //   放在排序之前：先筛小再排，排序的开销也跟着降。取键统一走 `localVideoKeys`
         //   （名字 = 标题/文件名，标签 = tagsCsv），与在线各页共用同一套规则（见 data/GlobalFilter.kt）。
         val beforeFilter = list.size
+        // 「隐藏未匹配的视频」：放在 beforeFilter 快照之后 —— 被藏数量计入 hiddenByFilter，
+        //   空态能显示"已隐藏 N 项"；只藏 iwaraId 为空的（有 id 但元数据未拉到的是瞬态，不藏）。
+        if (hideUnmatched) {
+            list = list.filter { !it.iwaraId.isNullOrBlank() }
+        }
         list = list.filterBy(GlobalFilterHolder.value, ::localVideoKeys)
 
         // 排序统一走 VideoSorter 纯函数（可单元测试）。

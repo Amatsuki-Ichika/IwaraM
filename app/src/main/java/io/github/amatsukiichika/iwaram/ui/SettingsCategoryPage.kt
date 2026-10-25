@@ -64,6 +64,7 @@ internal fun CategoryPage(
     val showTags by vm.showTagsFlow.collectAsStateWithLifecycle()
     val defaultR18 by vm.defaultR18Flow.collectAsStateWithLifecycle()
     val showR18Tag by vm.showR18TagFlow.collectAsStateWithLifecycle()
+    val hideUnmatched by vm.hideUnmatchedFlow.collectAsStateWithLifecycle()
     val themeMode by vm.themeMode.collectAsStateWithLifecycle()
     val themeColor by vm.themeColor.collectAsStateWithLifecycle()
     val fsOrientation by vm.fsOrientation.collectAsStateWithLifecycle()
@@ -157,6 +158,7 @@ internal fun CategoryPage(
                                     showTags = showTags,
                                     defaultR18 = defaultR18,
                                     showR18Tag = showR18Tag,
+                                    hideUnmatched = hideUnmatched,
                                     onInfo = ::showInfoDialog
                                 )
                                 // 播放页内两个集合区块（默认 / 超分）。
