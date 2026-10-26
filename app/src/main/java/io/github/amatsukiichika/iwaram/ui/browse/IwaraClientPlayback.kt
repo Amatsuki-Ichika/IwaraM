@@ -29,6 +29,7 @@ import io.github.amatsukiichika.iwaram.data.describeIwaraError
 import io.github.amatsukiichika.iwaram.data.ensureIwaraSuccess
 import io.github.amatsukiichika.iwaram.data.GlobalFilterHolder
 import io.github.amatsukiichika.iwaram.data.parseIwaraDate
+import io.github.amatsukiichika.iwaram.data.resolveDownloadTarget
 import io.github.amatsukiichika.iwaram.ui.DiagLog
 import io.github.amatsukiichika.iwaram.ui.QualityOption
 import kotlinx.coroutines.CancellationException
@@ -189,9 +190,13 @@ internal fun IwaraClientViewModel.reportView(id: String) {
 
     /* ---------- 下载 ---------- */
 
-fun IwaraClientViewModel.downloadVideo(video: IwaraVideoItem, onError: (String) -> Unit) {
+fun IwaraClientViewModel.downloadVideo(
+        video: IwaraVideoItem,
+        onSuccess: () -> Unit = {},
+        onError: (String) -> Unit
+    ) {
         val id = video.id ?: return onError("视频数据异常")
-        startDownloadById(id, scope = null, onError = onError)
+        startDownloadById(id, scope = null, onSuccess = onSuccess, onError = onError)
     }
 
     /**
@@ -199,43 +204,29 @@ fun IwaraClientViewModel.downloadVideo(video: IwaraVideoItem, onError: (String) 
      * 每次都会重新解析出新的签名地址（旧地址带 expires 会过期，不能复用）；
      * 若存在同视频的半成品文件，DownloadService 会自动从断点续传。
      */
-fun IwaraClientViewModel.startDownloadById(id: String, scope: CoroutineScope? = null, onError: (String) -> Unit) {
+fun IwaraClientViewModel.startDownloadById(
+        id: String,
+        scope: CoroutineScope? = null,
+        onSuccess: () -> Unit = {},
+        onError: (String) -> Unit
+    ) {
         (scope ?: viewModelScope).launch {
             try {
-                val detail = IwaraClient.call { it.video(id) }
-                val fileUrl = detail.fileUrl
-                if (fileUrl.isNullOrBlank()) {
-                    onError(if (detail.embedUrl != null) "外嵌视频暂不支持下载" else "该视频没有可下载的文件")
-                    return@launch
-                }
-                val qualities = withContext(Dispatchers.IO) { IwaraSign.fetchQualities(fileUrl) }
-                // 下载分辨率是独立设置，不复用在线播放的默认分辨率。
-                val preferred = repo.getDownloadQuality()
-                val usable = qualities.filter { !it.src?.download.isNullOrBlank() || !it.src?.view.isNullOrBlank() }
-                val chosen = usable.firstOrNull { it.name == preferred }
-                    ?: IwaraSign.pickViewUrl(qualities, preferred)?.let { p -> usable.firstOrNull { it.name == p.first } }
-                    ?: usable.firstOrNull()
-                    ?: throw IwaraSession.IwaraApiException("没有可用的下载地址")
-                val fileName = "[${id}] ${detail.title ?: id} (${chosen.name}).mp4"
-                // src.download 常为 //host/... 协议相对地址，必须归一化成 https 才能请求，
-                // 否则抛出 "Expected URL scheme 'http' or 'https'..."。
-                val url = IwaraSign.buildDownloadUrl(
-                    chosen.src?.download ?: chosen.src?.view!!,
-                    fileName
-                ) ?: run {
-                    onError("下载地址无效")
-                    return@launch
-                }
+                // 解析（详情 → 清晰度 → 归一化签名地址）与下载服务"地址过期后重解析"共用一条路径。
+                val target = resolveDownloadTarget(repo, id)
                 DownloadService.start(
                     app,
                     DownloadService.Job(
                         videoId = id,
-                        title = detail.title ?: id,
-                        url = url,
-                        fileName = fileName,
-                        quality = chosen.name.orEmpty()
+                        title = target.title,
+                        url = target.url,
+                        fileName = target.fileName,
+                        quality = target.quality
                     )
                 )
+                // 提示必须在真正入队之后：解析与建地址都可能失败，
+                // 先弹"已加入下载队列"再弹错误，用户会以为任务已经下起来了。
+                onSuccess()
             } catch (t: Throwable) {
                 if (t is CancellationException) throw t
                 onError(describeIwaraError(t))

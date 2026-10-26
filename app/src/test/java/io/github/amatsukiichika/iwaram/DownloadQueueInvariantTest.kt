@@ -95,6 +95,29 @@ class DownloadQueueInvariantTest {
     }
 
     @Test
+    fun `a task cancelled while it sat in the queue is dropped, not downloaded`() = runBlocking {
+        // 曾经「取消」只删了记录与列表条目，Channel 里的 job 原封不动：worker 出队后
+        // 照常开下，还先把任务重新登记成 running —— 用户看到的是"点了取消，它又自己下起来了"。
+        val queue = Channel<DownloadService.Job>(Channel.UNLIMITED)
+        val executed = mutableListOf<String>()
+        val dropped = mutableListOf<String>()
+        val cancelled = mutableSetOf("b")
+        queue.send(job("a"))
+        queue.send(job("b"))
+        queue.send(job("c"))
+        queue.close()
+        drainDownloadQueue(
+            queue,
+            execute = recorder(executed),
+            isCancelled = { j -> cancelled.remove(j.videoId) },
+            onCancelled = { j -> dropped.add(j.videoId) }
+        )
+        assertEquals("被取消的任务绝对不能被执行", listOf("a", "c"), executed)
+        assertEquals("而且必须走清理路径", listOf("b"), dropped)
+        assertTrue("取消标记是一次性事件，不能残留到下一次下载", cancelled.isEmpty())
+    }
+
+    @Test
     fun `cancellation propagates - no failure path, no further tasks executed`() = runBlocking {
         // 模拟服务销毁（scope.cancel）：execute 抛 CancellationException 时，
         // 循环必须原样传播 —— 不吞、不继续跑后续任务，也就不会走"下载失败"通知路径。

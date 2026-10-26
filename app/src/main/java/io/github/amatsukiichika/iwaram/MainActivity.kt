@@ -1432,7 +1432,20 @@ class MainActivity : ComponentActivity() {
                             },
                             // 评论收进播放页详情区药丸条 tab，不再由此处打开。
                             onDownload = {
-                                cvm.downloadVideo(item) { err ->
+                                cvm.downloadVideo(
+                                    item,
+                                    onSuccess = {
+                                        // 只有真的入队了才提示：解析详情、取清晰度、建签名地址
+                                        // 都可能失败，先弹"已加入队列"再弹错误会把用户引导错。
+                                        if (showingPlayer) {
+                                            Toast.makeText(
+                                                context,
+                                                "已加入下载队列，可在通知栏查看进度",
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                        }
+                                    }
+                                ) { err ->
                                     // 页面已关不再弹孤立错误
                                     if (!showingPlayer) return@downloadVideo
                                     Toast.makeText(
@@ -1441,7 +1454,6 @@ class MainActivity : ComponentActivity() {
                                         Toast.LENGTH_SHORT
                                     ).show()
                                 }
-                                Toast.makeText(context, "已加入下载队列，可在通知栏查看进度", Toast.LENGTH_SHORT).show()
                             },
                             onSelectQuality = { q ->
                                 prs.onlineQualityName = q.name
