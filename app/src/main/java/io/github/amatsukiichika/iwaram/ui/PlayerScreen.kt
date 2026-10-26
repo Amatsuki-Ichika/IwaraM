@@ -172,8 +172,10 @@ fun PlayerScreen(
     // 本地 content:// 走 ContentDataSource，不受这些头影响。
     // 播放器实例的"代数"。切 SR / 模型 = epoch++ 重建整个实例（理由见装片块）。
     var playerEpoch by remember { mutableIntStateOf(0) }
-    // 换代装片时要不要自动开播：epoch++ 前捕获"切模型那一刻是否在播"，
+    // 换代装片时要不要自动开播：epoch++ 前捕获用户的播放意图，
     // 暂停中切模型就保持暂停（否则暂停调参会被强制开播）。
+    // 取的是 playWhenReady（意图）而不是 isPlaying（事实）：错误回调时播放器已回到 IDLE，
+    // isPlaying 恒为 false，用它会把"错误后自动恢复播放"变成静默暂停。
     var playOnNextPrepare by remember { mutableStateOf(true) }
     val player = remember(playerEpoch) {
         val httpFactory = OkHttpDataSource.Factory(IwaraClient.mediaHttp)
@@ -301,6 +303,9 @@ fun PlayerScreen(
     var detachRetries by remember { mutableStateOf(0) }
     // 切模型相关 1000 错误（dropFrame 空队列）的自动恢复计数（同上，限 2 次）。
     var modelRetries by remember { mutableStateOf(0) }
+    // 上面两个计数属于"当前这一次片源"；用它记住预算是哪一份片源挣来的。
+    //   **不能按 playerEpoch 归零** —— 1000 的恢复就是换代，归零等于每轮都把额度还回去。
+    var recoveryBudgetMediaUrl by remember { mutableStateOf<String?>(null) }
     // 本地视频清晰度标签的依据：播放器上报的分辨率高度（在线视频用 currentQuality）。
     var videoHeight by remember { mutableStateOf<Int?>(null) }
     var videoWidth by remember { mutableStateOf<Int?>(null) }
@@ -348,7 +353,7 @@ fun PlayerScreen(
             player.duration.takeIf { it > 0 }?.let { durationMs = it }
             resumeOnRebuild = true
         }
-        playOnNextPrepare = player.isPlaying
+        playOnNextPrepare = rebuildPlayIntent(player.playWhenReady, player.isPlaying)
         DiagLog.log(TAG, "$reason → 重建播放器实例（第 ${playerEpoch + 1} 代）")
         playerEpoch++
     }
@@ -458,7 +463,7 @@ fun PlayerScreen(
                 //   偶发卡顿）。这不是数据或管线坏掉，从当前进度重新 prepare 即可无缝恢复；
                 //   连发 2 次仍失败才落到错误面板（防死循环）。SR 保持开启，不置 pipelineFailed。
                 if (error.errorCode == PlaybackException.ERROR_CODE_TIMEOUT &&
-                    chainMsg.contains("Detaching surface") && detachRetries < 2
+                    chainMsg.contains("Detaching surface") && mayRetryRecovery(detachRetries)
                 ) {
                     detachRetries++
                     DiagLog.log(TAG, "1003 Surface 切换超时 → 自动从当前进度恢复播放（第 $detachRetries 次）")
@@ -474,7 +479,7 @@ fun PlayerScreen(
                 //   改走换代重建 —— 同片换代，进度经 prepareRebuild 的 resumeOnRebuild 通路
                 //   精确续播；连发 2 次仍失败才落错误面板（防死循环）。
                 if (error.errorCode == PlaybackException.ERROR_CODE_UNSPECIFIED &&
-                    chainMsg.contains("NoSuchElementException") && modelRetries < 2
+                    chainMsg.contains("NoSuchElementException") && mayRetryRecovery(modelRetries)
                 ) {
                     modelRetries++
                     DiagLog.log(TAG, "1000 dropFrame 队列错位 → 重建播放器实例恢复（第 $modelRetries 次）")
@@ -578,7 +583,15 @@ fun PlayerScreen(
         preparedVideoKey = watchKey
         playError = null
         autoRetried = false
-        modelRetries = 0
+        // 自动恢复的重试预算只在**换了片源**时清零。这里曾经无条件 `modelRetries = 0`，
+        // 而 1000 的恢复路径正是"换代 → 新实例 → 标准装片"，于是每轮都把自己的额度还回去，
+        // 上限形同不存在（同一部片可无限重建实例）。1003 的计数此前从不复位，
+        // 换片后上一片的失败会吃掉新片的额度，这里一并按片源复位。
+        if (shouldResetRecoveryBudget(recoveryBudgetMediaUrl, mediaUrl)) {
+            recoveryBudgetMediaUrl = mediaUrl
+            modelRetries = 0
+            detachRetries = 0
+        }
         videoHeight = null
         videoWidth = null
         // 换片/换清晰度时连超分的实测分辨率一起清掉 —— 否则诊断面板会继续显示

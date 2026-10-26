@@ -22,6 +22,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   entry point been reintroduced, every authenticated metadata request would have carried the
   ciphertext as its bearer token and failed.
 
+- Player error recovery actually resumes playback. The rebuild path took the "should I keep
+  playing" flag from `isPlaying`, which is already false by the time the error callback runs, so
+  the 7001 (effect pipeline) and 1000 (frame queue) recoveries rebuilt the player paused — with the
+  error panel cleared, that looked like an unexplained silent stop.
+
+- The 1000 frame-queue recovery honours its two-attempt cap. The counter was reset inside the
+  prepare effect, which the recovery path itself re-enters, so every rebuild refunded its own
+  budget and a video that kept hitting the error could rebuild the player instance forever.
+
+- The playback page shows the author's avatar. It built the URL with the video-thumbnail template
+  instead of the avatar template, so the avatar slot rendered empty.
+
+- Opening a streamed (not downloaded) video seeds the follow state for its author, so an already
+  followed author no longer shows as 「关注」 and the first tap does not silently follow them again.
+
 ## [0.2.0] - 2026-10-25
 
 ### Changed

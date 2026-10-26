@@ -1384,7 +1384,10 @@ class MainActivity : ComponentActivity() {
                             mediaUrl = prs.onlinePlayUrl,
                             // 简介 + 作者头像（列表 DTO 已带，零额外请求）。
                             description = item.body,
-                            avatarUrl = IwaraClient.thumbnailUrl(item.user?.avatar?.id),
+                            // 头像走 avatarUrl（i.iwara.tv/image/avatar/{id}/{name}）；
+                            // thumbnailUrl 是视频封面模板（files.iwara.tv/.../thumbnail-00.jpg），
+                            // 拿它拼头像必然 404，而 AvatarImage 没有兜底图 ⇒ 空白圆圈。
+                            avatarUrl = IwaraClient.avatarUrl(item.user?.avatar),
                             qualities = prs.onlineQualities,
                             currentQuality = prs.onlineQualityName,
                             onRetry = { prs.startResolve(item, closeOnFailure = false) },
