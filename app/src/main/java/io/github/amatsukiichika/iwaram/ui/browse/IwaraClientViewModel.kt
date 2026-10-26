@@ -75,6 +75,11 @@ class IwaraClientViewModel(internal val app: IwaraApp) : ViewModel() {
                     loggedIn = false, username = "", userId = "", avatarUrl = null,
                     message = "登录已过期，请重新登录"
                 )
+                // 过期与主动登出在数据层面是同一件事：凭证没了，账号级状态就必须清掉，
+                // 否则用户换个账号重新登录，看到的还是上一个账号的列表。
+                // 回调可能来自 OkHttp 线程（401 续期），用 viewModelScope 回到主线程再清
+                // ——followStates/likeStates 是 Compose 快照状态，跨线程写不安全。
+                viewModelScope.launch { resetAccountScopedState() }
             }
         }
         if (IwaraSession.isLoggedIn) {
@@ -164,6 +169,8 @@ class IwaraClientViewModel(internal val app: IwaraApp) : ViewModel() {
             _session.value = _session.value.copy(busy = true, message = null)
             try {
                 IwaraSession.login(email, password)
+                // 换号登录：上一个账号的内存状态先清空，再刷新新账号的资料。
+                resetAccountScopedState()
                 refreshSession(loadRemote = true)
                 _session.value = _session.value.copy(busy = false, loggedIn = true)
             } catch (t: Throwable) {
@@ -176,10 +183,35 @@ class IwaraClientViewModel(internal val app: IwaraApp) : ViewModel() {
     fun logout() {
         IwaraSession.logout()
         _session.value = SessionState(checking = false, loggedIn = false)
-        // 登出后订阅流数据不再可信（可能属于上一个账号），下次登录强制重拉。
+        resetAccountScopedState()
+    }
+
+    /**
+     * 账号级内存状态的唯一清空出口。
+     *
+     * 这些槽位装的都是"上一个账号能看到什么"：订阅流、收藏分页器、播放列表、评论，
+     * 以及关注/点赞的本地快照。漏清任意一个就会串号 —— A 登出后 B 登录，页面拿到的
+     * 仍是 A 的列表，而分页器还会接着往后追加 B 的第 2 页。
+     *
+     * 刻意**不**清搜索词与筛选药丸：那是公开内容流的检索状态，与账号无关，
+     * 退出登录不该让用户丢掉正在搜的东西。
+     *
+     * 调用点固定在 logout()、onSessionExpired()、login() 三处；新增账号级状态时
+     * 必须同步加进这里，否则就是一个新的串号入口。
+     */
+    internal fun resetAccountScopedState() {
+        // 订阅流：数据不再可信，下次加载强制从第 0 页重拉。
+        subscribedPager.reset()
         subscribedTrusted = false
+        // 收藏分页器。
+        favoriteVideosPager.reset()
+        favoriteImagesPager.reset()
+        // 播放列表（含断网兜底缓存的展示态）。
+        _playlists.value = PlaylistsState()
+        // 评论面板挂着目标作品与回复态，属于具体会话上下文。
+        _comments.value = CommentsState()
+        // 关注/点赞的本地快照；打底标记一并复位，换账号后必须重新拉一次"我关注了谁"。
         followStates.clear()
-        // 打底标记一并复位：换账号登录后必须重新拉一次"我关注了谁"。
         followSeeded = false
         likeStates.clear()
     }

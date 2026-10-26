@@ -50,20 +50,22 @@ import kotlinx.coroutines.withContext
 fun IwaraClientViewModel.loadPlaylists(force: Boolean = false) {
         val current = _playlists.value
         if (current.loading || (!force && current.loaded)) return
+        // 请求与离线缓存都绑定"发起这次加载时的账号"：中途换号不会把 B 的结果写进 A 的缓存。
+        val accountId = _session.value.userId
         _playlists.value = current.copy(loading = true, error = null)
         viewModelScope.launch {
             try {
                 val items = IwaraClient.call {
-                    it.playlists(_session.value.userId, 0, 100).results.orEmpty()
+                    it.playlists(accountId, 0, 100).results.orEmpty()
                 }
-                repo.savePlaylistsCache(gson.toJson(items))
+                repo.savePlaylistsCache(accountId, gson.toJson(items))
                 _playlists.value = IwaraClientViewModel.PlaylistsState(items = items, loaded = true)
             } catch (t: Throwable) {
                 if (t is CancellationException) throw t
                 // 断网兜底：列表为空且本地有缓存时显示缓存内容，并明确提示。
                 // 缓存读取与 JSON 解析放在 IO 线程（缓存大时主线程会卡顿）。
                 val cached = if (_playlists.value.items.isEmpty()) {
-                    withContext(Dispatchers.IO) { repo.loadPlaylistsCache() }
+                    withContext(Dispatchers.IO) { repo.loadPlaylistsCache(accountId) }
                 } else null
                 if (cached != null) {
                     val items = runCatching {

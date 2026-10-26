@@ -82,9 +82,14 @@ class IwaraRepository(
         // 已把会话 access token 同步给 IwaraApi；本处只在 legacy 手动 token 存在时覆盖
         // （手动模式优先级更高，与 restore 的语义一致），不存在时保留会话 token，
         // 避免本 init 在 repository 首次创建时用 null 抹掉已恢复的鉴权头。
-        prefs.getString("access_token", null)?.takeIf { it.isNotBlank() }?.let {
-            IwaraApi.accessToken = it
-        }
+        // 必须经 getAccessToken() 读：手动 token 落盘时是 v1: 密文（见 setAccessToken），
+        // 把原始值直接当 Bearer 发出去，元数据与 R18 鉴权会全部 401。
+        getAccessToken()?.let { IwaraApi.accessToken = it }
+
+        // 旧版本的播放列表离线缓存用全局 key（不区分账号），换号后断网会读到上一个账号的
+        // 内容。新 key 按 userId 分区（见 playlistsCacheKey），这一份直接丢弃：
+        // 它是纯缓存、可重建，不需要迁移。
+        prefs.edit().remove(LEGACY_PLAYLISTS_CACHE_KEY).apply()
     }
 
     /* ---------- 视频 ID 解析 ---------- */
