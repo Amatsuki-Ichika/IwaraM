@@ -35,8 +35,8 @@ If a predicate fails, the change is not done, whatever the chat says.
 
 ## Evidence
 
-Match evidence to the surface. Do not run the full suite "to be safe"; CI owns exhaustive
-coverage and the platform matrix.
+Match evidence to the surface. Do not run the full suite "to be safe"; CI runs the repository
+gates, the JVM unit tests, lint and the debug build on ubuntu-latest for every pull request.
 
 | Change | Minimum evidence |
 | --- | --- |

@@ -12,7 +12,8 @@ this file only adds what is specific to this directory.
   a migration, and a migration test that opens the previous schema and asserts the result.
 - No destructive fallback (`fallbackToDestructiveMigration`) on the production path. Losing the
   user's library index is not an acceptable "migration".
-- Export the schema for every version so future migrations can be tested against it.
+- Export the schema for every version introduced after schema export was enabled; v1 predates it
+  and is recreated by hand in its migration test.
 
 ## Tokens, sessions and crypto
 
