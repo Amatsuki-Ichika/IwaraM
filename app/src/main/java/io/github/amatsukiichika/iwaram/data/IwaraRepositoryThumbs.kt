@@ -9,6 +9,7 @@ import androidx.documentfile.provider.DocumentFile
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import io.github.amatsukiichika.iwaram.ui.DiagLog
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -51,6 +52,10 @@ suspend fun IwaraRepository.fetchAndApplyMetadata(video: VideoEntity) {
                 refs = tags.map { VideoTagCrossRef(video.localUri, it) }
             )
         } catch (e: Exception) {
+            // 取消必须原样上抛。`CancellationException` 是 `IllegalStateException` 的子类，
+            // 被这个 catch 吞掉后扫描协程会"正常结束"，服务算不出自己是被取消的；
+            // 更糟的是取消被记成"元数据拉取失败"，日志里全是假故障。
+            if (e is CancellationException) throw e
             // 网络失败时保留本地条目，等待后续重试。
             // 无痕迹时"检索完成但元数据缺失"类问题无法归因，这里落 DiagLog。
             DiagLog.log("Repo", "元数据拉取失败 ${video.iwaraId}: ${e.javaClass.simpleName}: ${e.message ?: ""}")

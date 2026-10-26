@@ -45,6 +45,20 @@ import io.github.amatsukiichika.iwaram.ui.DiagLog
 import okhttp3.Request
 import java.util.concurrent.CopyOnWriteArraySet
 
+/**
+ * 这条库记录是不是"同一支视频、但指向一份已经不在的文件"的旧行。
+ *
+ * 三个条件缺一不可：同 iwaraId（调用方已按 iwaraId 查过来）、不是本次写入的 URI、
+ * 且旧文件**确实不在了**。文件还在的行属于用户数据，不能因为一次下载就删掉。
+ * 抽成纯函数是为了把"什么时候算旧行"钉进测试。
+ */
+internal fun isStaleRowForSameVideo(
+    rowUri: String,
+    rowIwaraId: String?,
+    newLocalUri: String,
+    oldFileExists: Boolean
+): Boolean = rowUri != newLocalUri && !rowIwaraId.isNullOrBlank() && !oldFileExists
+
 /** 下载任务状态（UI 可观察）；列表只保留最近的任务用于界面提示。 */
 object DownloadState {
     /** 任务状态机：queued → running →（done | failed | paused）。 */
@@ -621,12 +635,30 @@ class DownloadService : Service() {
         // 之后又下载/续传它一次"），就以已有记录为底、只更新下载相关字段。
         // 无条件 upsert 一条 `relPath = null`、`title = 文件名` 的裸记录，
         // 会把扫描时得到的**文件夹路径（relPath）**以及标题等元数据**冲掉**。
-        val existingRow = dao.byUri(doc.uri.toString())
-        val entity = if (existingRow != null) {
-            existingRow.copy(
+        // 这两种都算"已经在库里"，都应当**替换**而不是新增第二条：
+        //  ① 同一个 localUri（文件先被扫描入库、之后又下载/续传它一次）；
+        //  ② 同一个 iwaraId 但指向一份**已不存在的文件**的旧行 —— 用户删掉文件后重下，
+        //     新文件是新 URI，以前这里按 URI 查不到就再插一条：库里同 iwaraId 两条，
+        //     byIwaraId(...) 命中哪条看运气，点播可能打到已经消失的 URI。
+        val rowByUri = dao.byUri(doc.uri.toString())
+        val staleRow = if (rowByUri == null) {
+            dao.byIwaraId(job.videoId)?.takeIf {
+                isStaleRowForSameVideo(
+                    rowUri = it.localUri,
+                    rowIwaraId = it.iwaraId,
+                    newLocalUri = doc.uri.toString(),
+                    oldFileExists = documentOf(it.localUri) != null
+                )
+            }
+        } else null
+        val baseRow = rowByUri ?: staleRow
+        val entity = if (baseRow != null) {
+            baseRow.copy(
+                // 旧行可能指向已不存在的文件：主键换成新文件的 URI。
+                localUri = doc.uri.toString(),
                 fileName = doc.name ?: job.fileName,
-                iwaraId = existingRow.iwaraId?.takeIf { it.isNotBlank() } ?: job.videoId,
-                localThumbnailPath = existingRow.localThumbnailPath ?: repo.generateLocalThumbnail(doc.uri),
+                iwaraId = baseRow.iwaraId?.takeIf { it.isNotBlank() } ?: job.videoId,
+                localThumbnailPath = baseRow.localThumbnailPath ?: repo.generateLocalThumbnail(doc.uri),
                 // 文件刚落盘，刷新修改日期（也顺带把旧数据的 0 回填成真值）。
                 fileModifiedAt = doc.lastModified().coerceAtLeast(0L),
                 // 强制重拉一次元数据（刚下完，服务端信息最全）。
@@ -656,6 +688,11 @@ class DownloadService : Service() {
             )
         }
         dao.upsert(entity)
+        if (staleRow != null) {
+            // 旧行已被上面这条顶替：主键是 localUri，新行是新键，旧键必须显式删。
+            dao.deleteVideoWithTags(staleRow)
+            DiagLog.log("Download", "替换了指向已丢失文件的旧库行：${job.videoId}")
+        }
         repo.fetchAndApplyMetadata(entity)
 
         val doneMessage = note ?: "下载完成"

@@ -39,7 +39,7 @@ object ScanState {
 }
 
 /**
- * 后台检索前台服务：扫描本地目录并并发抓取 iwara 元数据，
+ * 后台检索前台服务：扫描本地目录并逐个抓取 iwara 元数据，
  * 在通知栏展示进度，完成后发送提醒通知并自动停止。
  */
 class ScanService : Service() {
@@ -47,7 +47,7 @@ class ScanService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     /**
-     * 重入保护：单次扫描可能是分钟量级（本地目录遍历 + 并发抓取 iwara 元数据）。
+     * 重入保护：单次扫描可能是分钟量级（本地目录遍历 + 逐个抓取 iwara 元数据）。
      * `onStartCommand` 每次无条件 `scope.launch { runScan() }` 会在连点「检索」或从通知栏
      * 重入时**并发跑多遍扫描**（重复遍历目录、重复打接口、进度条互相打架）。
      * 用一个原子标志保证同一时刻只有一条扫描在跑。
@@ -107,12 +107,21 @@ class ScanService : Service() {
      * 再点「检索」会重新走一遍）。onTimeout 之后系统只给几秒宽限，不做任何慢操作。
      */
     override fun onTimeout(startId: Int) {
+        // 到限额等于这次扫描结束了：进度状态必须当场归零，否则 UI 的
+        // `running = progress != null` 会一直是 true，「正在检索」永远转圈。
+        ScanState.set(null)
+        running.set(false)
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
 
     override fun onDestroy() {
         scope.cancel()
+        // 进度状态的唯一正常清空点是 [finish]，而取消/销毁路径到不了那里（runScan 对
+        // CancellationException 原样上抛）。不在这里兜底，UI 会永久停在「正在检索」，
+        // 而且 running 重入锁不放开，再点「检索」也起不来。
+        ScanState.set(null)
+        running.set(false)
         super.onDestroy()
     }
 
@@ -124,8 +133,14 @@ class ScanService : Service() {
             return
         }
         try {
-            repo.importFolder(Uri.parse(root)) { done, total ->
+            val imported = repo.importFolder(Uri.parse(root)) { done, total ->
                 pushProgress("扫描文件", done, total)
+            }
+            if (!imported) {
+                // 根目录打不开（SAF 授权失效等）：必须报错。以前这里静默继续，
+                // 最后照样提示"检索完成：本地共 0 个视频"。
+                finish(false, "无法访问该文件夹（授权可能已失效），请在设置里重新选择")
+                return
             }
             repo.fetchAllMissing { done, total ->
                 pushProgress("抓取信息", done, total)
