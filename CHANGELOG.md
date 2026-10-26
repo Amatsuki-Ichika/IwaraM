@@ -59,8 +59,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   checks it when the task reaches the front of the queue and re-resolves the address for the same
   video and quality instead of failing with an HTTP error.
 
-- Download notifications no longer contain the video title, and both notification kinds are marked
-  `VISIBILITY_PRIVATE`. Titles in a lock-screen preview disclose what the user is watching.
+- Download notifications keep the video title in the notification shade, but the lock-screen
+  (`VISIBILITY_PRIVATE`) variant is fully redacted. Titles in a lock-screen preview disclose what
+  the user is watching; the shade is only visible on an unlocked device.
 
 - The "已加入下载队列" toast appears only after the task was actually queued; previously it was
   shown before the detail request and quality lookup ran, so a failure produced a success message
