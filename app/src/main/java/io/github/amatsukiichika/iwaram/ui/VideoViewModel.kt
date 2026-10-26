@@ -12,6 +12,9 @@ import io.github.amatsukiichika.iwaram.data.GlobalFilterHolder
 import io.github.amatsukiichika.iwaram.data.TagEntity
 import io.github.amatsukiichika.iwaram.data.VideoEntity
 import io.github.amatsukiichika.iwaram.data.deleteLocalFile
+import io.github.amatsukiichika.iwaram.data.deleteVideo
+import io.github.amatsukiichika.iwaram.data.observeTags
+import io.github.amatsukiichika.iwaram.data.observeVideos
 import io.github.amatsukiichika.iwaram.data.filterBy
 import io.github.amatsukiichika.iwaram.data.localVideoKeys
 import io.github.amatsukiichika.iwaram.data.linkIwaraId
@@ -32,8 +35,7 @@ import java.time.ZoneId
 /** Iwara 客户端模块与本地库共用的本地视频 ViewModel：筛选、排序、导入、扫描、设置。 */
 class VideoViewModel(private val app: IwaraApp) : ViewModel() {
 
-    private val dao = app.database.videoDao()
-    private val repo = app.repository
+        private val repo = app.repository
 
     private var rawVideos: List<VideoEntity> = emptyList()
     private var rawTags: List<TagEntity> = emptyList()
@@ -141,7 +143,7 @@ class VideoViewModel(private val app: IwaraApp) : ViewModel() {
                         repo.deleteLocalFile(source.localUri)?.let { if (error == null) error = it }
                     }
                     // 行一定要删：文件删不掉却留着行，用户会以为删成功了。
-                    dao.deleteVideoWithTags(source)
+                    repo.deleteVideo(source)
                 }
             }
             onDone(error)
@@ -255,7 +257,7 @@ class VideoViewModel(private val app: IwaraApp) : ViewModel() {
         if (normalizedSrModel != rawSrModel) repo.setSuperResModel(normalizedSrModel)
 
         viewModelScope.launch {
-            dao.observeAll().collect { rows ->
+            repo.observeVideos().collect { rows ->
                 // 多源共存：表里一行一个文件，这里折成"一行一个视频"再往下走。
                 // 折组只影响显示与默认播放哪一份，表结构不变（不需要 Room 迁移）；
                 // 折错了最多显示不对，不会损坏用户数据。
@@ -276,7 +278,7 @@ class VideoViewModel(private val app: IwaraApp) : ViewModel() {
             }
         }
         viewModelScope.launch {
-            dao.observeAllTags().collect {
+            repo.observeTags().collect {
                 rawTags = it.sortedBy { t -> t.name.lowercase() }
                 recompute()
             }
@@ -378,7 +380,7 @@ class VideoViewModel(private val app: IwaraApp) : ViewModel() {
     fun removeFromLibrary(video: VideoEntity) {
         viewModelScope.launch {
             // 清关联 + 删记录收进单个 Room 事务，原子生效。
-            dao.deleteVideoWithTags(video)
+            repo.deleteVideo(video)
         }
     }
 

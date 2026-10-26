@@ -98,6 +98,10 @@ private const val SCRUB_SEEK_INTERVAL_MS = 45L
 @Composable
 fun PlayerScreen(
     video: VideoEntity,
+    /** 同一支视频的全部本地源文件（多源共存时用来在播放页切换/管理）。 */
+    localSources: List<VideoEntity> = emptyList(),
+    /** 删除选中的本地源文件；文件删除由面板的开关决定。 */
+    onDeleteLocalSources: (List<VideoEntity>, Boolean) -> Unit = { _, _ -> },
     /**
      * 本页的"打开令牌"（宿主传每次 openPlayer 都会变的层序号）。
      *
@@ -909,6 +913,8 @@ fun PlayerScreen(
             }
         },
         onSelectQuality = { q -> online?.let { it.onSelectQuality(q) } },
+        localSources = localSources,
+        onDeleteLocalSources = onDeleteLocalSources,
         onRetryPlay = {
             if (online != null) online.onRetry() else {
                 playError = null

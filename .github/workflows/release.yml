@@ -74,8 +74,21 @@ jobs:
         run: ./gradlew :app:assembleRelease -Papp.versionName="$VERSION" --no-daemon
 
       - name: Verify signed APK
+        env:
+          # 与 SECURITY.md 的 "Signing certificate" 同一枚指纹；换 key 时两处必须同时改。
+          EXPECTED_CERT_SHA256: "f4d78c505dfaf5275cd0a214a0e5a76874c052218a8393e61322ae54bcef75f6"
         run: |
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs app/build/outputs/apk/release/app-release.apk
+          APK=app/build/outputs/apk/release/app-release.apk
+          APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          "$APKSIGNER" verify --print-certs "$APK"
+          ACTUAL=$("$APKSIGNER" verify --print-certs "$APK" \
+            | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -1 | tr 'A-F' 'a-f')
+          if [ -z "$ACTUAL" ]; then
+            echo "无法从 apksigner 输出里读到证书指纹"; exit 1
+          fi
+          if [ "$ACTUAL" != "$EXPECTED_CERT_SHA256" ]; then
+            echo "签名指纹不符：期望 $EXPECTED_CERT_SHA256，实际 $ACTUAL"; exit 1
+          fi
 
       - name: Rename and checksum
         run: |

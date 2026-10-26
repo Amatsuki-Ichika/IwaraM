@@ -100,6 +100,7 @@ import io.github.amatsukiichika.iwaram.data.WatchHistoryEntity
 import io.github.amatsukiichika.iwaram.data.GlobalFilterHolder
 import io.github.amatsukiichika.iwaram.data.resumeStartMs
 import io.github.amatsukiichika.iwaram.data.thumbnailFileIdFromUrl
+import io.github.amatsukiichika.iwaram.ui.sourceDisplayName
 import io.github.amatsukiichika.iwaram.ui.COVER_DIM_ALPHA
 import io.github.amatsukiichika.iwaram.ui.COVER_MOTION_MS
 import io.github.amatsukiichika.iwaram.ui.COVER_SHIFT_DP
@@ -1319,6 +1320,8 @@ class MainActivity : ComponentActivity() {
                 // 把「点赞 / 评论 / 关注作者」接入本地播放页。连上服务器前整行隐藏（LOADING）、
                 // 拉取失败置灰（UNAVAILABLE），网络不佳时不给出注定失败的操作入口。
                 val localIwaraId = video.iwaraId?.takeIf { it.isNotBlank() && video.localUri.isNotBlank() }
+                // 同一支视频的全部本地源（表里一行一个文件，这里已经折过组）。
+                val localSourceList = vm.localSourcesOf(video)
                 var localNet by remember(localIwaraId) { mutableStateOf(OnlineNetState.LOADING) }
                 var localLiked by remember(localIwaraId) { mutableStateOf(false) }
                 var localAuthorId by remember(localIwaraId) { mutableStateOf<String?>(null) }
@@ -1467,11 +1470,20 @@ class MainActivity : ComponentActivity() {
                     localIwaraId != null -> OnlineVideoExtras(
                         liked = localLiked,
                         mediaUrl = null,
-                        qualities = emptyList(),
-                        currentQuality = null,
+                        // 本地多源：把源文件喂给同一个清晰度 chip，点它即可换源。
+                        qualities = localSourceList.let { list ->
+                            if (list.size > 1) list.map { QualityOption(it.sourceDisplayName(), it.localUri) }
+                            else emptyList()
+                        },
+                        currentQuality = localSourceList.firstOrNull { it.localUri == video.localUri }
+                            ?.sourceDisplayName(),
                         netState = localNet,
                         canFollow = localAuthorId != null && sessionState.loggedIn,
                         following = localFollowing,
+                        onSelectQuality = { q ->
+                            // 换源 = 换一份本地文件；同一个 iwaraId ⇒ 观看进度照常续播。
+                            localSourceList.firstOrNull { it.localUri == q.url }?.let { prs.currentVideo = it }
+                        },
                         onToggleLike = {
                             val previous = localLiked
                             localLiked = !previous
@@ -1515,6 +1527,14 @@ class MainActivity : ComponentActivity() {
                 val commentTargetId = curOnline?.id ?: localIwaraId
                 PlayerScreen(
                     video = video,
+                    localSources = localSourceList,
+                    onDeleteLocalSources = { chosen, deleteFiles ->
+                        vm.removeLocalSources(chosen, deleteFiles) { err ->
+                            if (err != null) {
+                                Toast.makeText(context, err, Toast.LENGTH_LONG).show()
+                            }
+                        }
+                    },
                     // 每次打开都会变的层序号 → 播放页据此把预测返回的跟手位移（backProgress）清零，
                     // 避免退场被打断重进时残留位移留在屏上。
                     entryToken = playerSeq,
