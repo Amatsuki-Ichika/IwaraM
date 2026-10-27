@@ -38,9 +38,12 @@ and install it. The build targets **arm64-v8a** devices running **Android 8.0 (A
 Testing builds (RCs) are published to the [releases page](https://github.com/Amatsuki-Ichika/IwaraM/releases)
 marked as pre-releases; the download link above always points at the latest stable.
 
-Because each release is signed with the same certificate, newer versions can be installed over
-older ones. Builds signed by anyone else cannot — uninstall first if you are coming from a
-different build. Verify a download as described in [SECURITY.md](SECURITY.md).
+Because each release is signed with the same certificate, later versions can normally be installed
+over older ones. Builds signed by anyone else cannot — uninstall first if you are coming from a
+different build. There is one exception: 0.2.0 uses a different application ID from 0.1.0, so
+Android treats it as a different app — uninstall and reinstall, or install both side by side. The
+library index, watch history and settings do not migrate; media files in folders you chose are
+untouched. Verify a download as described in [SECURITY.md](SECURITY.md).
 
 ## Build from source
 
@@ -58,14 +61,16 @@ echo "sdk.dir=$ANDROID_HOME" > local.properties
 ./gradlew :app:assembleRelease # signed release APK; needs keystore.properties, see CONTRIBUTING.md
 ```
 
-The app version has a single source of truth in `gradle.properties` (`app.versionCode`,
-`app.versionName`) and can be overridden per build: `./gradlew assembleRelease -Papp.versionName=0.2.0`.
+The version name has a single source of truth in `gradle.properties` (`app.versionName`) and can be
+overridden per build with `-Papp.versionName`; `versionCode` is derived from it in
+`app/build.gradle.kts` (`major * 10000 + minor * 100 + patch`, pre-release suffix ignored).
 
 ## Architecture
 
-A single-activity Compose app with a hand-written overlay stack, a repository layer over Room
-and Retrofit, and per-screen ViewModels — deliberately without a DI framework or a navigation
-library. See [docs/architecture.md](docs/architecture.md) for the module map and the
+A single-activity Compose app with a hand-written overlay stack and a repository layer over Room
+and Retrofit. There are only two app-scoped, shared ViewModels — `VideoViewModel` for the local
+library and `IwaraClientViewModel` for online browsing — deliberately without a DI framework or a
+navigation library. See [docs/architecture.md](docs/architecture.md) for the module map and the
 conventions used in this codebase.
 
 ## Contributing

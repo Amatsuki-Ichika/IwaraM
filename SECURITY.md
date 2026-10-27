@@ -22,8 +22,10 @@ We aim to acknowledge reports within a few days.
 
 ## Verifying a release build
 
-Every release APK is signed with the project's release certificate, and the same certificate
-is used for every version so builds can be updated in place. To verify a downloaded APK:
+Every release APK is signed with the project's release certificate, and the same certificate is
+used for every version. A matching certificate is necessary for an in-place update, but not
+sufficient by itself: 0.2.0 changed the application ID, so 0.1.0 installations cannot update in
+place (see the install notes in [README.en.md](README.en.md#install)). To verify a downloaded APK:
 
 ```bash
 apksigner verify --print-certs IwaraM-<version>-arm64-v8a.apk

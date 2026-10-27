@@ -35,8 +35,10 @@
 测试版（RC）也会发布在 [Releases 页面](https://github.com/Amatsuki-Ichika/IwaraM/releases)并标注为
 pre-release；上面的下载链接始终指向最新的正式版。
 
-每个版本都用同一张证书签名，因此新版本可以直接覆盖安装旧版本；由他人签名的包则不能——
-若你之前用的是别的签名包，请先卸载。校验下载文件的完整性与签名见 [SECURITY.md](SECURITY.md)。
+每个版本都用同一张证书签名，因此后续版本通常可以原地覆盖安装；由他人签名的包则不能——
+若你之前用的是别的签名包，请先卸载。例外：0.1.0 到 0.2.0 更换了 `applicationId`，Android
+视为另一个应用，必须卸载重装或并存安装；本地库索引、观看历史与设置不会迁移，用户自选目录
+里的媒体文件不受影响。校验下载文件的完整性与签名见 [SECURITY.md](SECURITY.md)。
 
 ## 从源码构建
 
@@ -54,13 +56,15 @@ echo "sdk.dir=$ANDROID_HOME" > local.properties
 ./gradlew :app:assembleRelease # 签名 Release APK，需要 keystore.properties，见 CONTRIBUTING.md
 ```
 
-版本号以 `gradle.properties` 里的 `app.versionCode` / `app.versionName` 为唯一来源，也可在构建时覆盖：
-`./gradlew assembleRelease -Papp.versionName=0.2.0`。
+版本名的唯一来源是 `gradle.properties` 里的 `app.versionName`，也可在构建时用
+`-Papp.versionName=0.2.0` 覆盖；`versionCode` 由 `app/build.gradle.kts` 从版本名推导
+（`major * 10000 + minor * 100 + patch`，忽略预发布后缀）。
 
 ## 架构
 
-单 Activity 的 Compose 应用，配手写的覆盖层栈；数据层由 Repository 封装 Room 与 Retrofit，
-各页面各自持有 ViewModel —— 有意不引入 DI 框架与 Navigation 库。模块地图与代码约定见
+单 Activity 的 Compose 应用，配手写的覆盖层栈；数据层由 Repository 封装 Room 与 Retrofit。
+全仓只有两个应用级共享的 ViewModel：`VideoViewModel` 管本地库，`IwaraClientViewModel` 管
+在线浏览 —— 有意不引入 DI 框架与 Navigation 库。模块地图与代码约定见
 [docs/architecture.md](docs/architecture.md)。
 
 ## 参与贡献

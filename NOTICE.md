@@ -7,7 +7,7 @@ Full licence texts are available from the links below.
 
 | Component | Licence | Source |
 | --- | --- | --- |
-| AndroidX (Core, Activity, Lifecycle, Room, DocumentFile, Test) | Apache-2.0 | https://github.com/androidx/androidx |
+| AndroidX (Core, Activity, Lifecycle, Room, DocumentFile) | Apache-2.0 | https://github.com/androidx/androidx |
 | Jetpack Compose (UI, Material 3, Material Icons) | Apache-2.0 | https://github.com/androidx/androidx |
 | Kotlin standard library and kotlinx.coroutines | Apache-2.0 | https://github.com/Kotlin/kotlinx.coroutines |
 | Retrofit and Gson converter | Apache-2.0 | https://github.com/square/retrofit |
@@ -27,5 +27,6 @@ Full licence texts are available from the links below.
 
 | Component | Licence | Source |
 | --- | --- | --- |
+| AndroidX Test (Core) | Apache-2.0 | https://github.com/androidx/androidx |
 | JUnit 4 | EPL-1.0 | https://github.com/junit-team/junit4 |
 | Robolectric | MIT | https://github.com/robolectric/robolectric |

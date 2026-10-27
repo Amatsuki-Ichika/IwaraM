@@ -6,8 +6,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
-    <!-- 关闭云备份：会话 token 以明文存放在 SharedPreferences 中，而 SAF 目录授权本来也无法跨设备还原，
-         备份只会扩大凭据的暴露面。 -->
+    <!-- 关闭云备份：会话 token 已用 AndroidKeyStore 的 AES-256-GCM 密钥加密后存入 SharedPreferences，
+         仅当 KeyStore 不可用时降级为明文；而 SAF 目录授权本来也无法跨设备还原，备份只会扩大凭据的暴露面。 -->
     <!-- 启动图标使用普通方形 drawable 而非自适应图标：原图的最大半径超出自适应图标的遮罩范围，
          用自适应图标必然被裁掉边缘。 -->
     <application

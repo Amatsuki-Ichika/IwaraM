@@ -11,8 +11,9 @@ for descriptive purposes.
 
 ## Content
 
-This application is a client. It does not host, store or distribute any content itself —
-everything it displays is fetched from the service the user is connected to.
+This application is a client. It does not host, store or distribute any content on a server —
+everything it displays is fetched from the service the user is connected to. Files the user chooses
+to download are saved only on the user's own device.
 
 The service may contain material intended for **adults only**. By using this application you
 confirm that you are of legal age in your jurisdiction and that accessing such material is

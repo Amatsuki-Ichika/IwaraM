@@ -7,8 +7,9 @@ This document describes how the app is put together. It is meant to be read alon
 
 IwaraM is a **single-activity Jetpack Compose app**. There is deliberately no dependency
 injection framework and no navigation library: screens are composed directly, and navigation is a
-small hand-written overlay stack. State is held in `StateFlow`s, most of which live in
-`IwaraRepository`, which acts as the single source of truth for both data and settings.
+small hand-written overlay stack. State is held in `StateFlow`s and Compose state, split by area:
+settings live in `IwaraRepository`, local-library state in `VideoViewModel`, and online state in
+`IwaraClientViewModel`.
 
 ```
                      ┌──────────────────────── MainActivity ─────────────────────────┐
