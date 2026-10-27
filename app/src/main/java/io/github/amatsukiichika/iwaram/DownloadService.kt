@@ -18,6 +18,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -34,8 +36,10 @@ import io.github.amatsukiichika.iwaram.data.VideoEntity
 import io.github.amatsukiichika.iwaram.data.addDownloadHistory
 import io.github.amatsukiichika.iwaram.data.fetchAndApplyMetadata
 import io.github.amatsukiichika.iwaram.data.generateLocalThumbnail
+import io.github.amatsukiichika.iwaram.data.isSignedUrlExpired
 import io.github.amatsukiichika.iwaram.data.loadPendingDownloads
 import io.github.amatsukiichika.iwaram.data.removePendingDownload
+import io.github.amatsukiichika.iwaram.data.resolveDownloadTarget
 import io.github.amatsukiichika.iwaram.data.savePendingDownload
 import io.github.amatsukiichika.iwaram.ui.DiagLog
 import okhttp3.Request
@@ -191,10 +195,18 @@ internal fun pendingToTask(p: PendingDownload): DownloadState.Task = DownloadSta
 internal suspend fun drainDownloadQueue(
     queue: ReceiveChannel<DownloadService.Job>,
     execute: suspend (DownloadService.Job) -> Unit,
-    onIdle: suspend (Int) -> Unit = {}
+    onIdle: suspend (Int) -> Unit = {},
+    /**
+     * 出队即判定"这个任务在排队期间被取消了"。返回 true 时不执行、改走 [onCancelled]。
+     *
+     * 判定带副作用（消费掉取消标记）而不是查询状态：取消是**一次性事件**，
+     * 标记被读走后不能残留，否则用户之后再下同一支视频会被立刻取消。
+     */
+    isCancelled: (DownloadService.Job) -> Boolean = { false },
+    onCancelled: suspend (DownloadService.Job) -> Unit = {}
 ) {
     for (job in queue) {
-        execute(job)
+        if (isCancelled(job)) onCancelled(job) else execute(job)
         // 注意 Channel 语义：isEmpty 表示"receive 会挂起吗"——对"已关闭且已取空"的 channel
         // 它返回 false（receive 不挂起而是立即返回关闭结果），所以必须并上 isClosedForReceive
         // 才能覆盖"最后一批任务消费完"的情形。
@@ -233,6 +245,10 @@ class DownloadService : Service() {
                         activeJobs.remove(job.videoId)
                     }
                 },
+                // 排队期间被取消的任务：出队即丢弃，绝不执行（旧的取消只清了记录与列表条目，
+                // Channel 里的 job 原封不动，worker 出队后又把任务写回「正在下载」并开下）。
+                isCancelled = { job -> cancelRequested.remove(job.videoId) },
+                onCancelled = { job -> discardCancelled(job) },
                 onIdle = { lastStartId ->
                     // 前台通知随任务走：队列清空后收起常驻通知；随后按 startId 协议自停，
                     // 空跑的服务不再常驻进程。stopSelf(lastStartId) 是 IntentService 同款的
@@ -264,14 +280,14 @@ class DownloadService : Service() {
         if (job == null) {
             // startForegroundService 拉起后必须先 startForeground 再移除，
             // 否则五秒内未进入前台会崩（ForegroundServiceDidNotStartInTime）。
-            startForeground(PROGRESS_NOTIF_ID, progressNotification("准备下载", 0, 0, true))
+            startForeground(PROGRESS_NOTIF_ID, progressNotification(0, 0, true))
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
             return START_NOT_STICKY
         }
         // 必须在 onStartCommand 内立即 startForeground（worker 可能正忙于上一个任务，
         // 排队中的新任务等不到 5 秒约束）；后续通知由 runDownload 的进度回调接管。
-        startForeground(PROGRESS_NOTIF_ID, progressNotification("准备下载", 0, 0, true))
+        startForeground(PROGRESS_NOTIF_ID, progressNotification(0, 0, true))
         // 排队任务必须立刻登记进「正在下载」列表并持久化：
         // 否则排队中的任务不可见，且杀后台后会凭空消失（只有 runDownload 出队才登记）。
         DownloadState.upsert(
@@ -335,6 +351,18 @@ class DownloadService : Service() {
         super.onDestroy()
     }
 
+    /**
+     * 排队期间被取消的任务：清掉落盘记录与列表条目。
+     * 队列中的任务通常还没有半成品文件（出队才建），真留下了半成品由 UI 的
+     * removePendingCompletely 按 docUri 删。
+     */
+    private suspend fun discardCancelled(job: Job) = withContext(Dispatchers.IO) {
+        val app = application as IwaraApp
+        runCatching { app.repository.removePendingDownload(job.videoId) }
+        DownloadState.remove(job.videoId)
+        DiagLog.log("Download", "排队任务已取消：${job.title}")
+    }
+
     private suspend fun runDownload(job: Job): Unit = withContext(Dispatchers.IO) {
         val app = application as IwaraApp
         val repo = app.repository
@@ -379,6 +407,20 @@ class DownloadService : Service() {
         val root = if (customRoot == null) iwaraDownloadDir(baseRoot) else baseRoot
         val pending = repo.loadPendingDownloads().firstOrNull { it.videoId == job.videoId }
         val sanitized = FileNameSanitizer.sanitize(job.fileName)
+
+        // 排队久了签名地址会过期（地址带 expires，见 isSignedUrlExpired）。出队时先验一次，
+        // 过期就用**同一个 videoId + 同一个档位**重新解析 —— 否则这次下载必然以 401/403 收场，
+        // 而用户除了在列表里点「重新下载」没有任何办法（这正是以前排队多任务时的表现）。
+        var sourceUrl = job.url
+        if (isSignedUrlExpired(sourceUrl, System.currentTimeMillis())) {
+            DiagLog.log("Download", "排队期间签名地址已过期，重新解析：${job.title}")
+            val fresh = runCatching { resolveDownloadTarget(repo, job.videoId, job.quality) }
+            if (fresh.isFailure) {
+                fail(job, repo, "下载地址已过期，请重新下载")
+                return@withContext
+            }
+            sourceUrl = fresh.getOrThrow().url
+        }
 
         // 库里**已经有这支视频**（同一个 iwaraId）而且文件还在 ⇒ 直接以已有文件收尾，
         // 不再下载、更不新建第二份。不检查"这支视频是否已存在"时，同名/异名都会再复制一份进库，
@@ -427,10 +469,12 @@ class DownloadService : Service() {
             return@withContext
         }
 
+        // 读循环里被用户取消时置位：走完 use 块（关流）之后再删文件、清记录。
+        var cancelledByUser = false
         try {
             // mediaHttp 对带 expires 的地址自动附加 X-Version 签名并带浏览器头，
             // 与播放同栈，避免下载地址被 CDN 拒签；这里再做一次协议补全防御。
-            val url = IwaraSign.httpsUrl(job.url.trim())
+            val url = IwaraSign.httpsUrl(sourceUrl.trim())
             val reqBody = Request.Builder()
                 .url(url)
                 .get()
@@ -472,6 +516,16 @@ class DownloadService : Service() {
                         // 收尾由 finishDownload() 兜底刷到完成态，观感无差别、开销降两个数量级。
                         var lastProgressAt = 0L
                         while (true) {
+                            // 用户在排队/下载中点「取消」：直接收尾，不把文件下完。
+                            if (cancelRequested.remove(job.videoId)) {
+                                cancelledByUser = true
+                                break
+                            }
+                            // 服务被销毁（scope.cancel）时也必须停：阻塞的 read 不响应协程取消，
+                            // 只检查暂停标记会让它在服务销毁后继续把文件读完，最后卡在
+                            // finishDownload 的第一个挂起点上抛 CancellationException ——
+                            // 磁盘上留下一个既没入库、也不在续传列表里的孤儿文件。
+                            currentCoroutineContext().ensureActive()
                             if (pauseRequested.remove(job.videoId)) {
                                 // 暂停：关流保留半成品，任务记为 PAUSED 并持久化，等用户点「继续」。
                                 outs.flush()
@@ -493,7 +547,7 @@ class DownloadService : Service() {
                                         state = DownloadState.STATE_PAUSED
                                     )
                                 )
-                                notify(DONE_NOTIF_ID, doneNotification(true, "已暂停：${job.title}"))
+                                notify(DONE_NOTIF_ID, doneNotification(true, "已暂停，可在应用内继续"))
                                 return@withContext
                             }
                             val n = ins.read(buf)
@@ -512,13 +566,23 @@ class DownloadService : Service() {
                                 )
                                 notify(
                                     PROGRESS_NOTIF_ID,
-                                    progressNotification(job.title, received, total, total <= 0)
+                                    progressNotification(received, total, total <= 0)
                                 )
                             }
                         }
                         outs.flush()
                     }
                 }
+            }
+
+            if (cancelledByUser) {
+                // 取消 = "这个文件我不要了"：记录、列表条目、半成品一起清。
+                // 与 UI 的 removePendingCompletely 同语义，两边都幂等。
+                runCatching { repo.removePendingDownload(job.videoId) }
+                DownloadState.remove(job.videoId)
+                runCatching { doc.delete() }
+                DiagLog.log("Download", "已取消：${job.title}")
+                return@withContext
             }
 
             finishDownload(job, repo, dao, doc)
@@ -608,10 +672,8 @@ class DownloadService : Service() {
                 localUri = doc.uri.toString()
             )
         )
-        notify(
-            DONE_NOTIF_ID,
-            doneNotification(true, "$doneMessage：${job.title}\n已加入管理器库")
-        )
+        // 通知同样不带标题（理由见 progressNotification）。
+        notify(DONE_NOTIF_ID, doneNotification(true, "$doneMessage，已加入管理器库"))
     }
 
     /**
@@ -687,20 +749,34 @@ class DownloadService : Service() {
 
     /* ---------- 通知 ---------- */
 
-    private fun progressNotification(title: String, received: Long, total: Long, indeterminate: Boolean): Notification {
+    /**
+     * 进度通知：**不显示视频标题**。
+     *
+     * 这个应用的内容是成人向的，标题落在锁屏预览里等于把"用户在看什么"公开给旁边的人。
+     * 进度与总大小足够判断"还在动"，具体是哪一支在应用内看。
+     * 显式声明 VISIBILITY_PRIVATE：锁屏会按系统的「隐藏敏感内容」设置降级展示，
+     * 而不是依赖系统的默认值（隐私相关的默认值不该是隐含契约）。
+     */
+    private fun progressNotification(received: Long, total: Long, indeterminate: Boolean): Notification {
         // 进度值先过纯函数钳制（received>total 会让 progress 超过 max、
         // 超大文件 total/1024 有 Int 溢出风险），详见 notificationProgressBounds。
         val (max, progress) = notificationProgressBounds(received, total)
+        val detail = if (total > 0) "${sizeText(received)} / ${sizeText(total)}" else "正在准备"
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("正在下载")
-            .setContentText(title)
+            .setContentText(detail)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .setContentIntent(openAppIntent())
             .setProgress(max, progress, indeterminate)
             .build()
     }
+
+    /** 通知里的体积文案（不含任何内容标识）。 */
+    private fun sizeText(bytes: Long): String =
+        if (bytes >= 1_048_576L) "${bytes / 1_048_576L} MB" else "${bytes / 1024L} KB"
 
     private fun doneNotification(success: Boolean, message: String): Notification =
         NotificationCompat.Builder(this, CHANNEL_ID)
@@ -708,6 +784,7 @@ class DownloadService : Service() {
             .setContentTitle(if (success) "下载" else "下载失败")
             .setContentText(message)
             .setStyle(NotificationCompat.BigTextStyle().bigText(message))
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .setContentIntent(openAppIntent())
             .setAutoCancel(true)
             .build()
@@ -755,10 +832,17 @@ class DownloadService : Service() {
         /** 在跑（已出队、尚未收尾）任务的 videoId 集合：onTimeout 据此批量转暂停。 */
         private val activeJobs = CopyOnWriteArraySet<String>()
 
+        /**
+         * 取消标记：UI 置入。
+         * worker 出队前消费一次（排队中取消），读循环每 64KB 再消费一次（正好在跑时取消）。
+         */
+        private val cancelRequested = CopyOnWriteArraySet<String>()
+
         fun start(context: Context, job: Job) {
-            // 暂停标记在「主动发起新任务」时清除：如果在 runDownload 出队后清，
-            // 排队中的任务在入队前置入的暂停标记会被出队时误清，导致"暂停排队任务"失效。
+            // 暂停/取消标记在「主动发起新任务」时清除：如果在 runDownload 出队后清，
+            // 排队中的任务在入队前置入的标记会被出队时误清，导致"暂停/取消排队任务"失效。
             pauseRequested.remove(job.videoId)
+            cancelRequested.remove(job.videoId)
             val i = Intent(context, DownloadService::class.java)
                 .putExtra(EXTRA_ID, job.videoId)
                 .putExtra(EXTRA_TITLE, job.title)
@@ -771,6 +855,18 @@ class DownloadService : Service() {
         /** 暂停：置标记，读循环在下一次 64KB 检查时安全停下（文件、记录都保留）。 */
         fun pause(videoId: String) {
             pauseRequested.add(videoId)
+        }
+
+        /**
+         * 取消：排队中的任务出队时被丢弃、不会执行；正好在跑的任务由读循环收尾
+         * （关流 → 删半成品 → 清记录）。
+         *
+         * 调用方（UI）仍要照常清理记录/列表/文件 —— 两边都是幂等的，谁先到谁后到都不会留垃圾。
+         * 标记是"一次性事件"，会被消费方读走；下次 [start] 同一支视频也会清掉它，
+         * 所以取消过的视频不会在下次下载时被误取消。
+         */
+        fun cancel(videoId: String) {
+            cancelRequested.add(videoId)
         }
     }
 }

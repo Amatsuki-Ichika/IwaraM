@@ -283,8 +283,12 @@ private fun ActiveDownloadsList(cvm: IwaraClientViewModel, modifier: Modifier = 
                                         cvm.startDownloadById(task.videoId, scope = scope) { showDownloadToast(ctx, it) }
                                     }) { Text("继续", style = MaterialTheme.typography.bodySmall) }
                                     TextButton(onClick = {
-                                        // 弃掉整个未完成任务：删记录 + 删半成品文件；文件删失败要**说出来**
+                                        // 弃掉整个未完成任务：先让服务放下这个任务（排队中的会在出队时
+                                        // 被丢弃，正好在跑的由读循环收尾），再删记录 + 删半成品文件。
+                                        // 顺序不能反：先删记录的话，worker 出队会重新登记一条 running。
+                                        // 文件删失败要**说出来**。
                                         scope.launch {
+                                            DownloadService.cancel(task.videoId)
                                             removePendingCompletely(ctx, task.videoId, task.docUri)
                                                 ?.let { showDownloadToast(ctx, it) }
                                         }

@@ -37,6 +37,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Opening a streamed (not downloaded) video seeds the follow state for its author, so an already
   followed author no longer shows as 「关注」 and the first tap does not silently follow them again.
 
+- Cancelling a queued download actually cancels it. The cancel button only removed the record,
+  the list entry and any partial file; the job stayed in the service queue, so the worker started
+  it once the previous download finished and re-registered it as running — the task came back.
+
+- A download that waited in the queue no longer fails because its signed URL expired. The URL is
+  minted when the task is created and carries an `expires` timestamp; the download service now
+  checks it when the task reaches the front of the queue and re-resolves the address for the same
+  video and quality instead of failing with an HTTP error.
+
+- Download notifications no longer contain the video title, and both notification kinds are marked
+  `VISIBILITY_PRIVATE`. Titles in a lock-screen preview disclose what the user is watching.
+
+- The "已加入下载队列" toast appears only after the task was actually queued; previously it was
+  shown before the detail request and quality lookup ran, so a failure produced a success message
+  followed by an error.
+
+- Destroying the download service now stops the read loop instead of letting it finish the file.
+
 ## [0.2.0] - 2026-10-25
 
 ### Changed
