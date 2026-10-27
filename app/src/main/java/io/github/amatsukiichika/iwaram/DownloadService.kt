@@ -294,14 +294,14 @@ class DownloadService : Service() {
         if (job == null) {
             // startForegroundService 拉起后必须先 startForeground 再移除，
             // 否则五秒内未进入前台会崩（ForegroundServiceDidNotStartInTime）。
-            startForeground(PROGRESS_NOTIF_ID, progressNotification(0, 0, true))
+            startForeground(PROGRESS_NOTIF_ID, progressNotification("准备下载", 0, 0, true))
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
             return START_NOT_STICKY
         }
         // 必须在 onStartCommand 内立即 startForeground（worker 可能正忙于上一个任务，
         // 排队中的新任务等不到 5 秒约束）；后续通知由 runDownload 的进度回调接管。
-        startForeground(PROGRESS_NOTIF_ID, progressNotification(0, 0, true))
+        startForeground(PROGRESS_NOTIF_ID, progressNotification("准备下载", 0, 0, true))
         // 排队任务必须立刻登记进「正在下载」列表并持久化：
         // 否则排队中的任务不可见，且杀后台后会凭空消失（只有 runDownload 出队才登记）。
         DownloadState.upsert(
@@ -561,7 +561,7 @@ class DownloadService : Service() {
                                         state = DownloadState.STATE_PAUSED
                                     )
                                 )
-                                notify(DONE_NOTIF_ID, doneNotification(true, "已暂停，可在应用内继续"))
+                                notify(DONE_NOTIF_ID, doneNotification(true, "已暂停：${job.title}"))
                                 return@withContext
                             }
                             val n = ins.read(buf)
@@ -580,7 +580,7 @@ class DownloadService : Service() {
                                 )
                                 notify(
                                     PROGRESS_NOTIF_ID,
-                                    progressNotification(received, total, total <= 0)
+                                    progressNotification(job.title, received, total, total <= 0)
                                 )
                             }
                         }
@@ -709,8 +709,8 @@ class DownloadService : Service() {
                 localUri = doc.uri.toString()
             )
         )
-        // 通知同样不带标题（理由见 progressNotification）。
-        notify(DONE_NOTIF_ID, doneNotification(true, "$doneMessage，已加入管理器库"))
+        // 通知栏带标题、锁屏走脱敏 public 版本（理由见 progressNotification）。
+        notify(DONE_NOTIF_ID, doneNotification(true, "$doneMessage：${job.title}\n已加入管理器库"))
     }
 
     /**
@@ -787,14 +787,20 @@ class DownloadService : Service() {
     /* ---------- 通知 ---------- */
 
     /**
-     * 进度通知：**不显示视频标题**。
+     * 进度通知：通知栏显示标题，**锁屏走脱敏的 public 版本**。
      *
-     * 这个应用的内容是成人向的，标题落在锁屏预览里等于把"用户在看什么"公开给旁边的人。
-     * 进度与总大小足够判断"还在动"，具体是哪一支在应用内看。
-     * 显式声明 VISIBILITY_PRIVATE：锁屏会按系统的「隐藏敏感内容」设置降级展示，
-     * 而不是依赖系统的默认值（隐私相关的默认值不该是隐含契约）。
+     * 这个应用的内容是成人向的：标题直接落在锁屏预览里，等于把"用户在看什么"告诉旁边的人。
+     * 因此：通知栏（设备已解锁）保留标题，方便同时下多个任务时分辨；同时显式声明
+     * VISIBILITY_PRIVATE 并给一份**完全不含内容**的 public 版本 —— 系统在「锁屏隐藏
+     * 敏感内容」档位下展示的是它，而不是把正文模糊掉。不显式设置的 PRIVATE 只是默认值，
+     * 隐私相关的默认值不该是隐含契约。
      */
-    private fun progressNotification(received: Long, total: Long, indeterminate: Boolean): Notification {
+    private fun progressNotification(
+        title: String,
+        received: Long,
+        total: Long,
+        indeterminate: Boolean
+    ): Notification {
         // 进度值先过纯函数钳制（received>total 会让 progress 超过 max、
         // 超大文件 total/1024 有 Int 溢出风险），详见 notificationProgressBounds。
         val (max, progress) = notificationProgressBounds(received, total)
@@ -802,14 +808,28 @@ class DownloadService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("正在下载")
-            .setContentText(detail)
+            .setContentText(title)
+            .setSubText(detail)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setPublicVersion(redactedPublicVersion(ongoing = true))
             .setContentIntent(openAppIntent())
             .setProgress(max, progress, indeterminate)
             .build()
     }
+
+    /**
+     * 锁屏脱敏版本：**任何字段都不含视频信息**。
+     * 系统在「锁屏隐藏敏感内容」档位下展示的是它 —— 这是标题能安全出现在通知栏的前提。
+     */
+    private fun redactedPublicVersion(ongoing: Boolean): Notification =
+        NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle("IwaraM")
+            .setContentText(if (ongoing) "正在下载" else "下载任务已结束")
+            .setOngoing(ongoing)
+            .build()
 
     /** 通知里的体积文案（不含任何内容标识）。 */
     private fun sizeText(bytes: Long): String =
@@ -822,6 +842,7 @@ class DownloadService : Service() {
             .setContentText(message)
             .setStyle(NotificationCompat.BigTextStyle().bigText(message))
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setPublicVersion(redactedPublicVersion(ongoing = false))
             .setContentIntent(openAppIntent())
             .setAutoCancel(true)
             .build()
