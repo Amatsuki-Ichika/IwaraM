@@ -78,6 +78,8 @@ internal fun PlayerBottomBar(
     onSelectSr: (String?) -> Unit,
     onInteract: () -> Unit,
     onSelectQuality: (QualityOption) -> Unit,
+    /** 本地多源时的管理入口；null = 只有一份源，菜单里不出现。 */
+    onManageSources: (() -> Unit)? = null,
     onTogglePlay: () -> Unit,
     onSeekStart: () -> Unit,
     onSeek: (Long) -> Unit,
@@ -170,6 +172,19 @@ internal fun PlayerBottomBar(
                             onClick = {
                                 closeMenu()
                                 onSelectQuality(q)
+                                onInteract()
+                            }
+                        )
+                    }
+                    // 本地多源才有管理入口：与选档同一张菜单，但排在最后一行，
+                    // 日常播放时看不见它（这是删除流程的入口，低频且不可逆）。
+                    if (onManageSources != null) {
+                        AnchorMenuItem(
+                            text = "管理源文件…",
+                            selected = false,
+                            onClick = {
+                                closeMenu()
+                                onManageSources.invoke()
                                 onInteract()
                             }
                         )

@@ -28,7 +28,10 @@ definition of done are in the root AGENTS.md; this file only adds what is specif
 
 ## Text and accessibility
 
-- User-facing strings live in string resources, not in composables. Keep sentence case.
+- The UI is single-language Simplified Chinese today, with copy written inline in composables.
+  New copy follows that: **do not** start a half-migrated state. Before a second language is
+  added, the screen being touched must move to resources first, one screen per change, named
+  `<screen>_<element>` (e.g. `player_sources_title`).
 - Icon-only buttons need a content description; decorative images need none.
 - Kotlin comments are Simplified Chinese, matching the UI language; do not translate existing ones.
 

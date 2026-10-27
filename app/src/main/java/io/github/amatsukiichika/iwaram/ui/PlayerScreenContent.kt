@@ -21,6 +21,10 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -123,8 +127,14 @@ internal fun PlayerContent(
     /** 底栏进度条的拖动开始 / 目标 / 结束（与视频区横拖是两条入口）。 */
     onSeekStart: () -> Unit,
     onSeek: (Long) -> Unit,
-    onSeekEnd: () -> Unit
+    onSeekEnd: () -> Unit,
+    /** 同一支视频的全部本地源文件（已按推荐顺序排好）；只有一份时为空也不显示管理入口。 */
+    localSources: List<VideoEntity> = emptyList(),
+    /** 删除选中的源；deleteFiles 默认由面板控制（默认 false）。 */
+    onDeleteLocalSources: (List<VideoEntity>, Boolean) -> Unit = { _, _ -> }
 ) {
+    // 源文件管理面板的开关：只在用户点菜单里的「管理源文件…」时打开。
+    var showSources by remember { mutableStateOf(false) }
     // 根容器透明，背景放在内层 Column 上并随内容一起右滑，
     // 预测式返回时露出下方主页内容，避免左半边出现空白背景。
     Box(
@@ -272,6 +282,19 @@ internal fun PlayerContent(
                     )
                 }
 
+                // 源文件管理（本地多源）：与诊断面板同层，盖在播放页之上。
+                if (showSources && localSources.size > 1) {
+                    PlayerSourcesSheet(
+                        sources = localSources,
+                        currentUri = video.localUri,
+                        onDismiss = { showSources = false },
+                        onDelete = { chosen, deleteFiles ->
+                            showSources = false
+                            onDeleteLocalSources(chosen, deleteFiles)
+                        }
+                    )
+                }
+
                 // 顶部短条渐变遮罩：返回 + 标题（淡入淡出 + 上滑动画）。
                 PlayerTopBar(
                     visible = controlsVisible,
@@ -304,6 +327,8 @@ internal fun PlayerContent(
                     onSelectSr = onSelectSr,
                     onInteract = pokeControls,
                     onSelectQuality = onSelectQuality,
+                    // 只有多源时才给菜单加「管理源文件…」：单源没有可管理的对象。
+                    onManageSources = if (localSources.size > 1) ({ showSources = true }) else null,
                     onTogglePlay = onTogglePlay,
                     onSeekStart = onSeekStart,
                     onSeek = onSeek,

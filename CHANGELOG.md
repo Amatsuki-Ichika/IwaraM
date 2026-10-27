@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The local library shows one entry per video instead of one per file. A video downloaded in
+  several qualities used to appear as several cards; rows are now folded by Iwara id (files whose
+  id could not be parsed always stay separate), and the highest quality is the one that plays by
+  default.
+
+- The player's quality chip lists the copy on disk, so a second quality can be played without
+  leaving playback, and the same menu opens 「管理源文件…」. Removing sources asks for a selection
+  first: the disk file is kept unless 「同时删除磁盘上的文件」 is switched on, deleting every source
+  warns that the entry will leave the library, and a file the system refuses to delete is reported
+  instead of silently ignored.
+
 ### Fixed
 
 - Switching accounts no longer leaks the previous account's data. Logging out, a session expiring,

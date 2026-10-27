@@ -32,7 +32,9 @@ this file only adds what is specific to this directory.
 
 ## Repository
 
-- `IwaraRepository` is the single source of truth for data and settings. UI code does not open a
-  DAO or a client directly.
+- `IwaraRepository` is the single source of truth for persisted data and settings. UI code never
+  opens the database: add a repository function instead (see `observeVideos` / `deleteVideo`).
+- Remote API calls are allowed from the two shared ViewModels (`VideoViewModel`,
+  `IwaraClientViewModel`); screens go through them. A third place calling `IwaraClient` is a defect.
 - Settings are exposed as `StateFlow`s. A new setting needs a default, a persistence path and a
   place in the settings screen; keep those in one change.

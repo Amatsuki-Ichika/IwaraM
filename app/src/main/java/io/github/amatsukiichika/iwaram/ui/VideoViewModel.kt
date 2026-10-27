@@ -11,6 +11,10 @@ import io.github.amatsukiichika.iwaram.ScanState
 import io.github.amatsukiichika.iwaram.data.GlobalFilterHolder
 import io.github.amatsukiichika.iwaram.data.TagEntity
 import io.github.amatsukiichika.iwaram.data.VideoEntity
+import io.github.amatsukiichika.iwaram.data.deleteLocalFile
+import io.github.amatsukiichika.iwaram.data.deleteVideo
+import io.github.amatsukiichika.iwaram.data.observeTags
+import io.github.amatsukiichika.iwaram.data.observeVideos
 import io.github.amatsukiichika.iwaram.data.filterBy
 import io.github.amatsukiichika.iwaram.data.localVideoKeys
 import io.github.amatsukiichika.iwaram.data.linkIwaraId
@@ -23,6 +27,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.time.Instant
 import java.time.YearMonth
 import java.time.ZoneId
@@ -30,8 +35,7 @@ import java.time.ZoneId
 /** Iwara 客户端模块与本地库共用的本地视频 ViewModel：筛选、排序、导入、扫描、设置。 */
 class VideoViewModel(private val app: IwaraApp) : ViewModel() {
 
-    private val dao = app.database.videoDao()
-    private val repo = app.repository
+        private val repo = app.repository
 
     private var rawVideos: List<VideoEntity> = emptyList()
     private var rawTags: List<TagEntity> = emptyList()
@@ -105,6 +109,46 @@ class VideoViewModel(private val app: IwaraApp) : ViewModel() {
      */
     private val _downloadedIwaraIds = MutableStateFlow<Set<String>>(emptySet())
     val downloadedIwaraIds: StateFlow<Set<String>> = _downloadedIwaraIds.asStateFlow()
+
+    /**
+     * 每个逻辑条目（key = [localSourceKey]）下的全部源文件，已按推荐播放顺序排好。
+     *
+     * 库列表只显示每组的第一份（[LocalSourceGroup.primary]），其余靠这里取：
+     * 播放页切换源、删除某一份，都要用到。
+     */
+    private val _localSources = MutableStateFlow<Map<String, List<VideoEntity>>>(emptyMap())
+    val localSources: StateFlow<Map<String, List<VideoEntity>>> = _localSources.asStateFlow()
+
+    /** 这支视频的全部本地源文件（含它自己）；只有一份时就是它本身。 */
+    fun localSourcesOf(video: VideoEntity): List<VideoEntity> =
+        _localSources.value[localSourceKey(video)] ?: listOf(video)
+
+    /**
+     * 删除选中的源文件。
+     *
+     * [deleteFiles] **默认必须是 false**：只移除库条目，磁盘文件原样保留。真删文件是用户的
+     * 显式选择，SAF 拒绝时要把原因报回去（[onDone] 非 null），不能静默吞掉。
+     */
+    fun removeLocalSources(
+        sources: List<VideoEntity>,
+        deleteFiles: Boolean,
+        onDone: (String?) -> Unit
+    ) {
+        if (sources.isEmpty()) { onDone(null); return }
+        viewModelScope.launch {
+            var error: String? = null
+            withContext(Dispatchers.IO) {
+                for (source in sources) {
+                    if (deleteFiles) {
+                        repo.deleteLocalFile(source.localUri)?.let { if (error == null) error = it }
+                    }
+                    // 行一定要删：文件删不掉却留着行，用户会以为删成功了。
+                    repo.deleteVideo(source)
+                }
+            }
+            onDone(error)
+        }
+    }
 
     /**
      * **全部**本地视频（未经本地库当前筛选/搜索/排序处理）。
@@ -213,22 +257,28 @@ class VideoViewModel(private val app: IwaraApp) : ViewModel() {
         if (normalizedSrModel != rawSrModel) repo.setSuperResModel(normalizedSrModel)
 
         viewModelScope.launch {
-            dao.observeAll().collect {
-                rawVideos = it
+            repo.observeVideos().collect { rows ->
+                // 多源共存：表里一行一个文件，这里折成"一行一个视频"再往下走。
+                // 折组只影响显示与默认播放哪一份，表结构不变（不需要 Room 迁移）；
+                // 折错了最多显示不对，不会损坏用户数据。
+                val groups = groupLocalSources(rows)
+                val collapsed = groups.map { it.primary }
+                _localSources.value = groups.associate { it.key to it.sources }
+                rawVideos = collapsed
                 // 作者二级页订阅的原始列表（不受本地库当前筛选影响）：随 DB 变化立刻反映。
                 // 这一步必须写在重算体之外：重算跑在后台且可能被作废，
                 //   而 _allVideos 的正确性只取决于 rawVideos，直接在这里赋值更准也更快。
-                _allVideos.value = it
+                _allVideos.value = collapsed
                 // 内容没变就不换实例 —— 这个 Set 通过 CompositionLocal 下发给**每张
                 //   在线卡片**，换新实例会让所有可见卡片重新读一次并重组。DB 变化很频繁
                 //   （扫描/下载期间尤甚），而"已下载 id 集合"其实很少真的变。
-                val ids = it.mapNotNull { v -> v.iwaraId?.takeIf { id -> id.isNotBlank() } }.toSet()
+                val ids = collapsed.mapNotNull { v -> v.iwaraId?.takeIf { id -> id.isNotBlank() } }.toSet()
                 if (ids != _downloadedIwaraIds.value) _downloadedIwaraIds.value = ids
                 recompute()
             }
         }
         viewModelScope.launch {
-            dao.observeAllTags().collect {
+            repo.observeTags().collect {
                 rawTags = it.sortedBy { t -> t.name.lowercase() }
                 recompute()
             }
@@ -330,7 +380,7 @@ class VideoViewModel(private val app: IwaraApp) : ViewModel() {
     fun removeFromLibrary(video: VideoEntity) {
         viewModelScope.launch {
             // 清关联 + 删记录收进单个 Room 事务，原子生效。
-            dao.deleteVideoWithTags(video)
+            repo.deleteVideo(video)
         }
     }
 
