@@ -55,6 +55,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Destroying the download service now stops the read loop instead of letting it finish the file.
 
+- The library stops trusting rows whose file is gone. A scan only ever added or updated rows, so
+  deleting a video in a file manager left its row behind: the online card still showed 「已下载」,
+  opening it failed, and downloading the same video again inserted a second row for the same
+  Iwara id — after which "find the local copy" could pick the dead one. A scan now prunes rows it
+  did not find on disk, and only after confirming the file really is absent.
+
+- Re-downloading a video whose local file was deleted replaces the old row instead of adding a
+  second one for the same Iwara id.
+
+- A cancelled scan no longer leaves the library page stuck on 「正在检索」. The progress state is
+  cleared when the service is destroyed or hits the foreground-service time limit, and a scan that
+  cannot open its folder now reports the failure instead of finishing with 「检索完成」.
+
 ## [0.2.0] - 2026-10-25
 
 ### Changed

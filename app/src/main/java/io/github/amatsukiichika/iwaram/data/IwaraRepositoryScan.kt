@@ -26,9 +26,16 @@ import java.io.File
     /**
      * 扫描 SAF 树下的所有视频文件，逐个入库并拉取 iwara 元数据。
      */
-suspend fun IwaraRepository.importFolder(treeUri: Uri, onProgress: (done: Int, total: Int) -> Unit) {
-        withContext(Dispatchers.IO) {
-            val root = DocumentFile.fromTreeUri(context, treeUri) ?: return@withContext
+suspend fun IwaraRepository.importFolder(treeUri: Uri, onProgress: (done: Int, total: Int) -> Unit): Boolean {
+        return withContext(Dispatchers.IO) {
+            val root = DocumentFile.fromTreeUri(context, treeUri)
+            if (root == null) {
+                // 授权失效（重装、清数据、用户在系统里撤销）必须让调用方知道：
+                // 静默 return 会让扫描接着报「检索完成：本地共 N 个视频」（N 往往是 0），
+                // 用户看到"检索完成"却一条没多，无从归因。
+                DiagLog.log("Repo", "扫描根目录不可访问（SAF 授权可能已失效）")
+                return@withContext false
+            }
             setRootName(root.name)
             val files = mutableListOf<Pair<DocumentFile, String>>()
             collectVideoFiles(root, "", files)
@@ -119,8 +126,51 @@ suspend fun IwaraRepository.importFolder(treeUri: Uri, onProgress: (done: Int, t
             }
             flushBatch()
             if (mtimeBackfill.isNotEmpty()) dao.setFileModifiedAtBatch(mtimeBackfill)
+
+            // 收尾：清掉「文件确实已经不在了」的库行。
+            // 只检查这次扫描没见到的行 —— 稳态重扫时这个集合是空的，零开销。
+            // 一个文件都没扫到时整体跳过：根目录暂时不可达不能当成"用户把库删光了"。
+            val unseen = existing.values.filter { it.localUri !in handled }
+            if (files.isNotEmpty() && unseen.isNotEmpty()) {
+                val pruned = pruneMissingRows(unseen) { uri ->
+                    // 查询本身失败（授权暂失）当作"还在"：宁可留着一条脏行，也不误删库索引。
+                    runCatching {
+                        DocumentFile.fromSingleUri(context, Uri.parse(uri))?.exists() == true
+                    }.getOrDefault(true)
+                }
+                if (pruned.isNotEmpty()) {
+                    DiagLog.log("Repo", "扫描收尾：清理了 ${pruned.size} 条指向已不存在文件的库行")
+                }
+            }
+            true
         }
     }
+
+/**
+ * 扫描收尾要删掉哪些行：**这次没扫到** 且 **文件确实不存在**。
+ *
+ * 两个条件是"与"不是"或"。扫描没看到但文件还在（换了根目录、目录暂时不可达）绝不能删 ——
+ * 那删的是用户的库索引。抽成纯函数是为了把这条判据钉在测试里。
+ */
+internal fun rowsToPrune(unseen: List<VideoRefRow>, fileExists: (String) -> Boolean): List<VideoRefRow> =
+    unseen.filterNot { fileExists(it.localUri) }
+
+/**
+ * 删除指向已不存在文件的行（连同标签关联）。
+ *
+ * 扫描以前只 upsert 不删除，于是文件被文件管理器删掉后旧行一直留着：在线卡片的「已下载」
+ * 标记、本地库查询、下载查重都还信任它，点播直接失败。
+ */
+private suspend fun IwaraRepository.pruneMissingRows(
+    unseen: List<VideoRefRow>,
+    fileExists: (String) -> Boolean
+): List<VideoRefRow> {
+    val doomed = rowsToPrune(unseen, fileExists)
+    for (ref in doomed) {
+        dao.byUri(ref.localUri)?.let { dao.deleteVideoWithTags(it) }
+    }
+    return doomed
+}
 
     /** 重扫已保存的根目录（用于刷新时增量更新）。 */
 suspend fun IwaraRepository.rescanStoredRoot(onProgress: (Int, Int) -> Unit) {
