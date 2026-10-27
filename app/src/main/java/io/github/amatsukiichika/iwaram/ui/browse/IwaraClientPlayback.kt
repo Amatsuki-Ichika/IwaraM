@@ -137,6 +137,16 @@ fun IwaraClientViewModel.resolveOnlineUrl(
                 // 详情现取：fileUrl 带时效签名，不能复用列表数据。
                 val detail = IwaraClient.call { it.video(id) }
                 likeStates[likeKey("video", id)] = detail.liked == true
+                // 关注态打底放在解析之后单独跑：它最多要翻 5 页关注列表，塞进主链路会把
+                // "点开即播"拖慢好几拍。本地视频路径（loadVideoOnlineState）早有这一步，
+                // 纯在线路径此前漏了 —— 已关注的作者在播放页显示成「关注」，
+                // 用户第一下点击反而是去关注，而不是取消关注。
+                detail.user?.id?.let { authorId ->
+                    viewModelScope.launch {
+                        ensureFollowStatesSeeded()
+                        followStates[authorId] = followStates[authorId] ?: false
+                    }
+                }
                 val fileUrl = detail.fileUrl
                 if (fileUrl.isNullOrBlank()) {
                     onResult(

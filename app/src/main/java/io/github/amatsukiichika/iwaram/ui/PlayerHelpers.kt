@@ -144,6 +144,36 @@ internal fun recoverAtCurrentPosition(player: ExoPlayer, url: String) {
 }
 
 /**
+ * 同一种自动恢复最多重试几次；达到上限就把错误交给面板，不再重建实例。
+ *
+ * 上限本身不防死循环 —— 防死循环靠"预算只在换片源时清零"，见 [shouldResetRecoveryBudget]。
+ */
+internal const val PLAYER_RECOVERY_MAX_ATTEMPTS = 2
+
+/** 这一种自动恢复还有没有额度。 */
+internal fun mayRetryRecovery(attempts: Int): Boolean = attempts < PLAYER_RECOVERY_MAX_ATTEMPTS
+
+/**
+ * 重试预算是否该清零 —— **只在换片源时**清零。
+ *
+ * 曾经的实现把 `modelRetries = 0` 直接写进装片 effect，而 1000（帧队列错位）的恢复路径正是
+ * "换代重建 → 新实例 → 走标准装片"，于是每一轮都把自己的额度还回去，`< 2` 的上限形同不存在：
+ * 同一部片可以无限重建播放器实例。判据必须用**跨重建存活**的片源身份（`mediaUrl`），
+ * 不能用随换代归零的 `preparedUrl`/`preparedVideoKey`。
+ */
+internal fun shouldResetRecoveryBudget(previousMediaUrl: String?, currentMediaUrl: String): Boolean =
+    previousMediaUrl != currentMediaUrl
+
+/**
+ * 换代重建后要不要继续播放。
+ *
+ * 不能用 `isPlaying` 判断意图：`onPlayerError` 回调触发时 ExoPlayer 已回到 IDLE，
+ * `isPlaying` 恒为 false，于是"自动恢复播放"实际恢复成暂停；而错误已被清空，
+ * 用户看到的是没有任何提示的静默暂停。`playWhenReady` 才是用户意图。
+ */
+internal fun rebuildPlayIntent(playWhenReady: Boolean, isPlaying: Boolean): Boolean = playWhenReady
+
+/**
  * 观看进度落笔的公共收口（暂停那一拍与 5 秒心跳同款样板）。
  * key 推不出（无 iwaraId 且无 localUri）直接跳过；fire-and-forget 由仓库私有 IO 作用域承担。
  */
