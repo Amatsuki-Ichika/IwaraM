@@ -48,13 +48,13 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
-import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.media3.common.C
 import io.github.amatsukiichika.iwaram.ui.components.AnchorMenu
+import io.github.amatsukiichika.iwaram.ui.components.AnchorMenuGeometry
 import io.github.amatsukiichika.iwaram.ui.components.AnchorMenuInfo
 import io.github.amatsukiichika.iwaram.ui.components.AnchorMenuItem
 import io.github.amatsukiichika.iwaram.ui.components.LocalDebugDetails
@@ -429,8 +429,9 @@ internal fun PlayerTopBar(
  * [menuContent] 收一个 `closeMenu` 参数 —— 菜单项点击后自己调用来收起菜单
  * （弹出的 onDismissRequest 只覆盖"点外部关闭"那条路径）。
  * 宽度上限 92.dp：保证与右侧相邻 chip 不互相挤占（弹性组结构的硬保证）。
- * 弹出体用 [AnchorMenu]（而非 M3 DropdownMenu）：强制锚点**下方**展开
- * （M3 空间不足会自动向上翻，导致 SR 菜单盖住视频）+ 32dp 紧凑行高（字号不变）。
+ * 弹出体用 [AnchorMenu]（而非 M3 DropdownMenu）：落位交给 [AnchorMenuGeometry]（方向、贴边距、
+ * 内部滚动，展开方向与"盖住视频下缘"的代价见 `docs/decisions/0007-player-menu-placement.md`），
+ * 行高压到 32dp（字号不变）。锚点范围必须每次布局都量进 `anchorRect`：位置、高度上限、缩放原点全靠它。
  */
 @Composable
 private fun MenuChip(
@@ -441,14 +442,14 @@ private fun MenuChip(
     menuContent: @Composable (closeMenu: () -> Unit) -> Unit
 ) {
     var menuOpen by remember { mutableStateOf(false) }
-    // 锚点底边在窗口内的 y → 菜单最大高度（锚点底到屏底 − 余量）；放不下内部滚动、绝不向上翻。
-    var anchorBottomDp by remember { mutableStateOf(0.dp) }
-    val density = LocalDensity.current
-    val screenH = LocalConfiguration.current.screenHeightDp.dp
-    val menuMaxHeight = (screenH - anchorBottomDp - 14.dp).coerceAtLeast(120.dp)
+    // 锚点（chip 整块）在窗口内的像素范围 → 菜单的展开方向、高度上限、缩放原点。
+    var anchorRect by remember { mutableStateOf(IntRect.Zero) }
     Box(
         Modifier.onGloballyPositioned { coords ->
-            anchorBottomDp = with(density) { (coords.positionInWindow().y + coords.size.height).toDp() }
+            val position = coords.positionInWindow()
+            val left = position.x.roundToInt()
+            val top = position.y.roundToInt()
+            anchorRect = IntRect(left, top, left + coords.size.width, top + coords.size.height)
         }
     ) {
         Text(
@@ -491,7 +492,7 @@ private fun MenuChip(
                 menuOpen = false
                 onInteract()
             },
-            maxHeight = menuMaxHeight
+            anchor = anchorRect
         ) {
             menuContent { menuOpen = false }
         }

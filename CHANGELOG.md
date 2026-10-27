@@ -81,6 +81,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cleared when the service is destroyed or hits the foreground-service time limit, and a scan that
   cannot open its folder now reports the failure instead of finishing with 「检索完成」.
 
+- The player's quality and super-resolution menus no longer open off-screen. Placement used to be
+  pinned to "always downward" with a hard 120 dp height floor, so a chip near the bottom edge (and
+  any fullscreen window) pushed the menu past the screen border. The menu now opens into the side
+  that actually fits (upward from the bottom bar), right-aligns with the chip, keeps itself inside
+  the window and scrolls internally when the content is taller than the space. It also animates:
+  fade plus a slight scale from the chip corner on open, and a quicker fade-out on close.
+
 ## [0.2.0] - 2026-10-25
 
 ### Changed
