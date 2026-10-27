@@ -70,12 +70,26 @@ fun IwaraRepository.loadPendingDownloads(): List<PendingDownload> =
             }
             .orEmpty()
 
+/** 旧版本用的全局 key；只用于在 init 里清除，不参与读写。 */
+internal const val LEGACY_PLAYLISTS_CACHE_KEY = "playlists_cache"
+
+/**
+ * 播放列表离线缓存的 prefs key，**按账号分区**。
+ *
+ * 全局 key 的问题是：A 断网登录过、B 再断网登录时，缓存里装的是 A 的播放列表，
+ * 而界面无从判断这是谁的。userId 为空（会话尚未恢复）时返回 null ⇒ 不读也不写：
+ * 拿不到账号归属时，宁可没有缓存也不冒串号的风险。
+ */
+internal fun playlistsCacheKey(userId: String): String? =
+    userId.takeIf { it.isNotBlank() }?.let { "playlists_cache_$it" }
+
     /** 播放列表离线缓存（JSON），断网时「我的」页展示。 */
-fun IwaraRepository.savePlaylistsCache(json: String) {
-        prefs.edit().putString("playlists_cache", json).apply()
+fun IwaraRepository.savePlaylistsCache(userId: String, json: String) {
+        playlistsCacheKey(userId)?.let { prefs.edit().putString(it, json).apply() }
     }
 
-fun IwaraRepository.loadPlaylistsCache(): String? = prefs.getString("playlists_cache", null)?.takeIf { it.isNotBlank() }
+fun IwaraRepository.loadPlaylistsCache(userId: String): String? =
+        playlistsCacheKey(userId)?.let { key -> prefs.getString(key, null)?.takeIf { it.isNotBlank() } }
 
     /**
      * 记一条观看（fire-and-forget）。同 key 重看经唯一索引 REPLACE 原地覆盖 = 天然置顶；

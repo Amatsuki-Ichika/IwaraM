@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Switching accounts no longer leaks the previous account's data. Logging out, a session expiring,
+  or signing in as someone else now clears the account-scoped state held in memory —
+  subscriptions, favorites, playlists, the comment pane, and the follow/like snapshots — instead of
+  leaving it on screen while the new account's pages were appended onto the old account's lists.
+
+- The offline playlists cache is stored per account instead of in one shared slot, so launching
+  without a network can no longer show the playlists of whoever was signed in before.
+
+- A manually pasted access token is decrypted when the repository starts. The startup path used to
+  read the raw preference, which after token encryption is `v1:` ciphertext; had the manual-token
+  entry point been reintroduced, every authenticated metadata request would have carried the
+  ciphertext as its bearer token and failed.
+
 ## [0.2.0] - 2026-10-25
 
 ### Changed
