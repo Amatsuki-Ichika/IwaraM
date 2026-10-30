@@ -53,6 +53,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.ui.browse.CompactSearchSlot
 import io.github.amatsukiichika.iwaram.ui.browse.RATING_OPTIONS
 import io.github.amatsukiichika.iwaram.ui.browse.SEARCH_ROW_HEIGHT
@@ -406,7 +407,7 @@ fun LibraryTopBar(vm: VideoViewModel) {
                             onClick = vm::clearFilter,
                             label = { Text(filter.label) },
                             trailingIcon = {
-                                Icon(Icons.Filled.Close, contentDescription = "清除", Modifier.heightIn(max = 18.dp))
+                                Icon(Icons.Filled.Close, contentDescription = tr("清除", "Clear"), Modifier.heightIn(max = 18.dp))
                             },
                             shape = RoundedCornerShape(50),
                             colors = accentInputChipColors()
@@ -423,15 +424,13 @@ private fun ModeSelector(
     current: LibraryMode,
     onSelect: (LibraryMode) -> Unit
 ) {
-    val labels = remember {
-        mapOf(
-            LibraryMode.ALL to "全部",
-            LibraryMode.FOLDER to "文件夹",
-            LibraryMode.AUTHOR to "作者",
-            LibraryMode.TIME to "时间",
-            LibraryMode.TAG to "标签"
-        )
-    }
+    val labels = mapOf(
+        LibraryMode.ALL to tr("全部", "All"),
+        LibraryMode.FOLDER to tr("文件夹", "Folders"),
+        LibraryMode.AUTHOR to tr("作者", "Authors"),
+        LibraryMode.TIME to tr("时间", "Time"),
+        LibraryMode.TAG to tr("标签", "Tags")
+    )
 
     // 滑块实现统一委托给 PillSelector（全仓库唯一实现）。
     PillSelector(
@@ -499,7 +498,7 @@ private fun SearchSortRow(
                 open = searchOpen,
                 query = query,
                 onQueryChange = onQueryChange,
-                placeholder = "搜索标题 / 作者 / 标签",
+                placeholder = tr("搜索标题 / 作者 / 标签", "Search title / author / tag"),
                 onOpen = { searchOpen = true },
                 onClose = {
                     onQueryChange("")

@@ -76,6 +76,9 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import io.github.amatsukiichika.iwaram.data.IwaraClient
 import io.github.amatsukiichika.iwaram.data.VideoEntity
+import io.github.amatsukiichika.iwaram.i18n.AppLanguage
+import io.github.amatsukiichika.iwaram.i18n.tr
+import io.github.amatsukiichika.iwaram.i18n.trCount
 import io.github.amatsukiichika.iwaram.ui.components.AvatarImage
 import io.github.amatsukiichika.iwaram.ui.components.PillSegment
 import io.github.amatsukiichika.iwaram.ui.components.PillSelector
@@ -171,7 +174,7 @@ internal fun DetailsSection(
         ) {
         PillSelector(
             segments = listOf(
-                PillSegment(DetailsTab.INTRO, "简介"),
+                PillSegment(DetailsTab.INTRO, tr("简介", "About")),
                 PillSegment(DetailsTab.COMMENTS, commentTabLabel(video.commentCount))
             ),
             selected = tab,
@@ -212,10 +215,12 @@ private fun IntroColumn(
     }
     // remember 必须在 LazyColumn 外（LazyListScope 非组合上下文，组合函数不允许在里面调用）。
     // 统计行只保留 日期/播放 + R18 药丸：评论数已由评论 tab 标签带数量、「赞」已由点赞按钮带数量。
-    val stats = remember(video) {
+    val stats = remember(video, AppLanguage.mode) {
         buildList {
             video.createdAt?.let { add(Icons.Filled.Schedule to dateStr(it)) }
-            video.viewCount?.let { add(Icons.Filled.Visibility to "${formatCount(it)} 播放") }
+            video.viewCount?.let { count ->
+                add(Icons.Filled.Visibility to "${formatCount(count)} " + trCount(count, "播放", "view", "views"))
+            }
         }
     }
     // 换片（点相关推荐）时滚回顶部：remember 的滚动位置跨视频保留，不复位的话
@@ -322,7 +327,7 @@ private fun IntroColumn(
             item("related") {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     HorizontalDivider(color = cs.surfaceVariant)
-                    Text("相关推荐", style = MaterialTheme.typography.titleSmall, color = cs.onBackground)
+                    Text(tr("相关推荐", "Related videos"), style = MaterialTheme.typography.titleSmall, color = cs.onBackground)
                     related.forEach { item ->
                         RelatedRow(item = item, onClick = { onOpenRelated(item) })
                     }
@@ -398,7 +403,7 @@ private fun ActionButtonsRow(
                 icon = if (online.liked) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
                 // 常态文案（不显示「连接中 / 未连接」）。
                 label = buildString {
-                    append(if (online.liked) "已赞" else "点赞")
+                    append(if (online.liked) tr("已赞", "Liked") else tr("点赞", "Like"))
                     video.likeCount?.let { append(" ").append(formatCount(it)) }
                 },
                 onClick = online.onToggleLike,
@@ -414,7 +419,7 @@ private fun ActionButtonsRow(
             if (onAddToPlaylist != null) {
                 DetailActionButton(
                     icon = Icons.Filled.Add,
-                    label = "收藏",
+                    label = tr("收藏", "Favorite"),
                     onClick = onAddToPlaylist,
                     modifier = Modifier.weight(1f),
                     enabled = isActionable
@@ -428,7 +433,7 @@ private fun ActionButtonsRow(
         if (downloaded || online != null) {
             DetailActionButton(
                 icon = if (downloaded) Icons.Filled.DownloadDone else Icons.Filled.Download,
-                label = if (downloaded) "已下载" else "下载",
+                label = if (downloaded) tr("已下载", "Downloaded") else tr("下载", "Download"),
                 onClick = { if (!downloaded) online?.onDownload?.invoke() },
                 modifier = Modifier.weight(1f),
                 enabled = !downloaded && isActionable,
@@ -438,7 +443,7 @@ private fun ActionButtonsRow(
         video.iwaraId?.takeIf { it.isNotBlank() }?.let { id ->
             DetailActionButton(
                 icon = Icons.AutoMirrored.Filled.OpenInNew,
-                label = "原视频",
+                label = tr("原视频", "Original"),
                 onClick = { openInBrowser(context, videoPageUrl(id)) },
                 modifier = Modifier.weight(1f)
             )
@@ -522,7 +527,7 @@ private fun CommentsTabPane(targetId: String?, pane: @Composable () -> Unit) {
             contentAlignment = Alignment.Center
         ) {
             Text(
-                "未匹配 Iwara 视频，暂无评论",
+                tr("未匹配 Iwara 视频，暂无评论", "No comments: unmatched Iwara video"),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -533,8 +538,11 @@ private fun CommentsTabPane(targetId: String?, pane: @Composable () -> Unit) {
 }
 
 /** 评论 tab 文案：有计数显示「评论 1.2万」，无计数只显示「评论」。 */
-internal fun commentTabLabel(count: Int?): String =
-    if (count == null) "评论" else "评论 ${formatCount(count)}"
+internal fun commentTabLabel(count: Int?): String {
+    if (count == null) return tr("评论", "Comments")
+    val formatted = formatCount(count)
+    return tr("评论 $formatted", "$formatted " + trCount(count, "评论", "comment", "comments"))
+}
 
 /**
  * 视频简介块：默认折叠 2 行省略，点整块或「展开 ▾ / 收起 ▴」切换
@@ -558,7 +566,7 @@ private fun DescriptionBlock(body: String) {
             overflow = TextOverflow.Ellipsis
         )
         Text(
-            text = if (expanded) "收起 ▴" else "展开 ▾",
+            text = if (expanded) tr("收起 ▴", "Collapse ▴") else tr("展开 ▾", "Expand ▾"),
             style = MaterialTheme.typography.labelMedium,
             color = cs.primary,
             modifier = Modifier.padding(top = 4.dp)
@@ -582,13 +590,13 @@ private fun RelatedRow(item: RelatedVideo, onClick: () -> Unit) {
         is RelatedVideo.Online -> RelatedRowUi(
             title = item.item.title.orEmpty(),
             author = item.item.user?.name,
-            meta = item.item.numViews?.let { "${formatCount(it)} 次播放" },
+            meta = item.item.numViews?.let { n -> "${formatCount(n)} " + trCount(n, "次播放", "view", "views") },
             thumbnail = IwaraClient.thumbnailUrl(item.item.file?.id)
         )
         is RelatedVideo.Local -> RelatedRowUi(
             title = item.video.title.ifBlank { item.video.fileName },
             author = item.video.author,
-            meta = item.video.viewCount?.let { "${formatCount(it)} 次播放" },
+            meta = item.video.viewCount?.let { n -> "${formatCount(n)} " + trCount(n, "次播放", "view", "views") },
             thumbnail = item.video.localThumbnailPath ?: item.video.thumbnailUrl
         )
     }
@@ -641,7 +649,7 @@ private fun RelatedRow(item: RelatedVideo, onClick: () -> Unit) {
  * general = 一般，ecchi = R18；其它未知值原样显示。
  */
 private fun ratingLabelOf(raw: String): String = when (raw.trim().lowercase()) {
-    "general" -> "一般"
+    "general" -> tr("一般", "General")
     "ecchi" -> "R18"
     else -> raw
 }
@@ -747,7 +755,7 @@ private fun DetailsAuthorRow(
             modifier = Modifier.alpha(if (canFollow) 1f else 0f)
         ) {
             Text(
-                text = if (following) "已关注" else "关注",
+                text = if (following) tr("已关注", "Following") else tr("关注", "Follow"),
                 style = MaterialTheme.typography.labelLarge,
                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
             )

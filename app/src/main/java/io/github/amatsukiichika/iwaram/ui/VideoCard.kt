@@ -15,8 +15,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material3.Card
+import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -34,7 +38,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import io.github.amatsukiichika.iwaram.data.MediaFormats
 import io.github.amatsukiichika.iwaram.data.VideoEntity
+import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.ui.components.CardDateLabel
 import io.github.amatsukiichika.iwaram.ui.components.R18Pill
 import io.github.amatsukiichika.iwaram.ui.theme.LocalTagContainer
@@ -103,7 +109,12 @@ data class VideoCardModel(
      * 发布日期（毫秒）。非空时在封面**左下角**画一枚日期胶囊
      * （<1h 刚刚 / <24h n 小时前 / <30d n 天前 / 其余 yyyy-MM-dd，见 [cardDateText]）。
      */
-    val createdAtMs: Long? = null
+    val createdAtMs: Long? = null,
+    /**
+     * 纯音频条目（按扩展名判定，见 [MediaFormats.mimeTypeFor]）。
+     * 没有缩略图时在占位底色上居中画一个音符，否则音频条目是一整块空白色块。
+     */
+    val isAudio: Boolean = false
 )
 
 /**
@@ -143,6 +154,17 @@ fun VideoCardContent(
                         contentDescription = model.title,
                         modifier = Modifier.matchParentSize(),
                         contentScale = ContentScale.Crop
+                    )
+                }
+                // 纯音频条目没有可抽的视频帧：占位底色上居中一枚音符（与播放页音频占位同款）。
+                if (model.thumbnail == null && model.isAudio) {
+                    Icon(
+                        imageVector = Icons.Filled.MusicNote,
+                        contentDescription = tr("音频", "Audio"),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .size(48.dp)
                     )
                 }
                 // 左上角：「本地」药丸（只有在线卡且本地库已有该 iwaraId 时为 true）。
@@ -271,7 +293,9 @@ fun VideoCard(
             showR18 = showR18Tag,
             showLocalBadge = showLocalBadge,
             // 封面左下角日期胶囊（本地条目用扫描/匹配写入的 createdAt）。
-            createdAtMs = video.createdAt
+            createdAtMs = video.createdAt,
+            // 音频容器（mp3/flac 等）没有可抽的视频帧，按扩展名判定后画音符占位。
+            isAudio = MediaFormats.mimeTypeFor(video.fileName)?.startsWith("audio/") == true
         ),
         onClick = onClick,
         onTagClick = onTagClick,
@@ -326,7 +350,7 @@ fun LocalPill(modifier: Modifier = Modifier) {
         modifier = modifier
     ) {
         Text(
-            text = "本地",
+            text = tr("本地", "Local"),
             fontSize = 10.sp,
             lineHeight = 13.sp,
             maxLines = 1,

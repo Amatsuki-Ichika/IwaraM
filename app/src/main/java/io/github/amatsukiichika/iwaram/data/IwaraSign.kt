@@ -2,6 +2,7 @@ package io.github.amatsukiichika.iwaram.data
 
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import io.github.amatsukiichika.iwaram.i18n.tr
 import okhttp3.Request
 import java.net.URI
 import java.security.MessageDigest
@@ -50,7 +51,7 @@ object IwaraSign {
         IwaraClient.fileHttp.newCall(request).execute().use { resp ->
             val text = resp.body?.string().orEmpty()
             if (!resp.isSuccessful) {
-                throw IwaraSession.IwaraApiException("解析播放地址失败（HTTP ${resp.code}）")
+                throw IwaraSession.IwaraApiException(tr("解析播放地址失败（HTTP ${resp.code}）", "Failed to resolve the playback address (HTTP ${resp.code})"))
             }
             // JSON 解析在 try 中抛带上下文的异常：调用方（播放页/下载）已有 catch，
             // 直接抛出的 JsonSyntaxException 无上下文，排查时不知道是哪个地址解析失败。
@@ -58,7 +59,12 @@ object IwaraSign {
                 gson.fromJson(text, qualityListType) ?: emptyList()
             } catch (e: Exception) {
                 throw IwaraSession.IwaraApiException(
-                    "解析播放地址失败：响应不是有效的清晰度列表（${e.javaClass.simpleName}）", isAuthError = false
+                    tr(
+                        "解析播放地址失败：响应不是有效的清晰度列表（${e.javaClass.simpleName}）",
+                        "Failed to resolve the playback address: the response is not a valid quality list " +
+                            "(${e.javaClass.simpleName})"
+                    ),
+                    isAuthError = false
                 )
             }
         }
