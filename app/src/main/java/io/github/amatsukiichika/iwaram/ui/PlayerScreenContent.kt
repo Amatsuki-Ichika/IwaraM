@@ -1,7 +1,6 @@
 package io.github.amatsukiichika.iwaram.ui
 
 import android.content.Context
-import android.net.Uri
 import androidx.annotation.OptIn
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -18,14 +17,8 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.MusicNote
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -41,15 +34,12 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.zIndex
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.PlayerView
-import io.github.amatsukiichika.iwaram.data.MediaFormats
 import io.github.amatsukiichika.iwaram.data.VideoEntity
 
 /**
@@ -114,8 +104,6 @@ internal fun PlayerContent(
     videoHeight: Int?,
     localVideoWidth: Int?,
     localVideoHeight: Int?,
-    /** 轨道表确认当前片源没有视频轨（纯音频）：视频区显示音频占位而不是整块黑。 */
-    audioOnly: Boolean,
     onVideoTap: () -> Unit,
     pokeControls: () -> Unit,
     onTogglePlay: () -> Unit,
@@ -147,19 +135,6 @@ internal fun PlayerContent(
 ) {
     // 源文件管理面板的开关：只在用户点菜单里的「管理源文件…」时打开。
     var showSources by remember { mutableStateOf(false) }
-    // 错误面板的「用其他应用打开」：本地取 content:// 地址，在线取当前解析出的播放地址；
-    //   都拿不到时（地址解析中/已清空）不显示该按钮。MIME 优先用入库文件名，其次用在线
-    //   播放地址的最后一段（短时效地址带查询串，先截掉）。
-    val externalMedia: Pair<Uri, String?>? = remember(video.localUri, video.fileName, online?.mediaUrl) {
-        val uri = video.localUri.ifBlank { online?.mediaUrl.orEmpty() }
-        val onlineName = online?.mediaUrl.orEmpty()
-            .substringBefore('?')
-            .substringBefore('#')
-            .substringAfterLast('/')
-        val mimeType = listOf(video.fileName, onlineName)
-            .firstNotNullOfOrNull { MediaFormats.mimeTypeFor(it) }
-        if (uri.isBlank()) null else Uri.parse(uri) to mimeType
-    }
     // 根容器透明，背景放在内层 Column 上并随内容一起右滑，
     // 预测式返回时露出下方主页内容，避免左半边出现空白背景。
     Box(
@@ -232,14 +207,6 @@ internal fun PlayerContent(
                 onVideoDrag = onVideoDrag,
                 onVideoDragEnd = onVideoDragEnd
             ) {
-                // 纯音频片源（轨道表确认没有视频轨）：视频区本来只有黑底，居中给一个
-                //   音符图标 + 标题，避免用户看到整块黑色以为卡死；错误面板在屏时不叠加。
-                if (audioOnly && playError == null && resolveError == null) {
-                    AudioOnlyPlaceholder(
-                        title = video.title,
-                        modifier = Modifier.align(Alignment.Center)
-                    )
-                }
                 // 换片/装片空窗：黑场 + 中央加载提示（本地/在线统一，条件在 PlayerScreen 算好）。
                 //   黑底整块淡入淡出 —— 淡出与新片首帧衔接成"渐显"，本地换片不再冻在旧片最后一帧；
                 //   解析失败（resolveError）与播放错误（playError）面板在屏时不叠加。
@@ -281,8 +248,6 @@ internal fun PlayerContent(
                     PlayErrorOverlay(
                         error = errorUi,
                         debugDetails = debugDetails,
-                        mediaUri = externalMedia?.first,
-                        mediaMimeType = externalMedia?.second,
                         onRetry = onRetryPlay,
                         onBack = onBack,
                         modifier = Modifier.align(Alignment.Center)
@@ -397,35 +362,6 @@ internal fun PlayerContent(
                 )
             }
         }
-    }
-}
-
-/**
- * 纯音频片源的画面占位：黑底上居中一个音符图标 + 标题。
- *
- * 只在轨道表确认没有视频轨时显示（判据见 PlayerScreen 的 onTracksChanged）；
- * 本地音频文件没有视频帧，不占位的话视频区是一整块纯黑，看起来像卡死。
- */
-@Composable
-private fun AudioOnlyPlaceholder(title: String, modifier: Modifier = Modifier) {
-    Column(
-        modifier = modifier.padding(horizontal = 32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Icon(
-            imageVector = Icons.Filled.MusicNote,
-            contentDescription = null, // 装饰图标：标题文字已说明是音频
-            tint = Color.White.copy(alpha = 0.85f),
-            modifier = Modifier.size(48.dp)
-        )
-        Spacer(Modifier.size(10.dp))
-        Text(
-            text = title,
-            color = Color.White.copy(alpha = 0.92f),
-            style = MaterialTheme.typography.bodyMedium,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis
-        )
     }
 }
 

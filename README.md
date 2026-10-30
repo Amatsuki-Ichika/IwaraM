@@ -41,13 +41,11 @@
 
 - **Online browsing** — trending and latest feeds, tag browsing, search and author pages.
 - **Local library** — import and scan media folders, fetch metadata, then browse by folder,
-  author, date or tag with search and sorting. The scanner indexes video files (MP4, MKV, WebM and
-  MOV, plus TS, M2TS, FLV, OGV, AVI, 3GP and 3G2) and audio files (MP3, M4A, AAC, FLAC, OGG, Opus,
-  WAV, AMR and MKA); audio entries show a music-note placeholder and play audio-only.
+  author, date or tag with search and sorting. The scanner indexes MP4, MKV, WebM and MOV videos.
 - **Playback** — swipe to seek, double-tap to seek, fullscreen, quality selection and
-  resume from where you left off. If the device's preferred decoder fails to initialise, the player
-  retries the next available decoder; a playback error offers "Open in another app" for files the
-  device cannot decode. Codec support still varies by device and OS.
+  resume from where you left off. Audio is decoded by a bundled FFmpeg decoder, so streams the
+  device's platform decoder rejects still play; video decoders are retried with ExoPlayer's decoder
+  fallback. Codec support still varies by device and OS.
 - **Super resolution** — optional Anime4K shader models running on the GPU.
 - **Downloads** — background downloads with resume.
 - **Watch history** — automatic history with one-tap resume.

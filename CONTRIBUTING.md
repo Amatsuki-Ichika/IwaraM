@@ -43,7 +43,9 @@ attach the log from the file described in `CrashLogger.kt` if you can retrieve i
 ## Pull requests
 
 - Direct pushes to `main` are blocked by branch rules — always open a pull request;
-  CI must pass before merging.
+  CI must pass and a human reviewer must approve before merging.
+- Merge with a merge commit, never a squash: the history stays reviewable, and merging plus
+  deleting the branch are manual steps for a maintainer, not for automation.
 - Keep changes focused; one topic per pull request, and delete the branch when it merges.
 - Follow the existing code style (official Kotlin conventions, 4-space indentation) and keep
   comments in Kotlin sources in Simplified Chinese, consistent with the rest of the codebase
