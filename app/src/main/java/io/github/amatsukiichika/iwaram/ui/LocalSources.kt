@@ -3,7 +3,6 @@ package io.github.amatsukiichika.iwaram.ui
 import io.github.amatsukiichika.iwaram.data.VideoEntity
 import io.github.amatsukiichika.iwaram.data.qualityLabel
 import io.github.amatsukiichika.iwaram.data.qualityPlayRank
-import io.github.amatsukiichika.iwaram.i18n.tr
 
 /**
  * 本地库的一个**逻辑条目**：一支视频 + 它的全部源文件。
@@ -52,4 +51,4 @@ internal fun groupLocalSources(rows: List<VideoEntity>): List<LocalSourceGroup> 
  * 认不出档位时回退到「本地」而不是空串：菜单项没有文字在界面上就是一条空白，
  * 用户会以为是渲染坏了。
  */
-internal fun VideoEntity.sourceDisplayName(): String = qualityLabel() ?: tr("本地", "Local")
+internal fun VideoEntity.sourceDisplayName(): String = qualityLabel() ?: "本地"

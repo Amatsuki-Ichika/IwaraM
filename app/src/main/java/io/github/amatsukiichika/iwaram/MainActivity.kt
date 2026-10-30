@@ -100,10 +100,6 @@ import io.github.amatsukiichika.iwaram.data.WatchHistoryEntity
 import io.github.amatsukiichika.iwaram.data.GlobalFilterHolder
 import io.github.amatsukiichika.iwaram.data.resumeStartMs
 import io.github.amatsukiichika.iwaram.data.thumbnailFileIdFromUrl
-import io.github.amatsukiichika.iwaram.i18n.AppLanguage
-import io.github.amatsukiichika.iwaram.i18n.LanguageMode
-import io.github.amatsukiichika.iwaram.i18n.tr
-import io.github.amatsukiichika.iwaram.i18n.trCount
 import io.github.amatsukiichika.iwaram.ui.sourceDisplayName
 import io.github.amatsukiichika.iwaram.ui.COVER_DIM_ALPHA
 import io.github.amatsukiichika.iwaram.ui.COVER_MOTION_MS
@@ -113,7 +109,6 @@ import io.github.amatsukiichika.iwaram.ui.LibraryScreen
 import io.github.amatsukiichika.iwaram.ui.LibraryTopBar
 import io.github.amatsukiichika.iwaram.ui.OnlineNetState
 import io.github.amatsukiichika.iwaram.ui.OnlineVideoExtras
-import io.github.amatsukiichika.iwaram.ui.OnboardingScreen
 import io.github.amatsukiichika.iwaram.ui.PlayerScreen
 import io.github.amatsukiichika.iwaram.ui.QualityOption
 import io.github.amatsukiichika.iwaram.ui.RelatedVideo
@@ -247,7 +242,7 @@ private class PlayerResolutionState(
             if (result == null) {
                 // Toast 与面板副行按 debug 开关取轨（关=人话，开=技术细节原样）
                 val text = err?.let { if (debugDetails) it else friendlyIwaraError(it) }
-                    ?: tr("无法播放该视频", "Unable to play this video")
+                    ?: "无法播放该视频"
                 Toast.makeText(context, text, Toast.LENGTH_SHORT).show()
                 resolveError = text
             } else {
@@ -306,11 +301,7 @@ private class PlayerResolutionState(
                 return
             }
             if (entry.iwaraId == null) {
-                Toast.makeText(
-                    context,
-                    tr("文件已不在库中", "File is no longer in the library"),
-                    Toast.LENGTH_SHORT
-                ).show()
+                Toast.makeText(context, "文件已不在库中", Toast.LENGTH_SHORT).show()
                 return
             }
             // 本地文件没了但 iwaraId 还在 → 落到下面的在线分支
@@ -438,10 +429,7 @@ class MainActivity : ComponentActivity() {
         val uiState by vm.uiState.collectAsStateWithLifecycle()
         val count by remember { derivedStateOf { uiState.videos.size } }
         Text(
-            text = tr(
-                "共 $count 个视频",
-                "$count " + trCount(count, "个视频", "video", "videos")
-            ),
+            text = "共 $count 个视频",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = modifier
@@ -506,7 +494,7 @@ class MainActivity : ComponentActivity() {
             }
             Icon(
                 Icons.Filled.Refresh,
-                contentDescription = tr("刷新", "Refresh"),
+                contentDescription = "刷新",
                 modifier = Modifier.graphicsLayer { rotationZ = rotation.value }
             )
         }
@@ -546,41 +534,6 @@ class MainActivity : ComponentActivity() {
                 DiagLog.log("SAF", "下载目录权限持久化失败 uri=$uri: $e")
             }
             vm.setDownloadRoot(uri)
-        }
-
-        // 首次使用引导：引导未完成时整屏渲染引导页（完成/跳过后写 prefs，之后不再出现）。
-        // 只做状态编排——选目录复用上面两个 launcher，语言切换立即生效并落盘，其余偏好走 ViewModel。
-        // 注意：这里提前 return，主界面那批 remember 在引导完成后才首次创建（Compose 按分支处理，安全）。
-        val repository = LocalAppRepository.current
-        val onboardingDone by repository.onboardingDone.collectAsStateWithLifecycle()
-        // 界面语言：引导页与设置页共用；切换时先让 AppLanguage 生效（驱动重组）再落盘。
-        val languagePref by repository.language.collectAsStateWithLifecycle()
-        if (!onboardingDone) {
-            val libraryName by repository.rootName.collectAsStateWithLifecycle()
-            val downloadName by repository.downloadRootName.collectAsStateWithLifecycle()
-            val defaultR18 by vm.defaultR18Flow.collectAsStateWithLifecycle()
-            val showTags by vm.showTagsFlow.collectAsStateWithLifecycle()
-            OnboardingScreen(
-                language = LanguageMode.fromPref(languagePref),
-                libraryName = libraryName.takeIf { it.isNotBlank() },
-                downloadName = downloadName.takeIf { it.isNotBlank() },
-                defaultR18 = defaultR18,
-                showTags = showTags,
-                onLanguageChange = { mode ->
-                    AppLanguage.set(mode)
-                    repository.setLanguage(mode.toPref())
-                    // 刷新缓存好的库内标签（月份/根目录/未知作者等），不重扫。
-                    vm.onLanguageChanged()
-                },
-                onPickLibrary = { folderPicker.launch(null) },
-                onPickDownload = { downloadFolderPicker.launch(null) },
-                onClearDownload = { vm.setDownloadRoot(null) },
-                onDefaultR18Change = { vm.setDefaultR18(it) },
-                onShowTagsChange = { vm.setShowTags(it) },
-                onFinish = { repository.setOnboardingDone(true) },
-                onSkip = { repository.setOnboardingDone(true) }
-            )
-            return
         }
 
         // 底栏当前 tab；默认管理器（保持既有主界面）。
@@ -1222,11 +1175,11 @@ class MainActivity : ComponentActivity() {
                             when (tab) {
                                 // 本地标题与数量同行，与其他页单行标题垂直对齐
                                 HomeTab.MANAGER -> Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(tr("本地", "Local"))
+                                    Text("本地")
                                     VideoCountText(vm, Modifier.padding(start = 8.dp))
                                 }
                                 HomeTab.VIDEO -> Text("Iwara")
-                                HomeTab.ME -> Text(tr("我的", "Me"))
+                                HomeTab.ME -> Text("我的")
                             }
                         }
                     },
@@ -1241,7 +1194,7 @@ class MainActivity : ComponentActivity() {
                         IconButton(onClick = { showingFilter = true }) {
                             Icon(
                                 if (filterState.effective) Icons.Filled.FilterAlt else Icons.Outlined.FilterAlt,
-                                contentDescription = tr("筛选", "Filter"),
+                                contentDescription = "筛选",
                                 tint = if (filterState.effective) {
                                     MaterialTheme.colorScheme.primary
                                 } else {
@@ -1337,17 +1290,7 @@ class MainActivity : ComponentActivity() {
                 pageAnimating = !settingsVisible.isIdle,
                 // 被更新的层盖住 → 让位（左移 + 压暗 + 收圆角）；此时让出返回键。
                 covered = settingsCovered,
-                backEnabled = ownsBack(showingSettings, settingsSeq),
-                language = LanguageMode.fromPref(languagePref),
-                // 语言切换立即生效（AppLanguage 驱动重组）再落盘；仓库只负责持久化。
-                onLanguageChange = { mode ->
-                    AppLanguage.set(mode)
-                    repository.setLanguage(mode.toPref())
-                    // 刷新缓存好的库内标签（月份/根目录/未知作者等），不重扫。
-                    vm.onLanguageChanged()
-                },
-                // 关于页「再次查看首次引导」：清掉引导完成标记，根部分支随即重新渲染引导页。
-                onShowOnboarding = { repository.setOnboardingDone(false) }
+                backEnabled = ownsBack(showingSettings, settingsSeq)
             )
         }
 
@@ -1484,7 +1427,7 @@ class MainActivity : ComponentActivity() {
                                         Toast.makeText(
                                             context,
                                             err?.let { if (debugDetails) it else friendlyIwaraError(it) }
-                                                ?: tr("操作失败", "Operation failed"),
+                                                ?: "操作失败",
                                             Toast.LENGTH_SHORT
                                         ).show()
                                     }
@@ -1500,10 +1443,7 @@ class MainActivity : ComponentActivity() {
                                         if (showingPlayer) {
                                             Toast.makeText(
                                                 context,
-                                                tr(
-                                                    "已加入下载队列，可在通知栏查看进度",
-                                                    "Queued for download; check the notification for progress"
-                                                ),
+                                                "已加入下载队列，可在通知栏查看进度",
                                                 Toast.LENGTH_SHORT
                                             ).show()
                                         }
@@ -1556,7 +1496,7 @@ class MainActivity : ComponentActivity() {
                                     Toast.makeText(
                                         context,
                                         err?.let { if (debugDetails) it else friendlyIwaraError(it) }
-                                            ?: tr("操作失败", "Operation failed"),
+                                            ?: "操作失败",
                                         Toast.LENGTH_SHORT
                                     ).show()
                                 }

@@ -43,7 +43,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.ui.components.PillSegment
 import io.github.amatsukiichika.iwaram.ui.components.PillSelector
 
@@ -77,23 +76,20 @@ fun PillSegmentSelector(
 
 /* ---------- 排序 / 分级选择器 ---------- */
 
-data class SortOption(val value: String, val label: String, val labelEn: String? = null) {
-    /** 显示用文案：语言切换时实时跟随。 */
-    val displayLabel: String get() = tr(label, labelEn ?: label)
-}
+data class SortOption(val value: String, val label: String)
 
 val VIDEO_SORTS = listOf(
-    SortOption("trending", "趋势", "Trending"),
-    SortOption("date", "最新", "Newest"),
-    SortOption("popularity", "热门", "Popular"),
-    SortOption("views", "最多播放", "Most viewed"),
-    SortOption("likes", "最多点赞", "Most liked")
+    SortOption("trending", "趋势"),
+    SortOption("date", "最新"),
+    SortOption("popularity", "热门"),
+    SortOption("views", "最多播放"),
+    SortOption("likes", "最多点赞")
 )
 
 val RATING_OPTIONS = listOf(
-    SortOption("all", "全部", "All"),
-    SortOption("general", "一般", "General"),
-    SortOption("ecchi", "R18", "R18")
+    SortOption("all", "全部"),
+    SortOption("general", "一般"),
+    SortOption("ecchi", "R18")
 )
 
 /** 与管理器滑块同源的 chip 配色：选中 = 主色 16% 浅底 + 主色文字/图标，全局统一强调色。 */
@@ -179,7 +175,7 @@ fun TagFilterRow(
                             trailingIcon = {
                                 Icon(
                                     Icons.Filled.Close,
-                                    contentDescription = tr("取消该标签", "Remove this tag"),
+                                    contentDescription = "取消该标签",
                                     modifier = Modifier.heightIn(max = 18.dp)
                                 )
                             },
@@ -223,7 +219,7 @@ fun SelectedTagChips(
                 trailingIcon = {
                     Icon(
                         Icons.Filled.Close,
-                        contentDescription = tr("取消该标签", "Remove this tag"),
+                        contentDescription = "取消该标签",
                         modifier = Modifier.heightIn(max = 18.dp)
                     )
                 },
@@ -241,7 +237,7 @@ fun SelectorChip(
     onSelect: (String) -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
-    val label = (options.firstOrNull { it.value == current }?.displayLabel ?: current)
+    val label = (options.firstOrNull { it.value == current }?.label ?: current)
     Box {
         // 与管理器页排序按钮同款：FilterChip + 下拉勾选。
         FilterChip(
@@ -255,7 +251,7 @@ fun SelectorChip(
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             options.forEach { opt ->
                 DropdownMenuItem(
-                    text = { Text(opt.displayLabel + if (opt.value == current) " ✓" else "") },
+                    text = { Text(opt.label + if (opt.value == current) " ✓" else "") },
                     onClick = {
                         expanded = false
                         onSelect(opt.value)

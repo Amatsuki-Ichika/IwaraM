@@ -5,7 +5,6 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import io.github.amatsukiichika.iwaram.i18n.tr
 
 /**
  * 全 app 唯一的「半透明材质」模块。
@@ -40,10 +39,10 @@ enum class GlassRole {
  * - [LIQUID_GLASS] 磨砂：Kyant0/AndroidLiquidGlass —— 真背景模糊 + 边缘折射（lens）+ vibrancy，
  *   由各消费点的 `drawBackdrop` 施加（API 31+；lens 部分 API 33+，之下自动退化成纯模糊）。**默认档**。
  */
-enum class GlassMode(val label: String, val labelEn: String) {
-    OFF("关", "Off"),
-    TRANSLUCENT("透明", "Translucent"),
-    LIQUID_GLASS("磨砂", "Frosted");
+enum class GlassMode(val label: String) {
+    OFF("关"),
+    TRANSLUCENT("透明"),
+    LIQUID_GLASS("磨砂");
 
     /** 是否属于"液态玻璃"档（需要背景录制 + 库的 drawBackdrop 管线）。 */
     val isLiquid: Boolean get() = this == LIQUID_GLASS
@@ -56,9 +55,8 @@ enum class GlassMode(val label: String, val labelEn: String) {
          */
         fun of(index: Int): GlassMode = entries.getOrElse(index) { TRANSLUCENT }
 
-        /** 供设置页 `ChoiceChips` 用的 (文案, 值) 列表（按当前界面语言求值）。 */
-        val options: List<Pair<String, String>>
-            get() = entries.map { tr(it.label, it.labelEn) to it.ordinal.toString() }
+        /** 供设置页 `ChoiceChips` 用的 (文案, 值) 列表。 */
+        val options: List<Pair<String, String>> = entries.map { it.label to it.ordinal.toString() }
     }
 }
 

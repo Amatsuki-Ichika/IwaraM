@@ -10,7 +10,6 @@ import androidx.media3.effect.BaseGlShaderProgram
 import androidx.media3.common.util.Size
 import androidx.media3.common.util.UnstableApi
 import com.google.gson.JsonParser
-import io.github.amatsukiichika.iwaram.i18n.tr
 
 private const val TAG = "SuperRes"
 /** 读当前绑定的帧缓冲 id —— 输出帧缓冲即调用方绑定的那个（两个程序同一取法）。 */
@@ -255,12 +254,8 @@ internal class Anime4kProgram(
             isAllocFailed = true
             val megapixels = String.format(java.util.Locale.US, "%.1f", SuperRes.MAX_OUTPUT_PIXELS / 1_000_000.0)
             SuperResStatus.markDegraded(
-                tr(
-                    "源分辨率 ${inputWidth}x${inputHeight} 超过 ${megapixels}MP 处理上限（1440p 以上），" +
-                        "本模型自动停用（直通输出）",
-                    "Source resolution ${inputWidth}x${inputHeight} exceeds the ${megapixels}MP processing limit " +
-                        "(above 1440p); this model is disabled (passthrough output)"
-                )
+                "源分辨率 ${inputWidth}x${inputHeight} 超过 ${megapixels}MP 处理上限（1440p 以上），" +
+                    "本模型自动停用（直通输出）"
             )
             DiagLog.log(TAG, "configure in=${inputWidth}x${inputHeight} 超 ${megapixels}MP 上限 → 直通降级")
             return Size(inputWidth, inputHeight)

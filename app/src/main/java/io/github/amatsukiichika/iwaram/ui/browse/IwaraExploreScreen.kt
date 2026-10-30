@@ -42,7 +42,6 @@ import io.github.amatsukiichika.iwaram.data.postKeys
 import io.github.amatsukiichika.iwaram.data.videoKeys
 import io.github.amatsukiichika.iwaram.ui.components.PillSegment
 import com.kyant.backdrop.backdrops.LayerBackdrop
-import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.ui.components.horizontalSlideSpec
 import io.github.amatsukiichika.iwaram.ui.components.PillSelector
 import io.github.amatsukiichika.iwaram.ui.components.TagSuggestionRow
@@ -176,7 +175,7 @@ fun IwaraTopBar(cvm: IwaraClientViewModel) {
                         open = searchMode,
                         query = searchText,
                         onQueryChange = { cvm.updateSearchInput(it) },
-                        placeholder = tr("搜索视频 / #tag…", "Search videos / #tag…"),
+                        placeholder = "搜索视频 / #tag…",
                         onOpen = { cvm.expandSearch() },
                         onClose = {
                             cvm.collapseSearch()
@@ -267,7 +266,7 @@ fun VideosGrid(
     val state by (if (subscribedOnly) cvm.subscribed else cvm.videos).collectAsStateWithLifecycle()
     val session by cvm.session.collectAsStateWithLifecycle()
     if (subscribedOnly && !session.loggedIn && !session.checking) {
-        LoginRequiredPanel(tr("订阅流需要登录后使用", "Sign in to use the subscription feed"))
+        LoginRequiredPanel("订阅流需要登录后使用")
         return
     }
     // key 里带上 `session.checking` —— 冷启动时"已登录但凭证还没换新"窗口里拉到的订阅数据
@@ -288,7 +287,7 @@ fun VideosGrid(
         onRetry = {
             if (subscribedOnly) cvm.loadMoreSubscribed(force = true) else cvm.loadMoreVideos(force = true)
         },
-        emptyHint = if (subscribedOnly) tr("还没有订阅内容", "No subscriptions yet") else tr("暂无视频", "No videos yet"),
+        emptyHint = if (subscribedOnly) "还没有订阅内容" else "暂无视频",
         globalFilter = ::videoKeys,
         entranceKey = if (subscribedOnly) "subscribed" else "videos",
         bottomPadding = bottomPadding,
@@ -325,10 +324,7 @@ private fun SearchResultsGrid(
                 modifier = Modifier.padding(top = 10.dp)
             ) {
                 Text(
-                    tr(
-                        "当前分级筛选是「${if (rating == "ecchi") "只看 R18" else "只看一般"}」，可能把它过滤掉了",
-                        "The rating filter is “${if (rating == "ecchi") "R18 only" else "general only"}”, which may be hiding it"
-                    ),
+                    "当前分级筛选是「${if (rating == "ecchi") "只看 R18" else "只看一般"}」，可能把它过滤掉了",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center,
@@ -338,14 +334,14 @@ private fun SearchResultsGrid(
                     // 这份 ecchi 是「默认 R18」设置项强制的：清除按钮无用（会被再强制回去），
                     // 只能如实提示去哪儿关。
                     Text(
-                        tr("设置里开着「默认 R18」，关掉它才能看到全部分级", "“Default R18” is on in settings — turn it off to see every rating"),
+                        "设置里开着「默认 R18」，关掉它才能看到全部分级",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                         modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp)
                     )
                 } else {
-                    TextButton(onClick = { cvm.setRating("all") }) { Text(tr("改看全部内容", "Show all content")) }
+                    TextButton(onClick = { cvm.setRating("all") }) { Text("改看全部内容") }
                 }
             }
         }
@@ -358,7 +354,7 @@ private fun SearchResultsGrid(
         error = state.error,
         onLoadMore = { cvm.loadMoreSearch() },
         onRetry = { cvm.retrySearch() },
-        emptyHint = tr("没有找到相关视频", "No matching videos"),
+        emptyHint = "没有找到相关视频",
         globalFilter = ::videoKeys,
         entranceKey = "search",
         emptyExtra = ratingHint,
@@ -392,7 +388,7 @@ fun ImagesGrid(cvm: IwaraClientViewModel, actions: IwaraNavActions, bottomPaddin
         onLoadMore = { cvm.loadMoreImages() },
         onRetry = { cvm.loadMoreImages(force = true) },
         columns = GridCells.Adaptive(120.dp),
-        emptyHint = tr("暂无图片", "No images yet"),
+        emptyHint = "暂无图片",
         globalFilter = ::imageKeys,
         entranceKey = "images",
         bottomPadding = bottomPadding,
@@ -428,7 +424,7 @@ fun PostsList(cvm: IwaraClientViewModel, actions: IwaraNavActions, bottomPadding
         onLoadMore = { cvm.loadMorePosts() },
         onRetry = { cvm.loadMorePosts(force = true) },
         columns = GridCells.Fixed(1),
-        emptyHint = tr("暂无帖子", "No posts yet"),
+        emptyHint = "暂无帖子",
         globalFilter = ::postKeys,
         entranceKey = "posts",
         bottomPadding = bottomPadding,

@@ -48,7 +48,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.lerp
 import com.kyant.backdrop.Backdrop
 import com.kyant.backdrop.drawBackdrop
-import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.ui.components.BAR_BOTTOM_INSET
 import io.github.amatsukiichika.iwaram.ui.components.BAR_HEIGHT_BASE
 import io.github.amatsukiichika.iwaram.ui.components.GLASS_BAR_SIZE
@@ -292,13 +291,13 @@ fun ScrollToTopButton(
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
-                    onClickLabel = tr("回到顶部", "Back to top")
+                    onClickLabel = "回到顶部"
                 ) { onClick() },
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 Icons.Filled.KeyboardArrowUp,
-                contentDescription = tr("回到顶部", "Back to top"),
+                contentDescription = "回到顶部",
                 tint = iconTint,
                 modifier = Modifier.size(28.dp)
             )

@@ -55,12 +55,6 @@ attach the log from the file described in `CrashLogger.kt` if you can retrieve i
 - Fill in the pull request template, including the AI usage table when an agent did part of the
   work. It tells reviewers how much of the diff to verify rather than skim.
 
-## Licensing
-
-IwaraM is released under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0). By
-opening a pull request you agree that your contribution is licensed under the same terms.
-Third-party components keep their own licences; see [NOTICE.md](NOTICE.md) for the list.
-
 ## Decision records
 
 Choices that the code cannot explain — a rejected alternative, a deliberately accepted cost, a

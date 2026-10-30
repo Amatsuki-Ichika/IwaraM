@@ -30,7 +30,6 @@ import io.github.amatsukiichika.iwaram.data.ensureIwaraSuccess
 import io.github.amatsukiichika.iwaram.data.GlobalFilterHolder
 import io.github.amatsukiichika.iwaram.data.parseIwaraDate
 import io.github.amatsukiichika.iwaram.data.resolveDownloadTarget
-import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.ui.DiagLog
 import io.github.amatsukiichika.iwaram.ui.QualityOption
 import kotlinx.coroutines.CancellationException
@@ -133,7 +132,7 @@ fun IwaraClientViewModel.resolveOnlineUrl(
         scope: CoroutineScope? = null,
         onResult: (result: OnlinePlayData?, error: String?) -> Unit
     ) {
-        val id = video.id ?: run { onResult(null, tr("视频数据异常", "Invalid video data")); return }
+        val id = video.id ?: run { onResult(null, "视频数据异常"); return }
         (scope ?: viewModelScope).launch {
             try {
                 // 详情现取：fileUrl 带时效签名，不能复用列表数据。
@@ -153,14 +152,8 @@ fun IwaraClientViewModel.resolveOnlineUrl(
                 if (fileUrl.isNullOrBlank()) {
                     onResult(
                         null,
-                        if (detail.embedUrl != null) {
-                            tr(
-                                "该视频为外嵌内容，可在详情里用「打开原视频」观看",
-                                "This video is embedded — open it via “Open original video” in the details"
-                            )
-                        } else {
-                            tr("该视频没有可播放的文件", "This video has no playable file")
-                        }
+                        if (detail.embedUrl != null) "该视频为外嵌内容，可在详情里用「打开原视频」观看"
+                        else "该视频没有可播放的文件"
                     )
                     return@launch
                 }
@@ -170,9 +163,9 @@ fun IwaraClientViewModel.resolveOnlineUrl(
                 DiagLog.log("Iwara", "清晰度档位: [" + qualities.joinToString(", ") { it.name.orEmpty().ifBlank { "未命名" } } + "]")
                 val options = qualities.mapNotNull { q ->
                     val view = q.src?.view?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
-                    QualityOption(q.name.orEmpty().ifBlank { tr("未知", "Unknown") }, IwaraSign.httpsUrl(view))
+                    QualityOption(q.name.orEmpty().ifBlank { "未知" }, IwaraSign.httpsUrl(view))
                 }
-                if (options.isEmpty()) throw IwaraSession.IwaraApiException(tr("没有可用的播放地址", "No playable stream available"))
+                if (options.isEmpty()) throw IwaraSession.IwaraApiException("没有可用的播放地址")
                 // 默认分辨率是偏好而非强制：该档缺失时回退最高可用档，但不改写设置。
                 val preferred = repo.getQualityPref()
                 val chosen = options.firstOrNull { it.name == preferred } ?: options.first()
@@ -202,7 +195,7 @@ fun IwaraClientViewModel.downloadVideo(
         onSuccess: () -> Unit = {},
         onError: (String) -> Unit
     ) {
-        val id = video.id ?: return onError(tr("视频数据异常", "Invalid video data"))
+        val id = video.id ?: return onError("视频数据异常")
         startDownloadById(id, scope = null, onSuccess = onSuccess, onError = onError)
     }
 

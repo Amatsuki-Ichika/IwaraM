@@ -32,15 +32,6 @@ private const val KEY_SORT_RESET_V1 = "iwara_video_sort_reset_v1"
 /** 视频流默认排序：date（「最新」）。 */
 internal const val DEFAULT_VIDEO_SORT = "date"
 
-/** SharedPreferences 文件名：仓库与进程启动期（语言恢复）共用这一份。 */
-internal const val APP_PREFS_NAME = "prefs"
-
-/** 界面语言偏好键（system / zh / en，见 i18n.LanguageMode）。 */
-internal const val KEY_LANGUAGE = "language"
-
-/** 首次使用引导完成标记（「跳过」同样置位）。 */
-internal const val KEY_ONBOARDING_DONE = "onboarding_done"
-
 /**
  * 排序偏好的落点（**纯函数**，便于单测）。
  *
@@ -66,7 +57,7 @@ class IwaraRepository(
     internal val dao = db.videoDao()
     internal val historyDao = db.watchHistoryDao()
 
-    internal val prefs = context.getSharedPreferences(APP_PREFS_NAME, Context.MODE_PRIVATE)
+    internal val prefs = context.getSharedPreferences("prefs", Context.MODE_PRIVATE)
 
     /**
      * 半透明材质的默认不透明度（0f..1f）。
@@ -197,45 +188,6 @@ class IwaraRepository(
 
     /** 卡片是否显示标签的单一真源（设置页经窄流订阅，不再收整份 UiState）。 */
     val showTags: StateFlow<Boolean> = _showTags.asStateFlow()
-
-    /* ---------- 界面语言（简体中文 / English，见 i18n.AppLanguage） ---------- */
-
-    /**
-     * 语言偏好：system / zh / en。单一真源（[language]），设置页与引导页都只改这一处。
-     *
-     * 切换后界面立即重组（`AppLanguage.mode` 是 Compose 状态），不重建 Activity；
-     * 落盘值在下次进程启动时由 `IwaraApp` 在首帧前恢复。
-     */
-    fun setLanguage(value: String) {
-        prefs.edit().putString(KEY_LANGUAGE, value).apply()
-        _language.value = value
-    }
-
-    fun getLanguage(): String = prefs.getString(KEY_LANGUAGE, "system") ?: "system"
-
-    private val _language = MutableStateFlow(getLanguage())
-
-    /** 界面语言偏好的单一真源。 */
-    val language: StateFlow<String> = _language.asStateFlow()
-
-    /* ---------- 首次使用引导 ---------- */
-
-    /**
-     * 首次启动引导是否已完成（「跳过」同样置位，之后不再出现）。
-     *
-     * 只由引导页的完成/跳过写入；MainActivity 根部据此决定渲染引导页还是主界面。
-     */
-    fun setOnboardingDone(value: Boolean) {
-        prefs.edit().putBoolean(KEY_ONBOARDING_DONE, value).apply()
-        _onboardingDone.value = value
-    }
-
-    fun getOnboardingDone(): Boolean = prefs.getBoolean(KEY_ONBOARDING_DONE, false)
-
-    private val _onboardingDone = MutableStateFlow(getOnboardingDone())
-
-    /** 引导完成状态的单一真源。 */
-    val onboardingDone: StateFlow<Boolean> = _onboardingDone.asStateFlow()
 
     /* ---------- 半透明材质（底栏玻璃 / 角标胶囊统一走这一份） ---------- */
 

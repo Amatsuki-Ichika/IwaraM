@@ -1,7 +1,5 @@
 package io.github.amatsukiichika.iwaram.data
 
-import io.github.amatsukiichika.iwaram.i18n.AppLanguage
-import io.github.amatsukiichika.iwaram.i18n.tr
 import okhttp3.Interceptor
 import okhttp3.ConnectionPool
 import okhttp3.Dispatcher
@@ -505,10 +503,7 @@ interface IwaraBrowseService {
 
 /** 变更类端点收到非 2xx 时抛出；message 尽量带出服务端 JSON 的 message 字段，便于设备端定位。 */
 class IwaraServerException(code: Int, serverMessage: String?) :
-    RuntimeException(
-        tr("服务器错误（HTTP $code）", "Server error (HTTP $code)") +
-            (serverMessage?.takeIf { it.isNotBlank() }?.let { tr("：$it", ": $it") } ?: "")
-    )
+    RuntimeException("服务器错误（HTTP $code）" + (serverMessage?.takeIf { it.isNotBlank() }?.let { "：$it" } ?: ""))
 
 /** 从错误响应体中提取服务端 message 的匹配式（形如 {"message":"..."}）。提为常量复用，避免每次新建。 */
 private val SERVER_MESSAGE_REGEX = Regex("\"message\"\\s*:\\s*\"([^\"]+)\"")
@@ -524,24 +519,17 @@ fun retrofit2.Response<ResponseBody>.ensureIwaraSuccess() {
     throw IwaraServerException(code(), msg)
 }
 
-/** 把底层 IOException 转成可读的技术串（渲染出口再经 [friendlyIwaraError] 转人话）。 */
+/** 把底层 IOException 转成可读的中文提示。 */
 fun describeIwaraError(t: Throwable): String = when (t) {
     // 协程取消（页面关闭终止加载）不是错误 —— 调用方应先判此分支直接静默返回，
     // 这里给出中性文案兜底，避免"取消"被当成"网络错误"展示。
-    is kotlinx.coroutines.CancellationException -> tr("已取消", "Cancelled")
-    is IwaraSession.IwaraApiException -> t.message ?: tr("请求失败", "Request failed")
-    is UnknownHostException, is ConnectException -> tr(
-        "无法连接 Iwara 服务器，请检查网络或代理",
-        "Cannot reach the Iwara server. Check your network or proxy"
-    )
-    is IOException -> tr(
-        "网络异常：${t.message ?: t.javaClass.simpleName}",
-        "Network error: ${t.message ?: t.javaClass.simpleName}"
-    )
+    is kotlinx.coroutines.CancellationException -> "已取消"
+    is IwaraSession.IwaraApiException -> t.message ?: "请求失败"
+    is UnknownHostException, is ConnectException -> "无法连接 Iwara 服务器，请检查网络或代理"
+    is IOException -> "网络异常：${t.message ?: t.javaClass.simpleName}"
     is retrofit2.HttpException -> {
         val msg = runCatching { t.response()?.errorBody()?.string() }.getOrNull().let(::serverMessageOf)
-        tr("服务器错误（HTTP ${t.code()}）", "Server error (HTTP ${t.code()})") +
-            (msg?.let { tr("：$it", ": $it") } ?: "")
+        "服务器错误（HTTP ${t.code()}）" + (msg?.let { "：$it" } ?: "")
     }
     else -> t.message ?: t.javaClass.simpleName
 }
@@ -553,17 +541,11 @@ fun describeIwaraError(t: Throwable): String = when (t) {
  * debug 开关关闭时用它替代「服务器错误（HTTP xxx）：英文 message」这类技术串。
  */
 fun friendlyHttpError(code: Int): String = when (code) {
-    401, 403 -> tr(
-        "没有权限访问该内容（可能需要登录，或作者已设为私密）",
-        "You do not have permission to view this content (it may require sign-in, or the author made it private)"
-    )
-    404, 410 -> tr("内容不存在或已被删除", "This content does not exist or has been deleted")
-    429 -> tr("请求太频繁，请稍后再试", "Too many requests. Please try again later")
-    in 500..599 -> tr(
-        "Iwara 服务器开小差了，请稍后再试",
-        "The Iwara server is having trouble. Please try again later"
-    )
-    else -> tr("请求失败，请稍后重试", "Request failed. Please try again later")
+    401, 403 -> "没有权限访问该内容（可能需要登录，或作者已设为私密）"
+    404, 410 -> "内容不存在或已被删除"
+    429 -> "请求太频繁，请稍后再试"
+    in 500..599 -> "Iwara 服务器开小差了，请稍后再试"
+    else -> "请求失败，请稍后重试"
 }
 
 /**
@@ -575,26 +557,15 @@ fun friendlyHttpError(code: Int): String = when (code) {
  * 回滚面最小。本函数是纯函数，映射规则全部有单测。
  */
 fun friendlyIwaraError(detail: String): String = when {
-    detail.startsWith("服务器错误（HTTP ") || detail.startsWith("Server error (HTTP ") ->
+    detail.startsWith("服务器错误（HTTP ") ->
         Regex("HTTP (\\d{3})").find(detail)?.groupValues?.get(1)?.toIntOrNull()
             ?.let(::friendlyHttpError) ?: detail
-    detail.startsWith("网络异常：") || detail.startsWith("Network error: ") -> tr(
-        "网络连接异常，请检查网络后重试",
-        "Network connection failed. Check your network and try again"
-    )
-    detail.startsWith("无法连接 Iwara 服务器") || detail.startsWith("Cannot reach the Iwara server") -> detail
-    detail.startsWith("登录失败") || detail.startsWith("Login failed") -> tr(
-        "登录失败，请稍后再试",
-        "Login failed. Please try again later"
-    )
-    detail.startsWith("获取用户信息失败（HTTP ") || detail.startsWith("Failed to load account info (HTTP ") -> tr(
-        "获取账号信息失败，请重新登录",
-        "Could not load your account. Please sign in again"
-    )
+    detail.startsWith("网络异常：") -> "网络连接异常，请检查网络后重试"
+    detail.startsWith("无法连接 Iwara 服务器") -> detail
+    detail.startsWith("登录失败") -> "登录失败，请稍后再试"
+    detail.startsWith("获取用户信息失败（HTTP ") -> "获取账号信息失败，请重新登录"
     // describeIwaraError 的 else 分支可能漏出纯英文技术串（异常 message / 类名）；
-    // 含 CJK 的视为已人话透传；英文界面下英文本身就是人话，只隐藏异常类名这类技术串。
+    // 含 CJK 的视为已人话透传，纯 ASCII 的按技术串隐藏。
     detail.any { it.code >= 0x2E80 } -> detail
-    AppLanguage.isEnglish && detail.isNotBlank() &&
-        !detail.contains("Exception") && !detail.contains("constructor") -> detail
-    else -> tr("操作失败，请稍后重试", "Operation failed. Please try again later")
+    else -> "操作失败，请稍后重试"
 }

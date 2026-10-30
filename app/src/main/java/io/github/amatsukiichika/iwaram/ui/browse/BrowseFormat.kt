@@ -1,14 +1,12 @@
 package io.github.amatsukiichika.iwaram.ui.browse
 
 import io.github.amatsukiichika.iwaram.data.parseIwaraDate
-import io.github.amatsukiichika.iwaram.i18n.tr
-import io.github.amatsukiichika.iwaram.i18n.trCount
 
 /* ---------- 小工具 ---------- */
 
 fun formatCount(n: Int): String = when {
-    n >= 100_000_000 -> tr("${"%.1f".format(n / 100_000_000f)}亿", "${"%.0f".format(n / 1_000_000f)}M")
-    n >= 10_000 -> tr("${"%.1f".format(n / 10_000f)}万", "${"%.0f".format(n / 1_000f)}K")
+    n >= 100_000_000 -> "${"%.1f".format(n / 100_000_000f)}亿"
+    n >= 10_000 -> "${"%.1f".format(n / 10_000f)}万"
     else -> n.toString()
 }
 
@@ -24,18 +22,9 @@ fun timeAgoLabel(iso: String?): String? {
     val hour = 60 * minute
     val day = 24 * hour
     return when {
-        diff < hour -> {
-            val n = (diff / minute).coerceAtLeast(1).toInt()
-            "$n " + trCount(n, "分钟前", "minute ago", "minutes ago")
-        }
-        diff < day -> {
-            val n = (diff / hour).toInt()
-            "$n " + trCount(n, "小时前", "hour ago", "hours ago")
-        }
-        diff < 30 * day -> {
-            val n = (diff / day).toInt()
-            "$n " + trCount(n, "天前", "day ago", "days ago")
-        }
+        diff < hour -> "${(diff / minute).coerceAtLeast(1)} 分钟前"
+        diff < day -> "${diff / hour} 小时前"
+        diff < 30 * day -> "${diff / day} 天前"
         else -> timeAgoDateFormatter.format(
             java.time.Instant.ofEpochMilli(ms).atZone(java.time.ZoneId.systemDefault())
         )

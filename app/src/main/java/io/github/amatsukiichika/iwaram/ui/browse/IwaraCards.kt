@@ -41,8 +41,6 @@ import io.github.amatsukiichika.iwaram.data.IwaraImageItem
 import io.github.amatsukiichika.iwaram.data.IwaraPostItem
 import io.github.amatsukiichika.iwaram.data.IwaraVideoItem
 import io.github.amatsukiichika.iwaram.data.parseIwaraDate
-import io.github.amatsukiichika.iwaram.i18n.tr
-import io.github.amatsukiichika.iwaram.i18n.trCount
 import io.github.amatsukiichika.iwaram.ui.VideoCardContent
 import io.github.amatsukiichika.iwaram.ui.VideoCardModel
 import io.github.amatsukiichika.iwaram.ui.normalizeCardText
@@ -76,7 +74,7 @@ fun LoginRequiredPanel(hint: String) {
         Spacer(Modifier.size(12.dp))
         Text(hint, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(
-            tr("请到「我的」页登录 Iwara 账号", "Sign in to Iwara on the Me tab"),
+            "请到「我的」页登录 Iwara 账号",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -105,7 +103,7 @@ fun VideoCardOnline(
     VideoCardContent(
         model = VideoCardModel(
             thumbnail = IwaraClient.thumbnailUrl(video.file?.id),
-            title = normalizeCardText(video.title ?: tr("（无标题）", "(untitled)")),
+            title = normalizeCardText(video.title ?: "（无标题）"),
             author = normalizeCardText(video.user?.name ?: video.user?.username.orEmpty()),
             tags = if (showTags) {
                 video.tags.orEmpty().map { normalizeCardText(it.id) }.filter { it.isNotEmpty() }
@@ -154,7 +152,7 @@ fun AuthorRow(user: IwaraAccount?, onClick: () -> Unit = {}) {
         }
         Spacer(Modifier.size(4.dp))
         Text(
-            normalizeCardText(user?.name ?: user?.username).ifEmpty { tr("未知作者", "Unknown author") },
+            normalizeCardText(user?.name ?: user?.username).ifEmpty { "未知作者" },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             minLines = 1,
@@ -207,13 +205,13 @@ fun ImageCardOnline(
                         shape = MaterialTheme.shapes.small,
                         modifier = Modifier.align(Alignment.BottomEnd).padding(6.dp)
                     ) {
-                        Text("$total " + trCount(total, "图", "image", "images"), fontSize = 10.sp, modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp))
+                        Text("$total 图", fontSize = 10.sp, modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp))
                     }
                 }
             }
             Column(Modifier.padding(8.dp)) {
                 Text(
-                    normalizeCardText(image.title ?: tr("（无标题）", "(untitled)")),
+                    normalizeCardText(image.title ?: "（无标题）"),
                     style = MaterialTheme.typography.bodyMedium,
                     minLines = 1,
                     maxLines = 1,
@@ -245,7 +243,7 @@ fun PostCard(
     Card(modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)) {
         Column(Modifier.padding(12.dp)) {
             Text(
-                normalizeCardText(post.title ?: tr("（无标题）", "(untitled)")),
+                normalizeCardText(post.title ?: "（无标题）"),
                 style = MaterialTheme.typography.titleSmall,
                 minLines = 1,
                 maxLines = 2,

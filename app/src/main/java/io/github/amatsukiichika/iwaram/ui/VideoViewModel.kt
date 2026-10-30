@@ -18,9 +18,6 @@ import io.github.amatsukiichika.iwaram.data.observeVideos
 import io.github.amatsukiichika.iwaram.data.filterBy
 import io.github.amatsukiichika.iwaram.data.localVideoKeys
 import io.github.amatsukiichika.iwaram.data.linkIwaraId
-import io.github.amatsukiichika.iwaram.i18n.AppLanguage
-import io.github.amatsukiichika.iwaram.i18n.LanguageMode
-import io.github.amatsukiichika.iwaram.i18n.tr
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -34,7 +31,6 @@ import kotlinx.coroutines.withContext
 import java.time.Instant
 import java.time.YearMonth
 import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 
 /** Iwara 客户端模块与本地库共用的本地视频 ViewModel：筛选、排序、导入、扫描、设置。 */
 class VideoViewModel(private val app: IwaraApp) : ViewModel() {
@@ -373,14 +369,6 @@ class VideoViewModel(private val app: IwaraApp) : ViewModel() {
         }
     }
 
-    /**
-     * 语言切换后重算界面文案（月/日标签、分组名等缓存值），**不重新扫描**。
-     * 由 MainActivity 在 [AppLanguage] 变更后调用；与一次普通筛选重算同价。
-     */
-    fun onLanguageChanged() {
-        recompute()
-    }
-
     /** 手动给某条视频指定 iwara ID。 */
     fun linkIwaraId(video: VideoEntity, id: String) {
         viewModelScope.launch {
@@ -583,7 +571,7 @@ class VideoViewModel(private val app: IwaraApp) : ViewModel() {
             timeBuckets = times,
             tags = tagBuckets,
             mode = mode,
-            activeFilter = activeFilterFor(authors, times),
+            activeFilter = activeFilterFor(buckets.authors),
             sortMode = sortMode,
             showTags = showTags,
             query = query,
@@ -601,26 +589,19 @@ class VideoViewModel(private val app: IwaraApp) : ViewModel() {
     }
 
     /** 当前筛选条件的展示文案（选中作者 / 时间桶 / 标签 / 文件夹四选一）。 */
-    private fun activeFilterFor(
-        authors: List<AuthorBucket>,
-        times: List<TimeBucket>
-    ): ActiveFilter? = when {
+    private fun activeFilterFor(authors: List<AuthorBucket>): ActiveFilter? = when {
         selectedAuthorId != null -> {
             val a = authors.find { it.id == selectedAuthorId }
-            ActiveFilter(a?.name ?: tr("作者", "Author"), LibraryMode.AUTHOR)
+            ActiveFilter(a?.name ?: "作者", LibraryMode.AUTHOR)
         }
-        selectedTime != null -> {
-            // 从本次重算的时间桶里取同 key 的新标签：切语言后旧 TimeBucket 仍带旧语言文案。
-            val t = selectedTime!!
-            ActiveFilter(times.find { it.key == t.key }?.label ?: t.label, LibraryMode.TIME)
-        }
+        selectedTime != null -> ActiveFilter(selectedTime!!.label, LibraryMode.TIME)
         // 多标签：多个 tag 拼成一条 chip 文案（清除时去掉全部 tag 条件）
         selectedTagIds.isNotEmpty() -> ActiveFilter(
             selectedTagIds.joinToString(" + "),
             LibraryMode.TAG
         )
         selectedFolder != null -> ActiveFilter(
-            selectedFolder.takeIf { it != ROOT_FOLDER_KEY } ?: tr("（根目录）", "(Root)"),
+            selectedFolder.takeIf { it != ROOT_FOLDER_KEY } ?: ROOT_FOLDER_NAME,
             LibraryMode.FOLDER
         )
         else -> null
@@ -629,7 +610,7 @@ class VideoViewModel(private val app: IwaraApp) : ViewModel() {
     /**
      * 四个分类桶（作者 / 时间 / 文件夹 / 标签）的**记忆化快照**。
      *
-     * 这四个计算**只依赖 `rawVideos` + `rawTags` + `sortMode` + 界面语言**，与搜索词和各类筛选
+     * 这四个计算**只依赖 `rawVideos` + `rawTags` + `sortMode`**，与搜索词和各类筛选
      * **完全无关**，但每敲一个键、每次 DB 变化、每次切换筛选都会把它们连同 `rawVideos` 的
      * 多次遍历一起重算一遍。这里按"输入换没换"缓存：失效判据用**引用相等**
      * （两个列表都是 DAO 整体替换的，`===` 就够，不需要 O(n) 的 equals）。
@@ -638,7 +619,6 @@ class VideoViewModel(private val app: IwaraApp) : ViewModel() {
         val videos: List<VideoEntity>,
         val tags: List<TagEntity>,
         val sort: SortMode,
-        val lang: LanguageMode,
         val authors: List<AuthorBucket>,
         val times: List<TimeBucket>,
         val folders: List<FolderBucket>,
@@ -654,8 +634,7 @@ class VideoViewModel(private val app: IwaraApp) : ViewModel() {
         if (cached != null &&
             cached.videos === rawVideos &&
             cached.tags === rawTags &&
-            cached.sort == sortMode &&
-            cached.lang == AppLanguage.mode
+            cached.sort == sortMode
         ) {
             return cached
         }
@@ -663,7 +642,6 @@ class VideoViewModel(private val app: IwaraApp) : ViewModel() {
             videos = rawVideos,
             tags = rawTags,
             sort = sortMode,
-            lang = AppLanguage.mode,
             authors = buildAuthors(),
             times = buildTimeBuckets(),
             folders = buildFolders(),
@@ -728,7 +706,7 @@ class VideoViewModel(private val app: IwaraApp) : ViewModel() {
             .map { (k, vs) ->
                 FolderBucket(
                     key = k,
-                    name = k.takeIf { it != ROOT_FOLDER_KEY } ?: tr("（根目录）", "(Root)"),
+                    name = k.takeIf { it != ROOT_FOLDER_KEY } ?: ROOT_FOLDER_NAME,
                     count = vs.size
                 )
             }
@@ -830,10 +808,7 @@ class VideoViewModel(private val app: IwaraApp) : ViewModel() {
             val end = ym.plusMonths(1).atDay(1).atStartOfDay(zone).toInstant().toEpochMilli()
             TimeBucket(
                 key = ym.toString(),
-                label = tr(
-                    "${ym.year}年${ym.monthValue}月",
-                    DateTimeFormatter.ofPattern("MMM yyyy", AppLanguage.locale).format(ym)
-                ),
+                label = "${ym.year}年${ym.monthValue}月",
                 startEpochMs = start,
                 endEpochMs = end,
                 count = vs.size
@@ -845,7 +820,7 @@ class VideoViewModel(private val app: IwaraApp) : ViewModel() {
             listOf(
                 TimeBucket(
                     key = TIME_UNKNOWN_KEY,
-                    label = tr("未识别时间", "Unknown date"),
+                    label = "未识别时间",
                     startEpochMs = 0,
                     endEpochMs = 0,
                     count = unknownCount
@@ -868,11 +843,12 @@ class VideoViewModel(private val app: IwaraApp) : ViewModel() {
 
         private const val TIME_UNKNOWN_KEY = "__unknown__"
         private const val ROOT_FOLDER_KEY = "__root__"
+        private const val ROOT_FOLDER_NAME = "（根目录）"
 
         /** 无 authorId（未匹配到 iwara）的本地视频统一归到这个分组键。 */
         const val UNKNOWN_AUTHOR_KEY = "__unknown_author__"
 
-        /** 上面那个分组的显示名（随界面语言变化，供 UI 与单测读取）。 */
-        val UNKNOWN_AUTHOR_NAME: String get() = tr("未指定", "Unspecified")
+        /** 上面那个分组的显示名。 */
+        const val UNKNOWN_AUTHOR_NAME = "未指定"
     }
 }

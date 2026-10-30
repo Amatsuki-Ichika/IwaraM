@@ -41,7 +41,6 @@ import io.github.amatsukiichika.iwaram.data.loadPendingDownloads
 import io.github.amatsukiichika.iwaram.data.removePendingDownload
 import io.github.amatsukiichika.iwaram.data.resolveDownloadTarget
 import io.github.amatsukiichika.iwaram.data.savePendingDownload
-import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.ui.DiagLog
 import okhttp3.Request
 import java.util.concurrent.CopyOnWriteArraySet
@@ -176,9 +175,9 @@ internal fun pendingToTask(p: PendingDownload): DownloadState.Task = DownloadSta
         else -> DownloadState.STATE_QUEUED
     },
     message = when (p.state) {
-        DownloadState.STATE_PAUSED -> tr("已暂停", "Paused")
-        DownloadState.STATE_FAILED -> tr("下载失败（可重新下载续传）", "Download failed (you can resume)")
-        else -> tr("下载中断（点「继续」重新下载）", "Download interrupted (tap Resume to continue)")
+        DownloadState.STATE_PAUSED -> "已暂停"
+        DownloadState.STATE_FAILED -> "下载失败（可重新下载续传）"
+        else -> "下载中断（点「继续」重新下载）"
     },
     fileName = p.fileName, quality = p.quality, docUri = p.docUri
 )
@@ -295,20 +294,20 @@ class DownloadService : Service() {
         if (job == null) {
             // startForegroundService 拉起后必须先 startForeground 再移除，
             // 否则五秒内未进入前台会崩（ForegroundServiceDidNotStartInTime）。
-            startForeground(PROGRESS_NOTIF_ID, progressNotification(tr("准备下载", "Preparing download"), 0, 0, true))
+            startForeground(PROGRESS_NOTIF_ID, progressNotification("准备下载", 0, 0, true))
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
             return START_NOT_STICKY
         }
         // 必须在 onStartCommand 内立即 startForeground（worker 可能正忙于上一个任务，
         // 排队中的新任务等不到 5 秒约束）；后续通知由 runDownload 的进度回调接管。
-        startForeground(PROGRESS_NOTIF_ID, progressNotification(tr("准备下载", "Preparing download"), 0, 0, true))
+        startForeground(PROGRESS_NOTIF_ID, progressNotification("准备下载", 0, 0, true))
         // 排队任务必须立刻登记进「正在下载」列表并持久化：
         // 否则排队中的任务不可见，且杀后台后会凭空消失（只有 runDownload 出队才登记）。
         DownloadState.upsert(
             DownloadState.Task(
                 job.videoId, job.title, 0, -1,
-                state = DownloadState.STATE_QUEUED, message = tr("排队等待", "Queued"),
+                state = DownloadState.STATE_QUEUED, message = "排队等待",
                 url = job.url, fileName = job.fileName, quality = job.quality
             )
         )
@@ -350,13 +349,8 @@ class DownloadService : Service() {
             DONE_NOTIF_ID,
             NotificationCompat.Builder(this, CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_notification)
-                .setContentTitle(tr("下载已暂停", "Download paused"))
-                .setContentText(
-                    tr(
-                        "已到系统后台运行限额；打开应用点「继续」断点续传",
-                        "The system background limit was reached; open the app and tap Resume to continue"
-                    )
-                )
+                .setContentTitle("下载已暂停")
+                .setContentText("已到系统后台运行限额；打开应用点「继续」断点续传")
                 .setAutoCancel(true)
                 .build()
         )
@@ -411,7 +405,7 @@ class DownloadService : Service() {
         val customRoot = repo.getDownloadRoot()
         val rootUri = customRoot ?: repo.getRoot()
         if (rootUri.isNullOrBlank()) {
-            fail(job, repo, tr("尚未设置管理器根目录，请先在设置里选择文件夹", "No library folder is set. Choose one in Settings first"))
+            fail(job, repo, "尚未设置管理器根目录，请先在设置里选择文件夹")
             return@withContext
         }
 
@@ -420,14 +414,7 @@ class DownloadService : Service() {
             runCatching { DocumentFile.fromTreeUri(this@DownloadService, Uri.parse(rootUri)) }.getOrNull()
         }
         if (baseRoot == null) {
-            fail(
-                job, repo,
-                tr(
-                    "无法访问下载目录（可能未授予写入权限），请在设置里重新选择下载目录或恢复默认",
-                    "Cannot access the download folder (write permission may be missing). " +
-                        "Choose the download folder again in Settings or reset it to default"
-                )
-            )
+            fail(job, repo, "无法访问下载目录（可能未授予写入权限），请在设置里重新选择下载目录或恢复默认")
             return@withContext
         }
         // 默认情形把落盘目录下沉到根目录下的 IwaraMDownload；自定义目录则原样使用。
@@ -443,7 +430,7 @@ class DownloadService : Service() {
             DiagLog.log("Download", "排队期间签名地址已过期，重新解析：${job.title}")
             val fresh = runCatching { resolveDownloadTarget(repo, job.videoId, job.quality) }
             if (fresh.isFailure) {
-                fail(job, repo, tr("下载地址已过期，请重新下载", "The download link expired. Please download again"))
+                fail(job, repo, "下载地址已过期，请重新下载")
                 return@withContext
             }
             sourceUrl = fresh.getOrThrow().url
@@ -457,7 +444,7 @@ class DownloadService : Service() {
         val libraryDoc = documentOf(libraryRow?.localUri)
         if (libraryDoc != null && (libraryDoc.length() ?: 0L) > 0L) {
             DiagLog.log("Download", "已在本地库，跳过重复下载：${job.title}")
-            finishDownload(job, repo, dao, libraryDoc, note = tr("本地库已有，未重复下载", "Already in your library; skipped"))
+            finishDownload(job, repo, dao, libraryDoc, note = "本地库已有，未重复下载")
             return@withContext
         }
 
@@ -492,14 +479,7 @@ class DownloadService : Service() {
             doc = runCatching { root.createFile("video/mp4", sanitized) }.getOrNull()
         }
         if (doc == null) {
-            fail(
-                job, repo,
-                tr(
-                    "无法在下载目录创建文件（可能未授予写入权限），请在设置里重新选择下载目录或恢复默认",
-                    "Cannot create a file in the download folder (write permission may be missing). " +
-                        "Choose the download folder again in Settings or reset it to default"
-                )
-            )
+            fail(job, repo, "无法在下载目录创建文件（可能未授予写入权限），请在设置里重新选择下载目录或恢复默认")
             return@withContext
         }
 
@@ -568,10 +548,7 @@ class DownloadService : Service() {
                                     job.videoId, job.title, received,
                                     if (total > 0) total else -1,
                                     state = DownloadState.STATE_PAUSED,
-                                    message = tr(
-                                        "已暂停（已接收 ${received / 1024} KB）",
-                                        "Paused (${received / 1024} KB received)"
-                                    ),
+                                    message = "已暂停（已接收 ${received / 1024} KB）",
                                     url = job.url, fileName = job.fileName, quality = job.quality,
                                     docUri = doc.uri.toString()
                                 )
@@ -584,7 +561,7 @@ class DownloadService : Service() {
                                         state = DownloadState.STATE_PAUSED
                                     )
                                 )
-                                notify(DONE_NOTIF_ID, doneNotification(true, tr("已暂停：${job.title}", "Paused: ${job.title}")))
+                                notify(DONE_NOTIF_ID, doneNotification(true, "已暂停：${job.title}"))
                                 return@withContext
                             }
                             val n = ins.read(buf)
@@ -641,7 +618,7 @@ class DownloadService : Service() {
             // Debug 模式开关：用户可见文案（列表/历史/通知）一律人话；
             // 技术细节（HTTP 码/异常串）转投 DiagLog。
             DiagLog.log("Download", "下载失败 ${job.title}: ${e.message ?: e.javaClass.simpleName}")
-            fail(job, repo, tr("下载失败（半成品已保留，可重新下载续传）", "Download failed (the partial file was kept; you can resume)"), doc.uri.toString())
+            fail(job, repo, "下载失败（半成品已保留，可重新下载续传）", doc.uri.toString())
         }
     }
 
@@ -718,7 +695,7 @@ class DownloadService : Service() {
         }
         repo.fetchAndApplyMetadata(entity)
 
-        val doneMessage = note ?: tr("下载完成", "Download complete")
+        val doneMessage = note ?: "下载完成"
         DownloadState.upsert(
             DownloadState.Task(
                 job.videoId, job.title, state = DownloadState.STATE_DONE,
@@ -733,10 +710,7 @@ class DownloadService : Service() {
             )
         )
         // 通知栏带标题、锁屏走脱敏 public 版本（理由见 progressNotification）。
-        notify(DONE_NOTIF_ID, doneNotification(
-            true,
-            tr("$doneMessage：${job.title}\n已加入管理器库", "$doneMessage: ${job.title}\nAdded to the library")
-        ))
+        notify(DONE_NOTIF_ID, doneNotification(true, "$doneMessage：${job.title}\n已加入管理器库"))
     }
 
     /**
@@ -830,10 +804,10 @@ class DownloadService : Service() {
         // 进度值先过纯函数钳制（received>total 会让 progress 超过 max、
         // 超大文件 total/1024 有 Int 溢出风险），详见 notificationProgressBounds。
         val (max, progress) = notificationProgressBounds(received, total)
-        val detail = if (total > 0) "${sizeText(received)} / ${sizeText(total)}" else tr("正在准备", "Preparing")
+        val detail = if (total > 0) "${sizeText(received)} / ${sizeText(total)}" else "正在准备"
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle(tr("正在下载", "Downloading"))
+            .setContentTitle("正在下载")
             .setContentText(title)
             .setSubText(detail)
             .setOngoing(true)
@@ -853,7 +827,7 @@ class DownloadService : Service() {
         NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("IwaraM")
-            .setContentText(if (ongoing) tr("正在下载", "Downloading") else tr("下载任务已结束", "Download finished"))
+            .setContentText(if (ongoing) "正在下载" else "下载任务已结束")
             .setOngoing(ongoing)
             .build()
 
@@ -864,7 +838,7 @@ class DownloadService : Service() {
     private fun doneNotification(success: Boolean, message: String): Notification =
         NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle(if (success) tr("下载", "Download") else tr("下载失败", "Download failed"))
+            .setContentTitle(if (success) "下载" else "下载失败")
             .setContentText(message)
             .setStyle(NotificationCompat.BigTextStyle().bigText(message))
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
@@ -884,9 +858,9 @@ class DownloadService : Service() {
     private fun createChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val ch = NotificationChannel(
-                CHANNEL_ID, tr("下载进度", "Download progress"), NotificationManager.IMPORTANCE_LOW
+                CHANNEL_ID, "下载进度", NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = tr("在线视频下载进度通知", "Download progress notification")
+                description = "在线视频下载进度通知"
             }
             getSystemService(NotificationManager::class.java).createNotificationChannel(ch)
         }

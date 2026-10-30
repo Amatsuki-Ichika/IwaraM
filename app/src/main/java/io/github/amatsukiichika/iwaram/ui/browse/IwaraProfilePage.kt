@@ -82,7 +82,6 @@ import io.github.amatsukiichika.iwaram.data.VideoEntity
 import io.github.amatsukiichika.iwaram.data.filterBy
 import io.github.amatsukiichika.iwaram.data.localVideoKeys
 import io.github.amatsukiichika.iwaram.data.videoKeys
-import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.ui.DiagLog
 import io.github.amatsukiichika.iwaram.ui.components.debugAwareErrorText
 import kotlin.math.roundToInt
@@ -109,19 +108,17 @@ import kotlinx.coroutines.withContext
  * `GET /images?user=`、帖子 `GET /posts?user=`（回退 `content/post`）、`GET /user/{id}/following|followers`。
  */
 
-internal enum class ProfileSegment(val labelZh: String, val labelEn: String) {
-    VIDEOS("视频", "Videos"),
-    IMAGES("图片", "Images"),
-    POSTS("帖子", "Posts");
-
-    val label: String get() = tr(labelZh, labelEn)
+internal enum class ProfileSegment(val label: String) {
+    VIDEOS("视频"),
+    IMAGES("图片"),
+    POSTS("帖子")
 }
 
 /** 「视频」栏来源筛选选项（默认全部）。 */
 internal val SOURCE_FILTERS = listOf(
-    SortOption("全部", "全部", "All"),
-    SortOption("在线", "在线", "Online"),
-    SortOption("本地", "本地", "Local")
+    SortOption("全部", "全部"),
+    SortOption("在线", "在线"),
+    SortOption("本地", "本地")
 )
 
 /**
@@ -328,7 +325,7 @@ fun ProfileOverlay(
                 Column(Modifier.weight(1f)) {
                     Text(
                         profile?.displayName ?: displayName ?: localAuthorName
-                            ?: username.ifBlank { tr("未知作者", "Unknown author") },
+                            ?: username.ifBlank { "未知作者" },
                         style = MaterialTheme.typography.titleMedium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -374,7 +371,7 @@ fun ProfileOverlay(
                                 contentDescription = null,
                                 modifier = Modifier.size(12.dp)
                             )
-                            Text(tr("主页", "Profile"), style = MaterialTheme.typography.labelMedium)
+                            Text("主页", style = MaterialTheme.typography.labelMedium)
                         }
                     }
                 }
@@ -428,7 +425,7 @@ fun ProfileOverlay(
                             (fadeIn(tween(200)) + scaleIn(initialScale = 0.9f)) togetherWith fadeOut(tween(120))
                         },
                         label = "followLabel"
-                    ) { followed -> Text(if (followed) tr("已关注", "Following") else tr("关注", "Follow")) }
+                    ) { followed -> Text(if (followed) "已关注" else "关注") }
                 }
             }
 
@@ -539,7 +536,7 @@ fun ProfileOverlay(
         //   精简状态右上角不放小关注按钮 —— 作者信息块里已有一个大的，滚下去再冒一个纯属重复，
         //   actions 槽留空。
         val topName = profile?.displayName ?: displayName ?: localAuthorName
-            ?: username.ifBlank { tr("作者主页", "Author profile") }
+            ?: username.ifBlank { "作者主页" }
         OverlayTopBar(
             title = topName,
             onBack = onClose,
@@ -624,7 +621,7 @@ fun ProfileOverlay(
                         OnlineState.READY -> PagedGrid(
                             state = images,
                             columns = GridCells.Adaptive(120.dp),
-                            emptyHint = tr("暂无图片", "No images yet"),
+                            emptyHint = "暂无图片",
                             gridState = imagesGridState,
                             header = headerItem,
                             onLoadMore = { loadImages(force = false) },
@@ -645,7 +642,7 @@ fun ProfileOverlay(
                             OnlineFailedHint { profileRetry += 1 }
                         }
                         OnlineState.UNAVAILABLE -> HeaderWithHint(measuredHeader) {
-                            OfflineHint(unmatchedLocal, offlineText = tr("需要联网才能查看", "Connect to the internet to view this"))
+                            OfflineHint(unmatchedLocal, offlineText = "需要联网才能查看")
                         }
                     }
 
@@ -653,7 +650,7 @@ fun ProfileOverlay(
                         OnlineState.READY -> PagedGrid(
                             state = posts,
                             columns = GridCells.Fixed(1),
-                            emptyHint = tr("暂无帖子", "No posts yet"),
+                            emptyHint = "暂无帖子",
                             gridState = postsGridState,
                             header = headerItem,
                             onLoadMore = { loadPosts(force = false) },
@@ -672,7 +669,7 @@ fun ProfileOverlay(
                             OnlineFailedHint { profileRetry += 1 }
                         }
                         OnlineState.UNAVAILABLE -> HeaderWithHint(measuredHeader) {
-                            OfflineHint(unmatchedLocal, offlineText = tr("需要联网才能查看", "Connect to the internet to view this"))
+                            OfflineHint(unmatchedLocal, offlineText = "需要联网才能查看")
                         }
                     }
                 }
@@ -835,30 +832,27 @@ private fun AuthorVideosGrid(
                         if (rows.isNotEmpty()) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 Text(
-                                    tr(
-                                        "筛选后没有符合的内容（已隐藏 ${rows.size} 项）",
-                                        "No content matches the filters (${rows.size} hidden)"
-                                    ),
+                                    "筛选后没有符合的内容（已隐藏 ${rows.size} 项）",
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 if (onlineReady && sourceFilter != "本地" && !state.end) {
-                                    TextButton(onClick = onLoadMore) { Text(tr("继续加载", "Load more")) }
+                                    TextButton(onClick = onLoadMore) { Text("继续加载") }
                                 }
                             }
                         } else {
                             when {
                                 sourceFilter == "本地" -> Text(
-                                    tr("暂无本地视频", "No local videos yet"),
+                                    "暂无本地视频",
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 onlineState == OnlineState.LOADING -> SegmentLoading()
                                 onlineState == OnlineState.FAILED -> OnlineFailedHint(onRetryProfile)
                                 !onlineReady -> Text(
                                     // 纯本地作者（没有 UUID）→ 不存在在线内容，别显示"重试"。
-                                    tr("暂无本地视频", "No local videos yet"),
+                                    "暂无本地视频",
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
-                                else -> SegmentPlaceholder(state, tr("暂无视频", "No videos yet"), onRetry)
+                                else -> SegmentPlaceholder(state, "暂无视频", onRetry)
                             }
                         }
                     }
@@ -891,7 +885,7 @@ private fun AuthorVideosGrid(
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                tr("正在加载在线…", "Loading online content…"),
+                                "正在加载在线…",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )

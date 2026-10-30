@@ -1,8 +1,5 @@
 package io.github.amatsukiichika.iwaram.ui
 
-import io.github.amatsukiichika.iwaram.i18n.tr
-import io.github.amatsukiichika.iwaram.i18n.trCount
-
 /**
  * 卡片文本归一化：让「标题 / 作者 / 标签」三行在视觉上统一对齐。
  *
@@ -77,12 +74,12 @@ private const val RELATIVE_DAYS = 30L
  */
 fun cardDateText(createdAtMs: Long, nowMs: Long = System.currentTimeMillis()): String {
     val diff = nowMs - createdAtMs
-    if (diff <= 0L) return tr("刚刚", "Just now")
+    if (diff <= 0L) return "刚刚"
     return when {
-        diff < MINUTE_MS -> tr("刚刚", "Just now")
-        diff < HOUR_MS -> "${diff / MINUTE_MS} " + trCount((diff / MINUTE_MS).toInt(), "分钟前", "minute ago", "minutes ago")
-        diff < DAY_MS -> "${diff / HOUR_MS} " + trCount((diff / HOUR_MS).toInt(), "小时前", "hour ago", "hours ago")
-        diff < RELATIVE_DAYS * DAY_MS -> "${diff / DAY_MS} " + trCount((diff / DAY_MS).toInt(), "天前", "day ago", "days ago")
+        diff < MINUTE_MS -> "刚刚"
+        diff < HOUR_MS -> "${diff / MINUTE_MS} 分钟前"
+        diff < DAY_MS -> "${diff / HOUR_MS} 小时前"
+        diff < RELATIVE_DAYS * DAY_MS -> "${diff / DAY_MS} 天前"
         else -> java.time.format.DateTimeFormatter.ISO_LOCAL_DATE.format(
             java.time.Instant.ofEpochMilli(createdAtMs)
                 .atZone(java.time.ZoneId.systemDefault())

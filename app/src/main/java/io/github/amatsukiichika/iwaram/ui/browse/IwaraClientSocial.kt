@@ -29,7 +29,6 @@ import io.github.amatsukiichika.iwaram.data.describeIwaraError
 import io.github.amatsukiichika.iwaram.data.ensureIwaraSuccess
 import io.github.amatsukiichika.iwaram.data.GlobalFilterHolder
 import io.github.amatsukiichika.iwaram.data.parseIwaraDate
-import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.ui.DiagLog
 import io.github.amatsukiichika.iwaram.ui.QualityOption
 import kotlinx.coroutines.CancellationException
@@ -50,7 +49,7 @@ fun IwaraClientViewModel.likeKey(type: String, id: String) = "$type:$id"
 
 fun IwaraClientViewModel.toggleLike(type: String, id: String, currentlyLiked: Boolean, scope: CoroutineScope? = null, onDone: (Boolean?, String?) -> Unit) {
         if (!_session.value.loggedIn) {
-            onDone(null, tr("请先登录后再点赞", "Sign in to like"))
+            onDone(null, "请先登录后再点赞")
             return
         }
         (scope ?: viewModelScope).launch {
@@ -70,7 +69,7 @@ fun IwaraClientViewModel.toggleLike(type: String, id: String, currentlyLiked: Bo
 
 fun IwaraClientViewModel.toggleFollow(userId: String, currentlyFollowing: Boolean, scope: CoroutineScope? = null, onDone: (Boolean?, String?) -> Unit) {
         if (!_session.value.loggedIn) {
-            onDone(null, tr("请先登录后再关注", "Sign in to follow"))
+            onDone(null, "请先登录后再关注")
             return
         }
         (scope ?: viewModelScope).launch {

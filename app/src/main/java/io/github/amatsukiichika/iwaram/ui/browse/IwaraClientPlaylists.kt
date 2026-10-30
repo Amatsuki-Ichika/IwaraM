@@ -31,7 +31,6 @@ import io.github.amatsukiichika.iwaram.data.GlobalFilterHolder
 import io.github.amatsukiichika.iwaram.data.parseIwaraDate
 import io.github.amatsukiichika.iwaram.data.loadPlaylistsCache
 import io.github.amatsukiichika.iwaram.data.savePlaylistsCache
-import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.ui.DiagLog
 import io.github.amatsukiichika.iwaram.ui.QualityOption
 import kotlinx.coroutines.CancellationException
@@ -77,7 +76,7 @@ fun IwaraClientViewModel.loadPlaylists(force: Boolean = false) {
                     _playlists.value = IwaraClientViewModel.PlaylistsState(
                         items = items,
                         loaded = true,
-                        error = tr("网络不可用，正在显示缓存内容", "Network unavailable — showing cached content")
+                        error = "网络不可用，正在显示缓存内容"
                     )
                 } else {
                     _playlists.value = _playlists.value.copy(loading = false, error = describeIwaraError(t))
