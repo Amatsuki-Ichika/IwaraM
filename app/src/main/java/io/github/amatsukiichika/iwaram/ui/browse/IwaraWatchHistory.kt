@@ -54,7 +54,6 @@ import io.github.amatsukiichika.iwaram.data.historyTimeText
 import io.github.amatsukiichika.iwaram.data.clearWatchHistory
 import io.github.amatsukiichika.iwaram.data.deleteWatchHistory
 import io.github.amatsukiichika.iwaram.data.observeWatchHistory
-import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.ui.components.AppDialog
 import kotlinx.coroutines.launch
 
@@ -93,7 +92,7 @@ fun WatchHistoryOverlay(actions: IwaraNavActions, onClose: () -> Unit) {
 
     Column(Modifier.fillMaxSize()) {
         OverlayTopBar(
-            title = tr("观看历史", "Watch history"),
+            title = "观看历史",
             onBack = onClose,
             trailing = {
                 if (hasContent) {
@@ -101,7 +100,7 @@ fun WatchHistoryOverlay(actions: IwaraNavActions, onClose: () -> Unit) {
                     IconButton(onClick = { editingMode = !editingMode }, modifier = Modifier.size(40.dp)) {
                         Icon(
                             if (editingMode) Icons.Filled.Close else Icons.Filled.Edit,
-                            contentDescription = if (editingMode) tr("退出编辑", "Exit editing") else tr("编辑", "Edit"),
+                            contentDescription = if (editingMode) "退出编辑" else "编辑",
                             tint = if (editingMode) MaterialTheme.colorScheme.primary
                             else MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -109,7 +108,7 @@ fun WatchHistoryOverlay(actions: IwaraNavActions, onClose: () -> Unit) {
                     IconButton(onClick = { showClearConfirm = true }, modifier = Modifier.size(40.dp)) {
                         Icon(
                             Icons.Filled.Delete,
-                            contentDescription = tr("清空观看历史", "Clear watch history"),
+                            contentDescription = "清空观看历史",
                             tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
@@ -119,7 +118,7 @@ fun WatchHistoryOverlay(actions: IwaraNavActions, onClose: () -> Unit) {
         if (filtered.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(
-                    if (entries.isEmpty()) tr("还没有观看记录", "No watch history yet") else tr("没有符合筛选的记录", "No entries match the filters"),
+                    if (entries.isEmpty()) "还没有观看记录" else "没有符合筛选的记录",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -155,18 +154,15 @@ fun WatchHistoryOverlay(actions: IwaraNavActions, onClose: () -> Unit) {
     AppDialog(
         visible = showClearConfirm,
         onDismiss = { showClearConfirm = false },
-        title = tr("清空观看历史？", "Clear watch history?"),
-        text = tr(
-            "将删除全部 ${entries.size} 条观看记录，此操作不可撤销。",
-            "This deletes all ${entries.size} watch history entries and cannot be undone."
-        ),
-        confirmText = tr("清空", "Clear"),
+        title = "清空观看历史？",
+        text = "将删除全部 ${entries.size} 条观看记录，此操作不可撤销。",
+        confirmText = "清空",
         onConfirm = {
             showClearConfirm = false
             editingMode = false
             scope.launch { repo.clearWatchHistory() }
         },
-        dismissText = tr("取消", "Cancel"),
+        dismissText = "取消",
         confirmDestructive = true
     )
 }
@@ -256,7 +252,7 @@ private fun HistoryRow(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     if (entry.isLocal) Icons.Filled.Folder else Icons.Filled.Public,
-                    contentDescription = if (entry.isLocal) tr("本地视频", "Local video") else tr("在线视频", "Online video"),
+                    contentDescription = if (entry.isLocal) "本地视频" else "在线视频",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(13.dp)
                 )
@@ -283,7 +279,7 @@ private fun HistoryRow(
             ) {
                 Icon(
                     Icons.Filled.Delete,
-                    contentDescription = tr("删除这条记录", "Delete this entry"),
+                    contentDescription = "删除这条记录",
                     tint = MaterialTheme.colorScheme.onErrorContainer,
                     modifier = Modifier.size(19.dp)
                 )

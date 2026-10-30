@@ -82,7 +82,6 @@ import io.github.amatsukiichika.iwaram.data.VideoEntity
 import io.github.amatsukiichika.iwaram.data.filterBy
 import io.github.amatsukiichika.iwaram.data.localVideoKeys
 import io.github.amatsukiichika.iwaram.data.videoKeys
-import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.ui.DiagLog
 import io.github.amatsukiichika.iwaram.ui.components.debugAwareErrorText
 import kotlin.math.roundToInt
@@ -110,14 +109,14 @@ internal fun OnlineFailedHint(onRetry: () -> Unit) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
-                tr("在线内容加载失败", "Failed to load online content"),
+                "在线内容加载失败",
                 color = MaterialTheme.colorScheme.error,
                 style = MaterialTheme.typography.bodyMedium,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.padding(horizontal = 32.dp)
             )
             Spacer(Modifier.size(12.dp))
-            TextButton(onClick = onRetry) { Text(tr("重试", "Retry")) }
+            TextButton(onClick = onRetry) { Text("重试") }
         }
     }
 }
@@ -127,7 +126,7 @@ internal fun OnlineFailedHint(onRetry: () -> Unit) {
 internal fun OfflineHint(unmatchedLocal: Boolean, offlineText: String) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Text(
-            if (unmatchedLocal) tr("这些本地视频未匹配到 iwara，没有在线内容", "These local videos did not match iwara, so there is no online content") else offlineText,
+            if (unmatchedLocal) "这些本地视频未匹配到 iwara，没有在线内容" else offlineText,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.bodyMedium,
             textAlign = TextAlign.Center,
@@ -238,7 +237,7 @@ internal fun PagedAccountList(
                     Spacer(Modifier.size(12.dp))
                     Column(Modifier.weight(1f)) {
                         Text(
-                            account.name ?: account.username ?: tr("未知用户", "Unknown user"),
+                            account.name ?: account.username ?: "未知用户",
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -253,7 +252,7 @@ internal fun PagedAccountList(
                         }
                     }
                     account.username?.let {
-                        TextButton(onClick = { onOpen(account) }) { Text(tr("主页", "Profile")) }
+                        TextButton(onClick = { onOpen(account) }) { Text("主页") }
                     }
                 }
             }
@@ -270,10 +269,10 @@ internal fun <T> PagedFooter(state: PagedState<T>, onLoadMore: () -> Unit, onRet
     Box(Modifier.fillMaxWidth().padding(vertical = 12.dp), contentAlignment = Alignment.Center) {
         when {
             state.loading -> CircularProgressIndicator()
-            state.error != null -> TextButton(onClick = onRetry) { Text(tr("重试", "Retry")) }
-            !state.end -> TextButton(onClick = onLoadMore) { Text(tr("加载更多", "Load more")) }
+            state.error != null -> TextButton(onClick = onRetry) { Text("重试") }
+            !state.end -> TextButton(onClick = onLoadMore) { Text("加载更多") }
             else -> Text(
-                tr("没有更多了", "No more items"),
+                "没有更多了",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -297,7 +296,7 @@ internal fun <T> SegmentPlaceholder(state: PagedState<T>, emptyHint: String, onR
                     modifier = Modifier.padding(horizontal = 24.dp)
                 )
                 Spacer(Modifier.size(12.dp))
-                TextButton(onClick = onRetry) { Text(tr("重试", "Retry")) }
+                TextButton(onClick = onRetry) { Text("重试") }
             }
             else -> Text(emptyHint, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }

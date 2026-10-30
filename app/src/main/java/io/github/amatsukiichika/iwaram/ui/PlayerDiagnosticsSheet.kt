@@ -33,7 +33,6 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import io.github.amatsukiichika.iwaram.CrashLogger
-import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.ui.browse.PillSegmentSelector
 import io.github.amatsukiichika.iwaram.ui.components.AppBottomSheet
 import kotlinx.coroutines.Dispatchers
@@ -83,23 +82,14 @@ internal fun DiagnosticsSheet(
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp)
         ) {
-            PillSegmentSelector(options = listOf(tr("状态", "Status"), tr("日志", "Logs")), current = tab, onSelect = { tab = it })
+            PillSegmentSelector(options = listOf("状态", "日志"), current = tab, onSelect = { tab = it })
             Spacer(Modifier.height(14.dp))
             if (tab == 0) {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     if (standalone) {
-                        DiagRow(
-                            tr("说明", "About"),
-                            tr(
-                                "设置页入口只显示全局状态；播放相关项请在播放页「⋮」里查看",
-                                "The settings entry shows global status only; open ⋮ on the player page for playback details"
-                            )
-                        )
+                        DiagRow("说明", "设置页入口只显示全局状态；播放相关项请在播放页「⋮」里查看")
                     } else {
-                        DiagRow(
-                            tr("播放源", "Source"),
-                            if (isLocal) tr("本地文件", "Local file") else tr("在线", "Online") + (qualityLabel?.let { " · $it" } ?: "")
-                        )
+                        DiagRow("播放源", if (isLocal) "本地文件" else "在线" + (qualityLabel?.let { " · $it" } ?: ""))
                     }
                     // 源分辨率优先取超分实测值（configure() 真正拿到的帧尺寸），
                     // 其次播放器回调，最后本地文件的 MetadataRetriever。
@@ -110,25 +100,20 @@ internal fun DiagnosticsSheet(
                             if (videoWidth != null || videoHeight != null) "${videoWidth ?: "?"}x${videoHeight ?: "?"}" else null
                         val localRes =
                             if (localWidth != null && localHeight != null) "${localWidth}x$localHeight" else null
-                        DiagRow(
-                            tr("源分辨率", "Source resolution"),
-                            SuperResStatus.sourceText ?: reportedRes ?: localRes ?: tr("未知", "Unknown")
-                        )
-                        SuperResStatus.outputText?.let { DiagRow(tr("输出分辨率", "Output resolution"), it) }
-                        if (reportedRes != null) DiagRow(tr("播放器上报", "Player-reported"), reportedRes)
-                        DiagRow(tr("进度", "Progress"), "${formatTime(positionMs())} / ${formatTime(durationMs)}")
+                        DiagRow("源分辨率", SuperResStatus.sourceText ?: reportedRes ?: localRes ?: "未知")
+                        SuperResStatus.outputText?.let { DiagRow("输出分辨率", it) }
+                        if (reportedRes != null) DiagRow("播放器上报", reportedRes)
+                        DiagRow("进度", "${formatTime(positionMs())} / ${formatTime(durationMs)}")
                     }
                     val sr = listOfNotNull(
-                        SuperResStatus.engine?.let { tr("引擎 $it", "Engine $it") },
-                        SuperResStatus.activeScale?.let {
-                            tr("倍率 ${SuperResStatus.formatScale(it)}", "Scale ${SuperResStatus.formatScale(it)}")
-                        },
-                        if (SuperResStatus.degraded) tr("已降级", "Degraded") else null,
-                        if (SuperResStatus.pipelineFailed) tr("管线失败已自动停用", "SR disabled after pipeline failure") else null
-                    ).joinToString(" · ").ifBlank { tr("关闭", "Off") }
-                    DiagRow(tr("超分", "Super resolution"), sr)
-                    SuperResStatus.reason?.let { DiagRow(tr("超分原因", "SR reason"), it) }
-                    DiagRow(tr("错误", "Error"), playError ?: tr("无", "None"))
+                        SuperResStatus.engine?.let { "引擎 $it" },
+                        SuperResStatus.activeScale?.let { "倍率 ${SuperResStatus.formatScale(it)}" },
+                        if (SuperResStatus.degraded) "已降级" else null,
+                        if (SuperResStatus.pipelineFailed) "管线失败已自动停用" else null
+                    ).joinToString(" · ").ifBlank { "关闭" }
+                    DiagRow("超分", sr)
+                    SuperResStatus.reason?.let { DiagRow("超分原因", it) }
+                    DiagRow("错误", playError ?: "无")
                 }
             } else {
                 DiagnosticsLogTab(logs = logs, copyScope = copyScope, clipboard = clipboard)
@@ -169,7 +154,7 @@ private fun DiagnosticsLogTab(
         }
         Column(Modifier.fillMaxWidth().verticalScroll(scroll)) {
             if (logs.isEmpty()) {
-                Text(tr("暂无日志", "No logs yet"), style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                Text("暂无日志", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
             }
             logs.forEach { line ->
                 Text(
@@ -196,7 +181,7 @@ private fun DiagnosticsLogTab(
                 onClick = {
                     copyScope.launch {
                         val text = withContext(Dispatchers.IO) { CrashLogger.dumpTail() }
-                            ?: tr("（暂无崩溃记录）", "(No crash records)")
+                            ?: "（暂无崩溃记录）"
                         clipboard.setText(AnnotatedString(text))
                         DiagLog.log(TAG, "崩溃日志已复制到剪贴板")
                     }
@@ -204,7 +189,7 @@ private fun DiagnosticsLogTab(
             ) {
                 Icon(
                     Icons.Filled.BugReport,
-                    contentDescription = tr("复制崩溃日志", "Copy crash log"),
+                    contentDescription = "复制崩溃日志",
                     tint = cs.onSurfaceVariant,
                     modifier = Modifier.padding(12.dp)
                 )
@@ -220,7 +205,7 @@ private fun DiagnosticsLogTab(
             ) {
                 Icon(
                     Icons.Filled.ContentCopy,
-                    contentDescription = tr("复制全部日志", "Copy all logs"),
+                    contentDescription = "复制全部日志",
                     tint = cs.onPrimary,
                     modifier = Modifier.padding(12.dp)
                 )

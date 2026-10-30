@@ -47,7 +47,6 @@ import coil.compose.AsyncImage
 import io.github.amatsukiichika.iwaram.data.IwaraClient
 import io.github.amatsukiichika.iwaram.data.IwaraImageItem
 import io.github.amatsukiichika.iwaram.data.IwaraPostItem
-import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.ui.components.debugAwareErrorText
 
 /* ---------- 图片查看器 ---------- */
@@ -103,11 +102,11 @@ fun ImageViewerOverlay(image: IwaraImageItem, cvm: IwaraClientViewModel, actions
                 .padding(horizontal = 4.dp)
         ) {
             IconButton(onClick = onClose) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = tr("返回", "Back"), tint = Color.White)
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回", tint = Color.White)
             }
             Column(Modifier.weight(1f)) {
                 Text(
-                    detail.title ?: tr("图片", "Image"),
+                    detail.title ?: "图片",
                     color = Color.White,
                     style = MaterialTheme.typography.titleSmall,
                     maxLines = 1,
@@ -121,7 +120,7 @@ fun ImageViewerOverlay(image: IwaraImageItem, cvm: IwaraClientViewModel, actions
                     )
                     // 详情里也把点赞/评论数据显出来（与卡片一致的计数口径）。
                     Text(
-                        tr("  ·  ♥ ${detail.numLikes ?: 0}  ·  评论 ${detail.numComments ?: 0}", "  ·  ♥ ${detail.numLikes ?: 0}  ·  comments ${detail.numComments ?: 0}"),
+                        "  ·  ♥ ${detail.numLikes ?: 0}  ·  评论 ${detail.numComments ?: 0}",
                         color = Color.White.copy(alpha = 0.7f),
                         style = MaterialTheme.typography.labelSmall
                     )
@@ -130,21 +129,21 @@ fun ImageViewerOverlay(image: IwaraImageItem, cvm: IwaraClientViewModel, actions
             IconButton(onClick = {
                 val id = detail.id ?: return@IconButton
                 if (!session.loggedIn) {
-                    feedback = tr("请先登录后再点赞", "Sign in to like")
+                    feedback = "请先登录后再点赞"
                     return@IconButton
                 }
                 cvm.toggleLike("image", id, liked, scope = pageScope) { _, err -> feedback = err }
             }) {
                 Icon(
                     if (liked) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
-                    contentDescription = tr("点赞", "Like"),
+                    contentDescription = "点赞",
                     tint = if (liked) MaterialTheme.colorScheme.primary else Color.White
                 )
             }
             IconButton(onClick = {
-                detail.id?.let { id -> actions.openComments("image", id, detail.title ?: tr("图片", "Image")) }
+                detail.id?.let { id -> actions.openComments("image", id, detail.title ?: "图片") }
             }) {
-                Icon(Icons.Filled.TextFields, contentDescription = tr("评论", "Comments"), tint = Color.White)
+                Icon(Icons.Filled.TextFields, contentDescription = "评论", tint = Color.White)
             }
         }
         error?.let {
@@ -181,20 +180,20 @@ fun PostDetailOverlay(post: IwaraPostItem, cvm: IwaraClientViewModel, actions: I
 
     Column(Modifier.fillMaxSize()) {
         OverlayTopBar(
-            title = detail.title ?: tr("帖子", "Post"),
+            title = detail.title ?: "帖子",
             onBack = onClose,
             trailing = {
                 IconButton(onClick = {
                     val id = detail.id ?: return@IconButton
                     if (!session.loggedIn) {
-                        feedback = tr("请先登录后再点赞", "Sign in to like")
+                        feedback = "请先登录后再点赞"
                         return@IconButton
                     }
                     cvm.toggleLike("post", id, liked, scope = pageScope) { _, err -> feedback = err }
                 }) {
                     Icon(
                         if (liked) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
-                        contentDescription = tr("点赞", "Like"),
+                        contentDescription = "点赞",
                         tint = if (liked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
@@ -213,7 +212,7 @@ fun PostDetailOverlay(post: IwaraPostItem, cvm: IwaraClientViewModel, actions: I
                 Avatar(detail.user, 32)
                 Spacer(Modifier.size(8.dp))
                 Column {
-                    Text(detail.user?.name ?: detail.user?.username ?: tr("匿名", "Anonymous"), style = MaterialTheme.typography.labelLarge)
+                    Text(detail.user?.name ?: detail.user?.username ?: "匿名", style = MaterialTheme.typography.labelLarge)
                     timeAgoLabel(detail.createdAt)?.let {
                         Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
@@ -232,9 +231,9 @@ fun PostDetailOverlay(post: IwaraPostItem, cvm: IwaraClientViewModel, actions: I
             }
             Spacer(Modifier.size(16.dp))
             TextButton(onClick = {
-                detail.id?.let { id -> actions.openComments("post", id, detail.title ?: tr("帖子", "Post")) }
+                detail.id?.let { id -> actions.openComments("post", id, detail.title ?: "帖子") }
             }) {
-                Text(tr("查看评论（${detail.numComments ?: 0}）", "View comments (${detail.numComments ?: 0})"))
+                Text("查看评论（${detail.numComments ?: 0}）")
             }
         }
         error?.let {

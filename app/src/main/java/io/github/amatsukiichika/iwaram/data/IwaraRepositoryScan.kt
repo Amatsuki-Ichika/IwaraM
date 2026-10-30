@@ -24,7 +24,7 @@ import java.io.File
     /* ---------- 扫描导入 ---------- */
 
     /**
-     * 扫描 SAF 树下的所有支持的媒体文件（视频与音频），逐个入库并拉取 iwara 元数据。
+     * 扫描 SAF 树下的所有视频文件，逐个入库并拉取 iwara 元数据。
      */
 suspend fun IwaraRepository.importFolder(treeUri: Uri, onProgress: (done: Int, total: Int) -> Unit): Boolean {
         return withContext(Dispatchers.IO) {
@@ -206,8 +206,14 @@ suspend fun IwaraRepository.countVideos(): Int = dao.count()
                     if (rel.isEmpty()) (f.name ?: "") else "$rel/${f.name}",
                     out
                 )
-                f.isFile && MediaFormats.isSupportedMediaFile(f.name) -> out.add(f to rel)
+                f.isFile && isVideo(f.name) -> out.add(f to rel)
             }
         }
     }
 
+    private fun isVideo(name: String?): Boolean {
+        if (name == null) return false
+        val n = name.lowercase()
+        return n.endsWith(".mp4") || n.endsWith(".webm") ||
+            n.endsWith(".mkv") || n.endsWith(".mov") || n.endsWith(".m4v")
+    }

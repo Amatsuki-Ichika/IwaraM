@@ -30,7 +30,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
-import io.github.amatsukiichika.iwaram.i18n.tr
 
 /**
  * 全仓库唯一的自绘弹窗（全屏遮罩 + 居中卡片）。
@@ -51,7 +50,7 @@ fun AppDialog(
     title: String,
     text: String? = null,
     content: (@Composable ColumnScope.() -> Unit)? = null,
-    confirmText: String? = tr("知道了", "Got it"),
+    confirmText: String? = "知道了",
     onConfirm: (() -> Unit)? = null,
     dismissText: String? = null,
     confirmDestructive: Boolean = false

@@ -23,7 +23,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
-import io.github.amatsukiichika.iwaram.i18n.tr
 
 /**
  * 全仓库**唯一**的"独立条目卡"（「我的」页 MeEntryCard 规格升为公共组件）。
@@ -76,7 +75,7 @@ fun AppEntryCard(
                             ) {
                                 Icon(
                                     Icons.Outlined.Info,
-                                    contentDescription = tr("$title 说明", "About $title"),
+                                    contentDescription = "$title 说明",
                                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.size(18.dp)
                                 )

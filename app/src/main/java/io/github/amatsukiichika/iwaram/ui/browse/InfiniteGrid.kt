@@ -39,7 +39,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kyant.backdrop.backdrops.LayerBackdrop
 import io.github.amatsukiichika.iwaram.data.GlobalFilterHolder
 import io.github.amatsukiichika.iwaram.data.filterBy
-import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.ui.FastScrollbarBasic
 import io.github.amatsukiichika.iwaram.ui.components.debugAwareErrorText
 import io.github.amatsukiichika.iwaram.ui.components.glassViewBackdrop
@@ -80,7 +79,7 @@ fun <T> InfiniteGrid(
     modifier: Modifier = Modifier,
     state: LazyGridState = rememberLazyGridState(),
     columns: GridCells = GridCells.Fixed(2),
-    emptyHint: String = tr("暂无内容", "Nothing here yet"),
+    emptyHint: String = "暂无内容",
     /**
      * 全局筛选器：网格**渲染前**过最后一道 —— 全仓库所有在线列表共用这一处实现。
      *
@@ -205,7 +204,7 @@ fun <T> InfiniteGrid(
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                             modifier = Modifier.padding(horizontal = 24.dp)
                         )
-                        TextButton(onClick = onRetry) { Text(tr("重试", "Retry")) }
+                        TextButton(onClick = onRetry) { Text("重试") }
                     }
                 }
             }
@@ -218,14 +217,14 @@ fun <T> InfiniteGrid(
                         Text(
                             // 被全局筛选器筛空 vs 真的没内容 —— 两句话必须分开，
                             // 否则会把"筛选生效"当成"这一页加载失败/坏了"。
-                            if (hiddenByFilter > 0) tr("筛选后没有符合的内容（已隐藏 $hiddenByFilter 项）", "No content matches the filters ($hiddenByFilter hidden)") else emptyHint,
+                            if (hiddenByFilter > 0) "筛选后没有符合的内容（已隐藏 $hiddenByFilter 项）" else emptyHint,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         emptyExtra?.invoke()
                         // 筛空时列表是空的 ⇒ 没法再"滚到底"触发翻页，后面几页里可能有命中的内容。
                         // 给一个手动入口，而不是让人以为筛选器不工作。
                         if (hiddenByFilter > 0 && !endReached) {
-                            TextButton(onClick = onLoadMore, enabled = !loading) { Text(tr("继续加载", "Load more")) }
+                            TextButton(onClick = onLoadMore, enabled = !loading) { Text("继续加载") }
                         }
                     }
                 }
@@ -237,8 +236,8 @@ fun <T> InfiniteGrid(
             // 排序上"隐藏条数"优先于"到底"——前者是**可能让内容消失**的那一个，必须显眼。
             if (shown.isNotEmpty() && error == null && !loading) {
                 val tailText = when {
-                    hiddenByFilter > 0 -> tr("已按筛选条件隐藏 $hiddenByFilter 项", "$hiddenByFilter items hidden by the active filters")
-                    endReached -> tr("已经到底了", "End of list")
+                    hiddenByFilter > 0 -> "已按筛选条件隐藏 $hiddenByFilter 项"
+                    endReached -> "已经到底了"
                     else -> null
                 }
                 if (tailText != null) {
@@ -255,7 +254,7 @@ fun <T> InfiniteGrid(
                             )
                             // 一键清除，不用再去记住"那个漏斗图标在哪、里面留了什么规则"。
                             if (hiddenByFilter > 0) {
-                                TextButton(onClick = { GlobalFilterHolder.reset() }) { Text(tr("清除筛选", "Clear filters")) }
+                                TextButton(onClick = { GlobalFilterHolder.reset() }) { Text("清除筛选") }
                             }
                         }
                     }

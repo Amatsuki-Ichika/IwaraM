@@ -40,7 +40,6 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.amatsukiichika.iwaram.data.IwaraImageItem
 import io.github.amatsukiichika.iwaram.data.IwaraVideoItem
-import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.ui.components.AppBottomSheet
 
 /* ---------- 动作面板（长按视频/图片） ---------- */
@@ -69,7 +68,7 @@ fun VideoActionsSheet(
         when (mode) {
             ActionsMode.MAIN -> {
                 Text(
-                    video.title ?: tr("视频", "Video"),
+                    video.title ?: "视频",
                     style = MaterialTheme.typography.titleSmall,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -78,17 +77,17 @@ fun VideoActionsSheet(
                 FeedbackText(feedback)
                 ActionRow(
                     icon = if (liked) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
-                    label = if (liked) tr("取消收藏", "Unfavorite") else tr("收藏", "Favorite"),
+                    label = if (liked) "取消收藏" else "收藏",
                     onClick = {
                         val id = video.id ?: return@ActionRow
                         if (!session.loggedIn) {
-                            feedback = tr("请先登录后再收藏", "Sign in to favorite")
+                            feedback = "请先登录后再收藏"
                             return@ActionRow
                         }
                         cvm.toggleLike("video", id, liked, scope = pageScope) { ok, err ->
                             feedback = when {
-                                ok == true -> tr("已收藏", "Favorited")
-                                ok == false -> tr("已取消收藏", "Unfavorited")
+                                ok == true -> "已收藏"
+                                ok == false -> "已取消收藏"
                                 else -> err
                             }
                         }
@@ -96,10 +95,10 @@ fun VideoActionsSheet(
                 )
                 ActionRow(
                     icon = Icons.Filled.Add,
-                    label = tr("加入播放列表", "Add to playlist"),
+                    label = "加入播放列表",
                     onClick = {
                         if (!session.loggedIn) {
-                            feedback = tr("请先登录后使用播放列表", "Sign in to use playlists")
+                            feedback = "请先登录后使用播放列表"
                             return@ActionRow
                         }
                         cvm.loadPlaylists()
@@ -108,27 +107,27 @@ fun VideoActionsSheet(
                 )
                 ActionRow(
                     icon = Icons.Filled.Download,
-                    label = tr("下载到管理器", "Download to manager"),
+                    label = "下载到管理器",
                     onClick = {
-                        feedback = tr("已加入下载队列，可在通知栏查看进度", "Added to the download queue — check progress in the notification")
+                        feedback = "已加入下载队列，可在通知栏查看进度"
                         cvm.downloadVideo(video) { err -> feedback = err }
                     }
                 )
                 ActionRow(
                     icon = Icons.Filled.PlayArrow,
-                    label = tr("播放", "Play"),
+                    label = "播放",
                     onClick = { actions.playVideo(video) }
                 )
                 ActionRow(
                     icon = Icons.Filled.TextFields,
-                    label = tr("评论（${video.numComments ?: 0}）", "Comments (${video.numComments ?: 0})"),
+                    label = "评论（${video.numComments ?: 0}）",
                     onClick = {
-                        video.id?.let { id -> actions.openComments("video", id, video.title ?: tr("视频", "Video")) }
+                        video.id?.let { id -> actions.openComments("video", id, video.title ?: "视频") }
                     }
                 )
                 ActionRow(
                     icon = Icons.Filled.Person,
-                    label = tr("作者主页", "Author profile"),
+                    label = "作者主页",
                     onClick = { video.user?.let { actions.openAccountProfile(it) } }
                 )
                 Spacer(Modifier.size(24.dp))
@@ -143,16 +142,16 @@ fun VideoActionsSheet(
                     OutlinedTextField(
                         value = newTitle,
                         onValueChange = { newTitle = it },
-                        placeholder = { Text(tr("新播放列表标题", "New playlist title")) },
+                        placeholder = { Text("新播放列表标题") },
                         singleLine = true,
                         modifier = Modifier.weight(1f)
                     )
                     TextButton(onClick = {
                         if (newTitle.isNotBlank()) {
-                            cvm.createPlaylist(newTitle, scope = pageScope) { err -> feedback = err ?: tr("已创建", "Created") }
+                            cvm.createPlaylist(newTitle, scope = pageScope) { err -> feedback = err ?: "已创建" }
                             newTitle = ""
                         }
-                    }) { Text(tr("创建", "Create")) }
+                    }) { Text("创建") }
                 }
                 FeedbackText(feedback)
                 LazyRow(
@@ -164,9 +163,9 @@ fun VideoActionsSheet(
                             val pid = pl.id ?: return@OutlinedButton
                             val vid = video.id ?: return@OutlinedButton
                             cvm.addToPlaylist(pid, vid, scope = pageScope) { err ->
-                                feedback = if (err == null) tr("已加入「${pl.title}」", "Added to ${pl.title}") else err
+                                feedback = if (err == null) "已加入「${pl.title}」" else err
                             }
-                        }) { Text(pl.title ?: tr("未命名", "Untitled")) }
+                        }) { Text(pl.title ?: "未命名") }
                     }
                 }
                 if (playlists.loading) {
@@ -176,7 +175,7 @@ fun VideoActionsSheet(
                 }
                 if (playlists.loaded && playlists.items.isEmpty()) {
                     Text(
-                        tr("还没有播放列表，先在上面创建一个吧", "No playlists yet — create one above"),
+                        "还没有播放列表，先在上面创建一个吧",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(16.dp)
@@ -185,7 +184,7 @@ fun VideoActionsSheet(
                 TextButton(
                     onClick = { mode = ActionsMode.MAIN },
                     modifier = Modifier.padding(horizontal = 16.dp)
-                ) { Text(tr("返回", "Back")) }
+                ) { Text("返回") }
                 Spacer(Modifier.size(24.dp))
             }
         }
@@ -202,7 +201,7 @@ fun ImageActionsSheet(image: IwaraImageItem, cvm: IwaraClientViewModel, actions:
     // 同视频动作面板 —— 统一走 AppBottomSheet（高度与其他三个抽屉一致）。
     AppBottomSheet(onDismiss = onClose) {
         Text(
-            image.title ?: tr("图片", "Image"),
+            image.title ?: "图片",
             style = MaterialTheme.typography.titleSmall,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -211,17 +210,17 @@ fun ImageActionsSheet(image: IwaraImageItem, cvm: IwaraClientViewModel, actions:
         FeedbackText(feedback)
         ActionRow(
             icon = if (liked) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
-            label = if (liked) tr("取消收藏", "Unfavorite") else tr("收藏", "Favorite"),
+            label = if (liked) "取消收藏" else "收藏",
             onClick = {
                 val id = image.id ?: return@ActionRow
                 if (!session.loggedIn) {
-                    feedback = tr("请先登录后再收藏", "Sign in to favorite")
+                    feedback = "请先登录后再收藏"
                     return@ActionRow
                 }
                 cvm.toggleLike("image", id, liked, scope = pageScope) { ok, err ->
                     feedback = when {
-                        ok == true -> tr("已收藏", "Favorited")
-                        ok == false -> tr("已取消收藏", "Unfavorited")
+                        ok == true -> "已收藏"
+                        ok == false -> "已取消收藏"
                         else -> err
                     }
                 }
@@ -229,14 +228,14 @@ fun ImageActionsSheet(image: IwaraImageItem, cvm: IwaraClientViewModel, actions:
         )
         ActionRow(
             icon = Icons.Filled.TextFields,
-            label = tr("评论（${image.numComments ?: 0}）", "Comments (${image.numComments ?: 0})"),
+            label = "评论（${image.numComments ?: 0}）",
             onClick = {
-                image.id?.let { id -> actions.openComments("image", id, image.title ?: tr("图片", "Image")) }
+                image.id?.let { id -> actions.openComments("image", id, image.title ?: "图片") }
             }
         )
         ActionRow(
             icon = Icons.Filled.Person,
-            label = tr("作者主页", "Author profile"),
+            label = "作者主页",
             onClick = { image.user?.let { actions.openAccountProfile(it) } }
         )
         Spacer(Modifier.size(24.dp))

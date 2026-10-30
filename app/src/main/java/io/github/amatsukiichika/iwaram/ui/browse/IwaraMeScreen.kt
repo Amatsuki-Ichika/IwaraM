@@ -49,7 +49,6 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.ui.FastScrollbarBasic
 import io.github.amatsukiichika.iwaram.ui.components.AppEntryCard
 import io.github.amatsukiichika.iwaram.ui.components.AvatarImage
@@ -93,12 +92,9 @@ private fun LoginForm(cvm: IwaraClientViewModel, actions: IwaraNavActions) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Text(tr("登录 Iwara 账号", "Sign in to Iwara"), style = MaterialTheme.typography.titleLarge)
+        Text("登录 Iwara 账号", style = MaterialTheme.typography.titleLarge)
         Text(
-            tr(
-                "账号密码只用于向 iwara.tv 官方接口登录，本机保存的是会话令牌",
-                "Credentials are sent only to the official iwara.tv API; only a session token is stored on this device"
-            ),
+            "账号密码只用于向 iwara.tv 官方接口登录，本机保存的是会话令牌",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 4.dp, bottom = 20.dp)
@@ -106,7 +102,7 @@ private fun LoginForm(cvm: IwaraClientViewModel, actions: IwaraNavActions) {
         OutlinedTextField(
             value = email,
             onValueChange = { email = it },
-            label = { Text(tr("邮箱或用户名", "Email or username")) },
+            label = { Text("邮箱或用户名") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth()
         )
@@ -114,7 +110,7 @@ private fun LoginForm(cvm: IwaraClientViewModel, actions: IwaraNavActions) {
         OutlinedTextField(
             value = password,
             onValueChange = { password = it },
-            label = { Text(tr("密码", "Password")) },
+            label = { Text("密码") },
             singleLine = true,
             visualTransformation = PasswordVisualTransformation(),
             keyboardOptions = KeyboardOptions(
@@ -143,13 +139,10 @@ private fun LoginForm(cvm: IwaraClientViewModel, actions: IwaraNavActions) {
                 CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
                 Spacer(Modifier.size(8.dp))
             }
-            Text(if (session.busy) tr("登录中…", "Signing in…") else tr("登录", "Sign in"))
+            Text(if (session.busy) "登录中…" else "登录")
         }
         Text(
-            tr(
-                "登录后可用：订阅流、收藏、点赞、评论、关注、播放列表",
-                "After signing in: subscriptions, favorites, likes, comments, following, playlists"
-            ),
+            "登录后可用：订阅流、收藏、点赞、评论、关注、播放列表",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 16.dp)
@@ -181,7 +174,7 @@ private fun MeCardDivider() {
  */
 @Composable
 private fun SettingsEntryRow(actions: IwaraNavActions) {
-    AppEntryCard(title = tr("设置", "Settings"), icon = Icons.Filled.Settings, onClick = { actions.openSettings() })
+    AppEntryCard(title = "设置", icon = Icons.Filled.Settings, onClick = { actions.openSettings() })
 }
 
 @Composable
@@ -224,9 +217,9 @@ private fun LoggedInPanel(
                         )
                         Spacer(Modifier.size(14.dp))
                         Column {
-                            Text(session.username.ifBlank { tr("已登录", "Signed in") }, style = MaterialTheme.typography.titleMedium)
+                            Text(session.username.ifBlank { "已登录" }, style = MaterialTheme.typography.titleMedium)
                             Text(
-                                tr("已登录 Iwara 账号", "Signed in to Iwara"),
+                                "已登录 Iwara 账号",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -249,7 +242,7 @@ private fun LoggedInPanel(
                         )
                         Spacer(Modifier.size(12.dp))
                         Text(
-                            tr("退出登录", "Sign out"),
+                            "退出登录",
                             color = MaterialTheme.colorScheme.error,
                             style = MaterialTheme.typography.bodyLarge
                         )
@@ -259,11 +252,11 @@ private fun LoggedInPanel(
         }
 
         // 账号操作入口：独立卡片，与「设置」同款；观看历史提到最前。
-        item { AppEntryCard(title = tr("观看历史", "Watch history"), icon = Icons.Filled.History, onClick = { actions.openWatchHistory() }) }
-        item { AppEntryCard(title = tr("我的关注", "Following"), icon = Icons.Filled.Group, onClick = { actions.openFollowing() }) }
-        item { AppEntryCard(title = tr("我的收藏", "Favorites"), icon = Icons.Filled.Star, onClick = { actions.openFavorites() }) }
-        item { AppEntryCard(title = tr("我的播放列表", "My playlists"), icon = Icons.Filled.VideoLibrary, onClick = { actions.openPlaylists() }) }
-        item { AppEntryCard(title = tr("下载列表", "Downloads"), icon = Icons.Filled.Download, onClick = { actions.openDownloads() }) }
+        item { AppEntryCard(title = "观看历史", icon = Icons.Filled.History, onClick = { actions.openWatchHistory() }) }
+        item { AppEntryCard(title = "我的关注", icon = Icons.Filled.Group, onClick = { actions.openFollowing() }) }
+        item { AppEntryCard(title = "我的收藏", icon = Icons.Filled.Star, onClick = { actions.openFavorites() }) }
+        item { AppEntryCard(title = "我的播放列表", icon = Icons.Filled.VideoLibrary, onClick = { actions.openPlaylists() }) }
+        item { AppEntryCard(title = "下载列表", icon = Icons.Filled.Download, onClick = { actions.openDownloads() }) }
 
         // 设置入口（从顶栏齿轮移到这里，置于页面最底部）
         item {

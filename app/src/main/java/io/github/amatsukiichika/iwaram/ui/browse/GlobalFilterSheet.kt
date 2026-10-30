@@ -32,7 +32,6 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.amatsukiichika.iwaram.data.GlobalFilterHolder
 import io.github.amatsukiichika.iwaram.data.ListMode
-import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.ui.VideoViewModel
 import io.github.amatsukiichika.iwaram.ui.components.AppBottomSheet
 import io.github.amatsukiichika.iwaram.ui.components.SearchPill
@@ -108,13 +107,13 @@ fun GlobalFilterSheet(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    tr("高级筛选", "Advanced filters"),
+                    "高级筛选",
                     style = MaterialTheme.typography.titleMedium,
                     // weight(1f) 把后面那一组整体顶到右边（= "标题靠左、其余整组靠右"）。
                     modifier = Modifier.weight(1f)
                 )
                 Text(
-                    tr("总开关", "Enabled"),
+                    "总开关",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -128,7 +127,7 @@ fun GlobalFilterSheet(
                 IconButton(onClick = { GlobalFilterHolder.reset() }) {
                     Icon(
                         Icons.Outlined.Delete,
-                        contentDescription = tr("清空筛选条件", "Clear all filters"),
+                        contentDescription = "清空筛选条件",
                         tint = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
@@ -144,14 +143,14 @@ fun GlobalFilterSheet(
                 Modifier.fillMaxWidth().padding(top = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(tr("标题", "Title"), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                Text("标题", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
                 ListToggle(state.name.list) { GlobalFilterHolder.setNameList(it) }
             }
             Spacer(Modifier.size(6.dp))
             SearchPill(
                 value = state.name.pattern,
                 onValueChange = { GlobalFilterHolder.setNamePattern(it) },
-                placeholder = tr("输入标题关键词…", "Enter title keywords…"),
+                placeholder = "输入标题关键词…",
                 modifier = Modifier.fillMaxWidth().height(44.dp),
                 onClear = { GlobalFilterHolder.setNamePattern("") },
                 // 点这里 → 对齐到顶（标题整块可见）
@@ -168,14 +167,14 @@ fun GlobalFilterSheet(
                 Modifier.fillMaxWidth().padding(top = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(tr("标签", "Tags"), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                Text("标签", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
                 ListToggle(state.tag.list) { GlobalFilterHolder.setTagList(it) }
             }
             Spacer(Modifier.size(6.dp))
             SearchPill(
                 value = state.tag.draft,
                 onValueChange = { GlobalFilterHolder.setTagDraft(it) },
-                placeholder = tr("输入标签…", "Enter tags…"),
+                placeholder = "输入标签…",
                 modifier = Modifier.fillMaxWidth().height(44.dp),
                 // ✕ = 清掉这一行的全部条件（草稿 + 已选 chip）
                 onClear = { GlobalFilterHolder.clearTagTerms() },
@@ -211,7 +210,7 @@ fun GlobalFilterSheet(
 @Composable
 private fun ListToggle(current: ListMode, onSelect: (ListMode) -> Unit) {
     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        listOf(tr("黑名单", "Blacklist") to ListMode.BLACK, tr("白名单", "Whitelist") to ListMode.WHITE).forEach { (label, mode) ->
+        listOf("黑名单" to ListMode.BLACK, "白名单" to ListMode.WHITE).forEach { (label, mode) ->
             FilterChip(
                 selected = current == mode,
                 onClick = { onSelect(mode) },

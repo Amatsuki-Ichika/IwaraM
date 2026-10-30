@@ -13,7 +13,6 @@ import io.github.amatsukiichika.iwaram.data.TagEntity
 import io.github.amatsukiichika.iwaram.data.VideoEntity
 import io.github.amatsukiichika.iwaram.data.filterBy
 import io.github.amatsukiichika.iwaram.data.localVideoKeys
-import io.github.amatsukiichika.iwaram.i18n.tr
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -30,21 +29,15 @@ import java.time.ZoneId
 /* ---------- 本地库 UI 模型（原 VideoViewModel.kt 模型区块） ---------- */
 enum class LibraryMode { ALL, FOLDER, AUTHOR, TIME, TAG }
 
-enum class SortMode(
-    private val labelZh: String,
-    private val labelEn: String
-) {
-    NEWEST("最新", "Newest"),
-    OLDEST("最早", "Oldest"),
-    NAME_ASC("名称 A→Z", "Name A→Z"),
-    NAME_DESC("名称 Z→A", "Name Z→A"),
-    COUNT_DESC("数量 多→少", "Count high→low"),
-    COUNT_ASC("数量 少→多", "Count low→high"),
-    ADDED_NEW("下载时间 新→旧", "Downloaded newest→oldest"),
-    ADDED_OLD("下载时间 旧→新", "Downloaded oldest→newest");
-
-    /** 当前界面语言下的排序名（组合期求值，切语言立即生效）。 */
-    val label: String get() = tr(labelZh, labelEn)
+enum class SortMode(val label: String) {
+    NEWEST("最新"),
+    OLDEST("最早"),
+    NAME_ASC("名称 A→Z"),
+    NAME_DESC("名称 Z→A"),
+    COUNT_DESC("数量 多→少"),
+    COUNT_ASC("数量 少→多"),
+    ADDED_NEW("下载时间 新→旧"),
+    ADDED_OLD("下载时间 旧→新")
 }
 
 data class AuthorBucket(val id: String, val name: String, val count: Int)

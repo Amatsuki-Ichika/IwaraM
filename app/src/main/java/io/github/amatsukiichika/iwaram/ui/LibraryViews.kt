@@ -53,7 +53,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.ui.browse.CompactSearchSlot
 import io.github.amatsukiichika.iwaram.ui.browse.RATING_OPTIONS
 import io.github.amatsukiichika.iwaram.ui.browse.SEARCH_ROW_HEIGHT
@@ -111,7 +110,7 @@ internal fun VideoGrid(
 ) {
     if (videos.isEmpty()) {
         if (hiddenByFilter > 0) {
-            EmptyState(onImport = null, hint = tr("筛选后没有符合的内容（已隐藏 $hiddenByFilter 项）", "No matching content after filtering ($hiddenByFilter hidden)"))
+            EmptyState(onImport = null, hint = "筛选后没有符合的内容（已隐藏 $hiddenByFilter 项）")
         } else {
             EmptyState(onImport = onImport)
         }
@@ -152,7 +151,7 @@ internal fun AuthorList(
     topPadding: androidx.compose.ui.unit.Dp = androidx.compose.ui.unit.Dp(0f)
 ) {
     if (authors.isEmpty()) {
-        EmptyState(onImport = null, hint = tr("暂无作者信息，请先导入并联网拉取", "No author info yet — import videos and go online to fetch it"))
+        EmptyState(onImport = null, hint = "暂无作者信息，请先导入并联网拉取")
         return
     }
     LazyColumn(
@@ -176,7 +175,7 @@ internal fun FolderList(
     topPadding: androidx.compose.ui.unit.Dp = androidx.compose.ui.unit.Dp(0f)
 ) {
     if (folders.isEmpty()) {
-        EmptyState(onImport = null, hint = tr("暂无文件夹分类，请先导入本地文件夹", "No folder categories yet — import a local folder first"))
+        EmptyState(onImport = null, hint = "暂无文件夹分类，请先导入本地文件夹")
         return
     }
     LazyColumn(
@@ -200,7 +199,7 @@ internal fun TimeList(
     topPadding: androidx.compose.ui.unit.Dp = androidx.compose.ui.unit.Dp(0f)
 ) {
     if (buckets.isEmpty()) {
-        EmptyState(onImport = null, hint = tr("暂无时间信息", "No time info yet"))
+        EmptyState(onImport = null, hint = "暂无时间信息")
         return
     }
     LazyColumn(
@@ -231,7 +230,7 @@ internal fun TagCloud(
     topPadding: androidx.compose.ui.unit.Dp = androidx.compose.ui.unit.Dp(0f)
 ) {
     if (tags.isEmpty()) {
-        EmptyState(onImport = null, hint = tr("暂无标签，请先导入并联网拉取", "No tags yet — import videos and go online to fetch them"))
+        EmptyState(onImport = null, hint = "暂无标签，请先导入并联网拉取")
         return
     }
     LazyColumn(contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 12.dp + topPadding, bottom = 12.dp + bottomPadding)) {
@@ -282,10 +281,7 @@ internal fun BucketRow(title: String, count: Int, onClick: () -> Unit) {
 }
 
 @Composable
-internal fun EmptyState(
-    onImport: (() -> Unit)?,
-    hint: String = tr("还没有视频，导入本地文件夹开始管理", "No videos yet — import a local folder to get started")
-) {
+internal fun EmptyState(onImport: (() -> Unit)?, hint: String = "还没有视频，导入本地文件夹开始管理") {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(
@@ -305,7 +301,7 @@ internal fun EmptyState(
                     modifier = Modifier.padding(top = 16.dp)
                 ) {
                     Icon(Icons.Filled.Add, contentDescription = null)
-                    Text(tr(" 导入文件夹", " Import folder"))
+                    Text(" 导入文件夹")
                 }
             }
         }

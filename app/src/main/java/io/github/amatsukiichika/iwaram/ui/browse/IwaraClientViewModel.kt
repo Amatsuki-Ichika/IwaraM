@@ -29,7 +29,6 @@ import io.github.amatsukiichika.iwaram.data.describeIwaraError
 import io.github.amatsukiichika.iwaram.data.ensureIwaraSuccess
 import io.github.amatsukiichika.iwaram.data.GlobalFilterHolder
 import io.github.amatsukiichika.iwaram.data.parseIwaraDate
-import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.ui.DiagLog
 import io.github.amatsukiichika.iwaram.ui.QualityOption
 import kotlinx.coroutines.CancellationException
@@ -74,7 +73,7 @@ class IwaraClientViewModel(internal val app: IwaraApp) : ViewModel() {
             override fun onSessionExpired() {
                 _session.value = _session.value.copy(
                     loggedIn = false, username = "", userId = "", avatarUrl = null,
-                    message = tr("登录已过期，请重新登录", "Your session has expired. Please sign in again")
+                    message = "登录已过期，请重新登录"
                 )
                 // 过期与主动登出在数据层面是同一件事：凭证没了，账号级状态就必须清掉，
                 // 否则用户换个账号重新登录，看到的还是上一个账号的列表。
@@ -163,9 +162,7 @@ class IwaraClientViewModel(internal val app: IwaraApp) : ViewModel() {
 
     fun login(email: String, password: String) {
         if (email.isBlank() || password.isBlank()) {
-            _session.value = _session.value.copy(
-                message = tr("请填写邮箱和密码", "Enter your email and password")
-            )
+            _session.value = _session.value.copy(message = "请填写邮箱和密码")
             return
         }
         viewModelScope.launch {
@@ -367,14 +364,10 @@ class IwaraClientViewModel(internal val app: IwaraApp) : ViewModel() {
                 //  · 凭证被服务器拒绝（IwaraApiException）⇒ 换一句能对上账号状态的话；
                 //  · 网络类失败 ⇒ 原样上抛，错误面板显示"网络异常，请检查网络"。
                 throw if (t is IwaraSession.IwaraApiException) {
-                    IwaraSession.IwaraApiException(
-                        tr("登录已过期，请重新登录", "Your session has expired. Please sign in again")
-                    )
+                    IwaraSession.IwaraApiException("登录已过期，请重新登录")
                 } else t
             }
-            if (token.isNullOrBlank()) throw IwaraSession.IwaraApiException(
-                tr("登录已过期，请重新登录", "Your session has expired. Please sign in again")
-            )
+            if (token.isNullOrBlank()) throw IwaraSession.IwaraApiException("登录已过期，请重新登录")
             // 订阅流走 callSubscription（固定 api.iwara.tv）—— apiq 会静默忽略
             //   `subscribed=true` 并返回全站最新视频。
             //   订阅流固定按最新排序（订阅页不提供排序筛选），分级沿用视频页选择。

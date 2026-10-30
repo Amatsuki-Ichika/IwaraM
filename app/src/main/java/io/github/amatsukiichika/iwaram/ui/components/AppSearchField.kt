@@ -35,7 +35,6 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import io.github.amatsukiichika.iwaram.i18n.tr
 
 /**
  * 胶囊搜索框 —— 全仓库唯一实现。
@@ -72,7 +71,7 @@ fun SearchPill(
     ) {
         Icon(
             Icons.Filled.Search,
-            contentDescription = if (collapsed) tr("展开搜索", "Expand search") else null,
+            contentDescription = if (collapsed) "展开搜索" else null,
             tint = if (collapsed) {
                 MaterialTheme.colorScheme.primary
             } else {
@@ -132,7 +131,7 @@ fun SearchPill(
             IconButton(onClick = onClear, modifier = Modifier.size(32.dp)) {
                 Icon(
                     Icons.Filled.Close,
-                    contentDescription = tr("清空", "Clear"),
+                    contentDescription = "清空",
                     modifier = Modifier.size(18.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )

@@ -45,12 +45,10 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
-import androidx.media3.common.Tracks
 import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.HttpDataSource
-import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
@@ -64,7 +62,6 @@ import io.github.amatsukiichika.iwaram.data.VideoEntity
 import io.github.amatsukiichika.iwaram.data.watchHistoryKey
 import io.github.amatsukiichika.iwaram.data.recordWatch
 import io.github.amatsukiichika.iwaram.data.updateWatchProgress
-import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.ui.components.LocalDebugDetails
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -186,13 +183,7 @@ fun PlayerScreen(
     var playOnNextPrepare by remember { mutableStateOf(true) }
     val player = remember(playerEpoch) {
         val httpFactory = OkHttpDataSource.Factory(IwaraClient.mediaHttp)
-        // 解码器回退：首选解码器初始化失败时（如部分设备的 c2.android.aac.decoder
-        //   Error 0x80000000）自动尝试下一个软/硬件解码器，而不是直接报错停播。
-        //   media3 默认关闭，必须显式打开；只多一个 RenderersFactory，装片与 SR 通路不变。
-        val renderersFactory = DefaultRenderersFactory(context)
-            .setEnableDecoderFallback(true)
         ExoPlayer.Builder(context)
-            .setRenderersFactory(renderersFactory)
             .setMediaSourceFactory(
                 DefaultMediaSourceFactory(DefaultDataSource.Factory(context, httpFactory))
             )
@@ -330,14 +321,6 @@ fun PlayerScreen(
     // 播放源统一入口：本地取 localUri，在线取后台解析出的 mediaUrl；
     // 键变化（含重试时先清空再赋值）即重新装片，本地/在线只有这一条装片路径。
     val mediaUrl = video.localUri.ifBlank { online?.mediaUrl.orEmpty() }
-    // 当前片源是否含视频轨；null = 轨道信息还没上报（不能据此当作纯音频）。
-    //   纯音频文件永远不会回调 onVideoSizeChanged，只能靠 onTracksChanged 判断 ——
-    //   据此在视频区叠一个音频占位，避免本地音频文件播放时整块黑屏像卡死。
-    //   状态对象不按 mediaUrl 作 key：listener 只在首次组合创建一次，若状态对象随
-    //   换片被 remember 换新，listener 仍握着旧对象的引用，更新就写丢了；换片归零
-    //   改由下面的 LaunchedEffect 负责。
-    var hasVideoTrack by remember { mutableStateOf<Boolean?>(null) }
-    LaunchedEffect(mediaUrl) { hasVideoTrack = null }
     // 超分：默认取设置页选择，播放器内可临时切换。
     // （声明在 listener 之前：7001 自动保播放需要在错误回调里读写 SR 开关。）
     val srRepo = LocalAppRepository.current
@@ -423,14 +406,6 @@ fun PlayerScreen(
                 }
             }
 
-            override fun onTracksChanged(tracks: Tracks) {
-                // 空轨道表 = 还没 prepare 完，不能据此判断"没有视频轨"；
-                //   groups 非空才说明轨道信息已到，此时没有视频组 = 纯音频。
-                if (tracks.groups.isNotEmpty()) {
-                    hasVideoTrack = tracks.containsType(C.TRACK_TYPE_VIDEO)
-                }
-            }
-
             override fun onRenderedFirstFrame() {
                 Log.i(TAG, "onRenderedFirstFrame sr=${SuperResStatus.engine ?: "off"}")
                 DiagLog.log(TAG, "onRenderedFirstFrame sr=${SuperResStatus.engine ?: "off"}")
@@ -474,10 +449,7 @@ fun PlayerScreen(
                     SuperResStatus.degraded = false
                     SuperResStatus.activeScale = null
                     SuperResStatus.pipelineFailed = true
-                    SuperResStatus.reason = tr(
-                        "特效管线失败（7001），已自动停用超分并恢复播放",
-                        "Effect pipeline failed (7001); super resolution disabled and playback resumed"
-                    )
+                    SuperResStatus.reason = "特效管线失败（7001），已自动停用超分并恢复播放"
                     // 出错时刻的进度/时长记进页面状态，恢复统一交给装片
                     //   effect 的 epoch 重建通路（srEnabled 翻 false 触发）——新实例上特效在首次
                     //   prepare 前重建，装片时经 resumePos 精确续播。若在回调里先对旧实例
@@ -606,12 +578,7 @@ fun PlayerScreen(
         }.onFailure {
             Log.e(TAG, "setVideoEffects 失败", it)
             DiagLog.log(TAG, "setVideoEffects 失败: ${it.message}")
-            SuperResStatus.markDegraded(
-                tr(
-                    "特效链替换失败：${it.message ?: it.javaClass.simpleName}",
-                    "Failed to replace the effect chain: ${it.message ?: it.javaClass.simpleName}"
-                )
-            )
+            SuperResStatus.markDegraded("特效链替换失败：${it.message ?: it.javaClass.simpleName}")
         }
         // SR 自动停用（pipelineFailed）时保留状态，让 chip 继续显示"SR 自动停用"提醒；
         // 重新打开 SR（buildEffects 会 reset）或换视频时才真正清零。
@@ -869,11 +836,7 @@ fun PlayerScreen(
     //   播放中的网络卡顿只转圈、不压黑画面（画面保持，老行为不变）。
     val switchBlackout = showSwitchLoading &&
         (mediaUrl.isBlank() || preparedUrl != mediaUrl || !firstFrameSeen)
-    val switchLoadingText = if (mediaUrl.isBlank()) {
-        tr("正在获取播放地址…", "Fetching playback URL…")
-    } else {
-        tr("正在加载…", "Loading…")
-    }
+    val switchLoadingText = if (mediaUrl.isBlank()) "正在获取播放地址…" else "正在加载…"
 
     PlayerContent(
         player = player,
@@ -917,7 +880,6 @@ fun PlayerScreen(
         videoHeight = videoHeight,
         localVideoWidth = localVideoWidth,
         localVideoHeight = localVideoHeight,
-        audioOnly = hasVideoTrack == false,
         onVideoTap = { if (controlsVisible) controlsVisible = false else pokeControls() },
         pokeControls = { pokeControls() },
         onTogglePlay = {

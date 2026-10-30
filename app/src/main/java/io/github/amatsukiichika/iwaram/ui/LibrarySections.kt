@@ -13,7 +13,6 @@ import io.github.amatsukiichika.iwaram.data.TagEntity
 import io.github.amatsukiichika.iwaram.data.VideoEntity
 import io.github.amatsukiichika.iwaram.data.filterBy
 import io.github.amatsukiichika.iwaram.data.localVideoKeys
-import io.github.amatsukiichika.iwaram.i18n.tr
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -75,24 +74,21 @@ private fun nameSection(name: String): String {
 }
 
 private fun countTier(n: Int): String = when {
-    n >= 10000 -> tr("1万+", "10K+")
-    n >= 1000 -> tr("1千+", "1K+")
+    n >= 10000 -> "1万+"
+    n >= 1000 -> "1千+"
     n >= 100 -> "100+"
     else -> "<100"
 }
 
 private fun monthLabel(epochMs: Long): String {
     val ym = YearMonth.from(Instant.ofEpochMilli(epochMs).atZone(ZoneId.systemDefault()))
-    return tr("${ym.year}年${ym.monthValue}月", "%d-%02d".format(ym.year, ym.monthValue))
+    return "${ym.year}年${ym.monthValue}月"
 }
 
 /** 下载时间排序的分节标签按天 —— 集中在最近一两个月下载时按月只剩 1 个分节，滚动条不渲染。 */
 private fun dayLabel(epochMs: Long): String {
     val d = Instant.ofEpochMilli(epochMs).atZone(ZoneId.systemDefault()).toLocalDate()
-    return tr(
-        "%02d月%02d日".format(d.monthValue, d.dayOfMonth),
-        "%02d-%02d".format(d.monthValue, d.dayOfMonth)
-    )
+    return "%02d月%02d日".format(d.monthValue, d.dayOfMonth)
 }
 
 /**
@@ -106,7 +102,7 @@ private fun dayLabel(epochMs: Long): String {
 internal fun videoSection(v: VideoEntity, sortMode: SortMode): String = when (sortMode) {
     SortMode.NAME_ASC, SortMode.NAME_DESC -> nameSection(v.title)
     SortMode.COUNT_ASC, SortMode.COUNT_DESC -> countTier(v.viewCount ?: 0)
-    SortMode.NEWEST, SortMode.OLDEST -> v.createdAt?.let(::monthLabel) ?: tr("未知", "Unknown")
+    SortMode.NEWEST, SortMode.OLDEST -> v.createdAt?.let(::monthLabel) ?: "未知"
     // 下载时间排序按天分节，取值键与 VideoSorter 的比较器同源：
     // 文件修改日期（0 = 未知时退回入库时刻），否则分节会与排序键错位。
     SortMode.ADDED_NEW, SortMode.ADDED_OLD ->
