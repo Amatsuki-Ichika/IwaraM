@@ -56,7 +56,8 @@ change goes through a pull request.
 1. Branch from `main` as `fix/<topic>`, `feat/<topic>` or `chore/<topic>`.
 2. Run `./gradlew verify` and `node scripts/check.mjs` before pushing.
 3. Open a pull request with a Conventional Commit title; descriptions follow the template.
-4. Wait for `build` to go green, then squash-merge and delete the branch.
+4. Wait for `build` to go green and a human review approval, then merge with a merge commit and
+   delete the branch. Never squash-merge.
 
 Releases are tag-driven; see [CONTRIBUTING.md](CONTRIBUTING.md#releasing). A change that breaks
 persisted data (Room schema, application ID, signing key) needs a decision record and a

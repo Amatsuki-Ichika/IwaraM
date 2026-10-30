@@ -49,6 +49,7 @@ import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.HttpDataSource
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
@@ -62,6 +63,7 @@ import io.github.amatsukiichika.iwaram.data.VideoEntity
 import io.github.amatsukiichika.iwaram.data.watchHistoryKey
 import io.github.amatsukiichika.iwaram.data.recordWatch
 import io.github.amatsukiichika.iwaram.data.updateWatchProgress
+import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.ui.components.LocalDebugDetails
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -183,7 +185,20 @@ fun PlayerScreen(
     var playOnNextPrepare by remember { mutableStateOf(true) }
     val player = remember(playerEpoch) {
         val httpFactory = OkHttpDataSource.Factory(IwaraClient.mediaHttp)
+        // 解码器策略：
+        // 1) 扩展渲染器优先 —— 音频优先交给 FFmpeg 软件解码（jellyfin 的 media3-ffmpeg-decoder，
+        //    见 docs/decisions/0011-codec-support.md）：部分设备的平台解码器对 AAC Main 等
+        //    profile 会"报告支持但解码失败"（如 c2.android.aac.decoder Error 0x80000000），
+        //    FFmpeg 软解是唯一能真正播出来的通路；平台没有的音频编码同样由它兜底。
+        // 2) 解码器回退 —— 首选解码器初始化失败时自动尝试同平台的下一个解码器
+        //    （含 AOSP 的 c2.android.* 软解），而不是直接报错停播；media3 默认关闭。
+        //    视频没有 FFmpeg 渲染器（上游仍是不工作的占位实现），视频只能靠这条平台回退。
+        // 只多一个 RenderersFactory，装片与 SR 通路不变。
+        val renderersFactory = DefaultRenderersFactory(context)
+            .setEnableDecoderFallback(true)
+            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
         ExoPlayer.Builder(context)
+            .setRenderersFactory(renderersFactory)
             .setMediaSourceFactory(
                 DefaultMediaSourceFactory(DefaultDataSource.Factory(context, httpFactory))
             )
@@ -449,7 +464,10 @@ fun PlayerScreen(
                     SuperResStatus.degraded = false
                     SuperResStatus.activeScale = null
                     SuperResStatus.pipelineFailed = true
-                    SuperResStatus.reason = "特效管线失败（7001），已自动停用超分并恢复播放"
+                    SuperResStatus.reason = tr(
+                        "特效管线失败（7001），已自动停用超分并恢复播放",
+                        "Effect pipeline failed (7001); super resolution disabled and playback resumed"
+                    )
                     // 出错时刻的进度/时长记进页面状态，恢复统一交给装片
                     //   effect 的 epoch 重建通路（srEnabled 翻 false 触发）——新实例上特效在首次
                     //   prepare 前重建，装片时经 resumePos 精确续播。若在回调里先对旧实例
@@ -578,7 +596,12 @@ fun PlayerScreen(
         }.onFailure {
             Log.e(TAG, "setVideoEffects 失败", it)
             DiagLog.log(TAG, "setVideoEffects 失败: ${it.message}")
-            SuperResStatus.markDegraded("特效链替换失败：${it.message ?: it.javaClass.simpleName}")
+            SuperResStatus.markDegraded(
+                tr(
+                    "特效链替换失败：${it.message ?: it.javaClass.simpleName}",
+                    "Failed to replace the effect chain: ${it.message ?: it.javaClass.simpleName}"
+                )
+            )
         }
         // SR 自动停用（pipelineFailed）时保留状态，让 chip 继续显示"SR 自动停用"提醒；
         // 重新打开 SR（buildEffects 会 reset）或换视频时才真正清零。
@@ -836,7 +859,11 @@ fun PlayerScreen(
     //   播放中的网络卡顿只转圈、不压黑画面（画面保持，老行为不变）。
     val switchBlackout = showSwitchLoading &&
         (mediaUrl.isBlank() || preparedUrl != mediaUrl || !firstFrameSeen)
-    val switchLoadingText = if (mediaUrl.isBlank()) "正在获取播放地址…" else "正在加载…"
+    val switchLoadingText = if (mediaUrl.isBlank()) {
+        tr("正在获取播放地址…", "Fetching playback URL…")
+    } else {
+        tr("正在加载…", "Loading…")
+    }
 
     PlayerContent(
         player = player,

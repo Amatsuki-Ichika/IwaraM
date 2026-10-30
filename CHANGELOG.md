@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The app is bilingual. Every screen, dialog, status message, notification and error text is
+  available in Simplified Chinese and English, and Settings > General > Language switches between
+  following the system, Chinese and English. Switching takes effect immediately, including the
+  library's month, root-folder and unknown-author labels, which are recomputed without rescanning.
+
+- A first-run guide explains the language choice, the library folder, the download folder and the
+  main preferences before the app opens for the first time. It can be replayed from
+  Settings > About > Show the first-run guide again.
+
+- Audio decoding now falls back to a bundled FFmpeg decoder. It covers AAC (including Main),
+  AC-3, E-AC-3, DTS, TrueHD, MLP, MP3, FLAC, ALAC and PCM mu-law/A-law, and is preferred over
+  platform decoders, which still handle the formats it does not: a stream the device's decoder
+  claims to support but then rejects is decoded in software instead of failing. This uses Jellyfin's
+  prebuilt media3 FFmpeg decoder artifact and moves AndroidX Media3 from 1.4.1 to 1.5.0.
+
+### Changed
+
+- The project is now licensed under the GNU Affero General Public License v3.0 instead of the MIT
+  license. The README defaults to English with a Simplified Chinese translation, and shows the app
+  icon and screenshots of the local library, the player and the first-run guide.
+
+### Fixed
+
+- Playback no longer stops at the first decoder that fails to initialise. The player enables
+  ExoPlayer's decoder fallback, so a video whose preferred decoder fails — or that has no hardware
+  decoder on the device — is retried on the next platform decoder, including Android's software
+  decoders, instead of failing outright.
+
 ## [0.2.1] - 2026-10-28
 
 ### Added

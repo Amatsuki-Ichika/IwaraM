@@ -3,6 +3,7 @@ package io.github.amatsukiichika.iwaram.data
 import android.content.Context
 import android.content.SharedPreferences
 import android.util.Base64
+import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.ui.DiagLog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
@@ -148,7 +149,9 @@ object IwaraSession {
                 url = IwaraClient.activeBase + "user/login",
                 body = JSONObject().put("email", email.trim()).put("password", password)
             ) { it.optString("token").takeIf { t -> t.isNotBlank() } }
-                ?: throw IwaraApiException("登录失败：服务器未返回令牌")
+                ?: throw IwaraApiException(
+                    tr("登录失败：服务器未返回令牌", "Login failed: the server did not return a token")
+                )
 
             refreshToken = refresh
             writeStoredToken(KEY_REFRESH, refresh)
@@ -160,7 +163,7 @@ object IwaraSession {
                 // 不把邮箱兜底存成用户名（会导致 profile(邮箱) 404 与界面显示邮箱）。
                 // 解析不到就留空，界面显示"已登录"，随后 refreshSession 会用 /user 补全。
                 saveUserInfo(me.displayName, me.userId, me.avatarUrl)
-                me.displayName ?: me.userId ?: "已登录"
+                me.displayName ?: me.userId ?: tr("已登录", "Signed in")
             } catch (t: Throwable) {
                 clear()
                 throw t
@@ -286,7 +289,7 @@ object IwaraSession {
                     body = null,
                     bearer = refresh
                 ) { it.optString("accessToken").takeIf { t -> t.isNotBlank() } }
-            } ?: throw IwaraApiException("会话已过期，请重新登录")
+            } ?: throw IwaraApiException(tr("会话已过期，请重新登录", "Your session has expired. Please sign in again"))
         } catch (e: IwaraApiException) {
             // 仅 refresh token 被服务器明确拒绝（401/403/invalidLogin）才清空会话；
             // 瞬时错误（500/429/解析失败等）保留会话并向上抛，下次请求还会重试刷新，
@@ -316,7 +319,7 @@ object IwaraSession {
      * 收藏/播放列表/点赞一并失效。因此优先读嵌套 user 对象，扁平形态回退兼容。
      */
     private fun fetchMe(): MeInfo {
-        val token = accessToken ?: throw IwaraApiException("尚未登录")
+        val token = accessToken ?: throw IwaraApiException(tr("尚未登录", "Not signed in"))
         val request = Request.Builder()
             .url(IwaraClient.activeBase + "user")
             .header("Authorization", "Bearer $token")
@@ -329,7 +332,12 @@ object IwaraSession {
             .build()
         bareClient.newCall(request).execute().use { resp ->
             val text = resp.body?.string().orEmpty()
-            if (!resp.isSuccessful) throw IwaraApiException("获取用户信息失败（HTTP ${resp.code}）")
+            if (!resp.isSuccessful) throw IwaraApiException(
+                tr(
+                    "获取用户信息失败（HTTP ${resp.code}）",
+                    "Failed to load account info (HTTP ${resp.code})"
+                )
+            )
             val root = JSONObject(text)
             val user = root.optJSONObject("user") ?: root
             val displayName = user.optString("name").takeIf { it.isNotBlank() }
@@ -397,10 +405,10 @@ object IwaraSession {
         code == 401 || code == 403 || message?.contains("invalidLogin") == true
 
     internal fun mapLoginError(code: Int, message: String?): String = when {
-        classifyTokenError(code, message) -> "邮箱或密码错误"
-        code == 429 -> "请求过于频繁，请稍后再试"
-        !message.isNullOrBlank() -> "登录失败：$message"
-        else -> "登录失败（HTTP $code）"
+        classifyTokenError(code, message) -> tr("邮箱或密码错误", "Incorrect email or password")
+        code == 429 -> tr("请求过于频繁，请稍后再试", "Too many requests. Please try again later")
+        !message.isNullOrBlank() -> tr("登录失败：$message", "Login failed: $message")
+        else -> tr("登录失败（HTTP $code）", "Login failed (HTTP $code)")
     }
 
     /** 解析 JWT payload 的 exp（秒）；解析失败返回 0。 */

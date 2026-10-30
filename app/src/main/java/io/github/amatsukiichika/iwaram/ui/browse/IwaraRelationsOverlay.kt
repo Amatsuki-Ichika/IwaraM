@@ -82,6 +82,7 @@ import io.github.amatsukiichika.iwaram.data.VideoEntity
 import io.github.amatsukiichika.iwaram.data.filterBy
 import io.github.amatsukiichika.iwaram.data.localVideoKeys
 import io.github.amatsukiichika.iwaram.data.videoKeys
+import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.ui.DiagLog
 import io.github.amatsukiichika.iwaram.ui.components.debugAwareErrorText
 import kotlin.math.roundToInt
@@ -131,7 +132,7 @@ fun RelationsOverlay(
         OverlayTopBar(title = kind.label, onBack = onClose)
         PagedAccountList(
             state = state,
-            emptyHint = if (kind == RelationKind.FOLLOWING) "TA 还没有关注任何人" else "TA 还没有粉丝",
+            emptyHint = if (kind == RelationKind.FOLLOWING) tr("TA 还没有关注任何人", "They are not following anyone yet") else tr("TA 还没有粉丝", "No followers yet"),
             onLoadMore = { load(false) },
             onRetry = { load(true) },
             onOpen = { actions.openAccountProfile(it) }

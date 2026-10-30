@@ -3,6 +3,10 @@
 This project redistributes or links against the following third-party components.
 Full licence texts are available from the links below.
 
+IwaraM itself is released under the [GNU Affero General Public License v3.0](LICENSE)
+(AGPL-3.0). The third-party components listed below keep their own licences and copyright
+notices.
+
 ## Runtime dependencies
 
 | Component | Licence | Source |
@@ -15,6 +19,7 @@ Full licence texts are available from the links below.
 | Gson | Apache-2.0 | https://github.com/google/gson |
 | Coil | Apache-2.0 | https://github.com/coil-kt/coil |
 | AndroidX Media3 (ExoPlayer) | Apache-2.0 | https://github.com/androidx/media |
+| Jellyfin Media3 FFmpeg decoder (`org.jellyfin.media3:media3-ffmpeg-decoder`), including its FFmpeg build | GPL-3.0 | https://github.com/jellyfin/jellyfin-androidx-media |
 | AndroidLiquidGlass (`io.github.kyant0:backdrop`) | Apache-2.0 | https://github.com/Kyant0/AndroidLiquidGlass |
 
 ## Bundled assets

@@ -29,6 +29,7 @@ import io.github.amatsukiichika.iwaram.data.describeIwaraError
 import io.github.amatsukiichika.iwaram.data.ensureIwaraSuccess
 import io.github.amatsukiichika.iwaram.data.GlobalFilterHolder
 import io.github.amatsukiichika.iwaram.data.parseIwaraDate
+import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.ui.DiagLog
 import io.github.amatsukiichika.iwaram.ui.QualityOption
 import kotlinx.coroutines.CancellationException
@@ -98,7 +99,7 @@ fun IwaraClientViewModel.sendComment(text: String, scope: CoroutineScope? = null
         val body = text.trim()
         if (body.isEmpty()) return
         if (!_session.value.loggedIn) {
-            onDone("请先登录后再评论")
+            onDone(tr("请先登录后再评论", "Sign in to comment"))
             return
         }
         _comments.value = current.copy(sending = true)
