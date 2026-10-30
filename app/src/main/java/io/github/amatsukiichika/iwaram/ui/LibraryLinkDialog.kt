@@ -53,6 +53,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.ui.browse.CompactSearchSlot
 import io.github.amatsukiichika.iwaram.ui.browse.RATING_OPTIONS
 import io.github.amatsukiichika.iwaram.ui.browse.SEARCH_ROW_HEIGHT
@@ -100,7 +101,7 @@ internal fun ManualLinkDialog(
     if (confirmingRemove) {
         AlertDialog(
             onDismissRequest = onDismiss,
-            title = { Text("从库中移除？") },
+            title = { Text(tr("从库中移除？", "Remove from library?")) },
             text = {
                 Column {
                     Text(
@@ -110,7 +111,10 @@ internal fun ManualLinkDialog(
                         overflow = TextOverflow.Ellipsis
                     )
                     Text(
-                        text = "仅从本地库移除该条目，不删除视频文件；重新扫描可找回。",
+                        text = tr(
+                            "仅从本地库移除该条目，不删除视频文件；重新扫描可找回。",
+                            "Removes this entry from the local library only; the video file is kept and rescanning restores it."
+                        ),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 8.dp)
@@ -122,18 +126,18 @@ internal fun ManualLinkDialog(
                     onRemove()
                     onDismiss()
                 }) {
-                    Text("确认移除", color = MaterialTheme.colorScheme.error)
+                    Text(tr("确认移除", "Remove"), color = MaterialTheme.colorScheme.error)
                 }
             },
             dismissButton = {
-                TextButton(onClick = onDismiss) { Text("取消") }
+                TextButton(onClick = onDismiss) { Text(tr("取消", "Cancel")) }
             }
         )
         return
     }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("手动指定 iwara ID") },
+        title = { Text(tr("手动指定 iwara ID", "Set iwara ID manually")) },
         text = {
             Column {
                 Text(
@@ -145,8 +149,8 @@ internal fun ManualLinkDialog(
                 OutlinedTextField(
                     value = input,
                     onValueChange = { input = it },
-                    label = { Text("视频 ID 或链接") },
-                    placeholder = { Text("例如 1ywe1sbkqwumpdxz5") },
+                    label = { Text(tr("视频 ID 或链接", "Video ID or link")) },
+                    placeholder = { Text(tr("例如 1ywe1sbkqwumpdxz5", "e.g. 1ywe1sbkqwumpdxz5")) },
                     singleLine = true,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -156,17 +160,17 @@ internal fun ManualLinkDialog(
                     onClick = { confirmingRemove = true },
                     contentPadding = PaddingValues(0.dp),
                     modifier = Modifier.padding(top = 4.dp)
-                ) { Text("从库中移除…", color = MaterialTheme.colorScheme.error) }
+                ) { Text(tr("从库中移除…", "Remove from library…"), color = MaterialTheme.colorScheme.error) }
             }
         },
         confirmButton = {
             TextButton(onClick = {
                 val id = sanitizeIwaraId(input)
                 if (id.isNotBlank()) onConfirm(id)
-            }) { Text("确定") }
+            }) { Text(tr("确定", "OK")) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+            TextButton(onClick = onDismiss) { Text(tr("取消", "Cancel")) }
         }
     )
 }

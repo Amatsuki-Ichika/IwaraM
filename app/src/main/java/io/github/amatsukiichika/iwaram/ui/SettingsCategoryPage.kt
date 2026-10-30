@@ -31,6 +31,9 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.github.amatsukiichika.iwaram.i18n.AppLanguage
+import io.github.amatsukiichika.iwaram.i18n.LanguageMode
+import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.ui.components.AppDialog
 import kotlinx.coroutines.CancellationException
 
@@ -53,6 +56,12 @@ internal fun CategoryPage(
     onPickFolder: () -> Unit,
     onPickDownloadFolder: () -> Unit,
     backEnabled: Boolean,
+    /** 当前界面语言（通用页语言选项的选中值）。 */
+    language: LanguageMode = AppLanguage.mode,
+    /** 切换界面语言：宿主负责落盘并同步 [AppLanguage]。 */
+    onLanguageChange: (LanguageMode) -> Unit = {},
+    /** 重新查看首次引导：宿主重建引导页。 */
+    onShowOnboarding: () -> Unit = {},
     /** 宿主下发：子页进出场动画正在播（圆角自适应判据，同设置页本体的 pageAnimating）。 */
     animating: Boolean,
     /** 手势进度上抛（拖动中 0f..1f / 松手与取消 null）→ 设置主页实时联动回位。 */
@@ -135,7 +144,7 @@ internal fun CategoryPage(
                     title = { Text(category.title, style = MaterialTheme.typography.titleLarge) },
                     navigationIcon = {
                         IconButton(onClick = onBack) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = tr("返回", "Back"))
                         }
                     }
                 )
@@ -159,6 +168,8 @@ internal fun CategoryPage(
                                     defaultR18 = defaultR18,
                                     showR18Tag = showR18Tag,
                                     hideUnmatched = hideUnmatched,
+                                    language = language,
+                                    onLanguageChange = onLanguageChange,
                                     onInfo = ::showInfoDialog
                                 )
                                 // 播放页内两个集合区块（默认 / 超分）。
@@ -185,7 +196,7 @@ internal fun CategoryPage(
                                     debugDetails = debugDetails,
                                     onOpenDiagnostics = { showDiagnostics = true }
                                 )
-                                SettingsCategory.ABOUT -> AboutContent()
+                                SettingsCategory.ABOUT -> AboutContent(onShowOnboarding = onShowOnboarding)
                             }
                         }
                     }
@@ -204,7 +215,7 @@ internal fun CategoryPage(
         AppDialog(
             visible = showSrInfo,
             onDismiss = { showSrInfo = false },
-            title = "超分方案说明",
+            title = tr("超分方案说明", "Super resolution models"),
             content = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     SuperRes.modelsFor(debugDetails).forEach { m ->
@@ -218,7 +229,11 @@ internal fun CategoryPage(
                         }
                     }
                     Text(
-                        "所有方案都按屏幕分辨率与总像素上限收敛放大倍率；源分辨率已超过屏幕时不再放大，只做增强。",
+                        tr(
+                            "所有方案都按屏幕分辨率与总像素上限收敛放大倍率；源分辨率已超过屏幕时不再放大，只做增强。",
+                            "All models clamp the upscale factor to the screen resolution and a total-pixel cap; " +
+                                "when the source already exceeds the screen it is enhanced but not upscaled."
+                        ),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

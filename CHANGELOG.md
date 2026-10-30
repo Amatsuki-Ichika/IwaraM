@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The app is bilingual. Every screen, dialog, status message, notification and error text is
+  available in Simplified Chinese and English, and Settings > General > Language switches between
+  following the system, Chinese and English. Switching takes effect immediately, including the
+  library's month, root-folder and unknown-author labels, which are recomputed without rescanning.
+
+- A first-run guide explains the language choice, the library folder, the download folder and the
+  main preferences before the app opens for the first time. It can be replayed from
+  Settings > About > Show the first-run guide again.
+
+- The local library now indexes audio files (MP3, M4A, AAC, FLAC, OGG, Opus, WAV, AMR, MKA) and
+  more video containers (TS, M2TS, FLV, OGV, AVI, 3GP, 3G2) in addition to the existing MP4, MKV,
+  WebM and MOV support. Audio entries show a music-note placeholder on their card and play
+  audio-only in the player instead of failing to render a video surface.
+
+- The playback-error screen offers "Open in another app", which hands the file to an external
+  player through the system chooser when the device cannot decode it.
+
+### Changed
+
+- The project is now licensed under the GNU Affero General Public License v3.0 instead of the MIT
+  license. The README defaults to English with a Simplified Chinese translation, and shows the app
+  icon and screenshots of the local library, the player and the first-run guide.
+
+### Fixed
+
+- Playback no longer stops at the first decoder that fails to initialise. The player now enables
+  ExoPlayer's decoder fallback, so a file whose preferred audio decoder rejects it (for example an
+  AAC Main track that `c2.android.aac.decoder` refuses with error 0x80000000) is retried on the
+  next available decoder instead of failing outright.
+
 ## [0.2.1] - 2026-10-28
 
 ### Added

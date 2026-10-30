@@ -13,6 +13,7 @@ import io.github.amatsukiichika.iwaram.data.IwaraPostItem
 import io.github.amatsukiichika.iwaram.data.IwaraVideoItem
 import io.github.amatsukiichika.iwaram.data.VideoEntity
 import io.github.amatsukiichika.iwaram.data.WatchHistoryEntity
+import io.github.amatsukiichika.iwaram.i18n.tr
 
 /* ---------- 跨页共享的轻量显示偏好（由 MainActivity 在根部下发） ---------- */
 
@@ -41,24 +42,33 @@ val SEARCH_ROW_HEIGHT = 52.dp
 
 // 枚举声明序 = 底栏从左到右的顺序；AnimatedContent 按 ordinal 判滑动方向，两者须保持一致。
 // 订阅并入视频页顶部分类（不再占底栏），收藏入口在「我的」页。
-enum class HomeTab(val label: String, val icon: ImageVector) {
-    MANAGER("本地", Icons.Filled.Folder),
-    VIDEO("Iwara", Icons.Filled.SmartDisplay),
-    ME("我的", Icons.Filled.Person)
+enum class HomeTab(val labelZh: String, val labelEn: String, val icon: ImageVector) {
+    MANAGER("本地", "Local", Icons.Filled.Folder),
+    VIDEO("Iwara", "Iwara", Icons.Filled.SmartDisplay),
+    ME("我的", "Me", Icons.Filled.Person);
+
+    /** 双语显示名：getter 读语言状态，切换语言后调用点就地重组。 */
+    val label: String get() = tr(labelZh, labelEn)
 }
 
 /** 视频页顶部分类（声明序 = 从左到右，订阅在最左端）。 */
-enum class Segment(val label: String) {
-    SUBSCRIBED("订阅"),
-    VIDEOS("视频"),
-    IMAGES("图片"),
-    POSTS("帖子")
+enum class Segment(val labelZh: String, val labelEn: String) {
+    SUBSCRIBED("订阅", "Subscribed"),
+    VIDEOS("视频", "Videos"),
+    IMAGES("图片", "Images"),
+    POSTS("帖子", "Posts");
+
+    /** 双语显示名。 */
+    val label: String get() = tr(labelZh, labelEn)
 }
 
 /** 作者页头部计数点进去的关系列表类型。 */
-enum class RelationKind(val label: String) {
-    FOLLOWING("关注"),
-    FOLLOWERS("粉丝")
+enum class RelationKind(val labelZh: String, val labelEn: String) {
+    FOLLOWING("关注", "Following"),
+    FOLLOWERS("粉丝", "Followers");
+
+    /** 双语显示名。 */
+    val label: String get() = tr(labelZh, labelEn)
 }
 
 /** 浏览界面与 MainActivity 之间的导航回调集合。 */
