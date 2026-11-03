@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-11-03
+
 ### Added
 
 - The app is bilingual. Every screen, dialog, status message, notification and error text is
@@ -219,7 +221,8 @@ First public release.
   frosted-glass treatment for the bars.
 - **Crash log capture** — uncaught exceptions are written to a file for troubleshooting.
 
-[Unreleased]: https://github.com/Amatsuki-Ichika/IwaraM/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/Amatsuki-Ichika/IwaraM/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/Amatsuki-Ichika/IwaraM/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/Amatsuki-Ichika/IwaraM/compare/v0.2.1-rc.2...v0.2.1
 [0.2.1-rc.2]: https://github.com/Amatsuki-Ichika/IwaraM/compare/v0.2.0...v0.2.1-rc.2
 [0.2.0]: https://github.com/Amatsuki-Ichika/IwaraM/compare/v0.2.0-rc.2...v0.2.0
