@@ -58,4 +58,5 @@ autonomously). Grade by who supplied the adopted structure, not by who typed the
 - [ ] New or changed pure logic is covered by a unit test that would fail before the change
 - [ ] User-visible changes are in `CHANGELOG.md` under `[Unreleased]`
 - [ ] A non-obvious decision has a record under `docs/decisions/`
+- [ ] A human reviewer has approved this pull request, and it is merged with a merge commit (never a squash)
 - [ ] No secrets, SDK paths, keystore material or build output are included

@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import io.github.amatsukiichika.iwaram.data.VideoEntity
+import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.ui.components.CardDateLabel
 import io.github.amatsukiichika.iwaram.ui.components.R18Pill
 import io.github.amatsukiichika.iwaram.ui.theme.LocalTagContainer
@@ -326,7 +327,7 @@ fun LocalPill(modifier: Modifier = Modifier) {
         modifier = modifier
     ) {
         Text(
-            text = "本地",
+            text = tr("本地", "Local"),
             fontSize = 10.sp,
             lineHeight = 13.sp,
             maxLines = 1,

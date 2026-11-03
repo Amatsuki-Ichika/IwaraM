@@ -3,6 +3,8 @@ package io.github.amatsukiichika.iwaram.data
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
+import io.github.amatsukiichika.iwaram.i18n.AppLanguage
+import io.github.amatsukiichika.iwaram.i18n.tr
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -76,17 +78,25 @@ fun historyGroupLabel(lastWatchAt: Long, now: Long): String {
     val day = Instant.ofEpochMilli(lastWatchAt).atZone(zone).toLocalDate()
     val today = Instant.ofEpochMilli(now).atZone(zone).toLocalDate()
     return when {
-        day == today -> "今天"
-        day == today.minusDays(1) -> "昨天"
-        day.year == today.year -> "${day.monthValue}月${day.dayOfMonth}日"
-        else -> "${day.year}年${day.monthValue}月${day.dayOfMonth}日"
+        day == today -> tr("今天", "Today")
+        day == today.minusDays(1) -> tr("昨天", "Yesterday")
+        day.year == today.year -> tr(
+            "${day.monthValue}月${day.dayOfMonth}日",
+            DateTimeFormatter.ofPattern("MMM d", AppLanguage.locale).format(day)
+        )
+        else -> tr(
+            "${day.year}年${day.monthValue}月${day.dayOfMonth}日",
+            DateTimeFormatter.ofPattern("MMM d, yyyy", AppLanguage.locale).format(day)
+        )
     }
 }
 
 /** 观看时间行文本：「M月d日 HH:mm」（本地时区）。 */
-fun historyTimeText(lastWatchAt: Long): String =
-    Instant.ofEpochMilli(lastWatchAt).atZone(ZoneId.systemDefault())
-        .format(DateTimeFormatter.ofPattern("M'月'd'日' HH:mm"))
+fun historyTimeText(lastWatchAt: Long): String {
+    val zoned = Instant.ofEpochMilli(lastWatchAt).atZone(ZoneId.systemDefault())
+    val pattern = tr("M'月'd'日' HH:mm", "MMM d, HH:mm")
+    return zoned.format(DateTimeFormatter.ofPattern(pattern, AppLanguage.locale))
+}
 
 /**
  * 时长角标：看完（≥95%，与 [resumeStartMs] 同一阈值）→「已看完」；
@@ -102,7 +112,7 @@ fun historyBadge(positionMs: Long, durationMs: Long): String {
         else String.format(java.util.Locale.US, "%02d:%02d", m, sec)
     }
     return when {
-        durationMs > 0 && positionMs >= durationMs * 95 / 100 -> "已看完"
+        durationMs > 0 && positionMs >= durationMs * 95 / 100 -> tr("已看完", "Watched")
         durationMs <= 0 -> fmt(positionMs)
         else -> fmt(positionMs) + " / " + fmt(durationMs)
     }

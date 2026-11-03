@@ -53,6 +53,7 @@ import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.media3.common.C
+import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.ui.components.AnchorMenu
 import io.github.amatsukiichika.iwaram.ui.components.AnchorMenuGeometry
 import io.github.amatsukiichika.iwaram.ui.components.AnchorMenuInfo
@@ -123,7 +124,7 @@ internal fun PlayerBottomBar(
             IconButton(onClick = onTogglePlay, modifier = Modifier.size(34.dp)) {
                 Icon(
                     if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                    contentDescription = "暂停/播放",
+                    contentDescription = tr("暂停/播放", "Pause/Play"),
                     tint = Color.White
                 )
             }
@@ -180,7 +181,7 @@ internal fun PlayerBottomBar(
                     // 日常播放时看不见它（这是删除流程的入口，低频且不可逆）。
                     if (onManageSources != null) {
                         AnchorMenuItem(
-                            text = "管理源文件…",
+                            text = tr("管理源文件…", "Manage source files…"),
                             selected = false,
                             onClick = {
                                 closeMenu()
@@ -198,7 +199,7 @@ internal fun PlayerBottomBar(
                 // 按**使用场景**命名的平铺列表，不用 A/B/C 这种不直观的字母。
                 // 顺序即常用程度：MMD/3D 最对口也最省电，高质最吃 GPU。
                 AnchorMenuItem(
-                    text = "关闭",
+                    text = tr("关闭", "Off"),
                     selected = !srEnabled,
                     onClick = {
                         closeMenu()
@@ -217,7 +218,7 @@ internal fun PlayerBottomBar(
                 }
                 // 失败原因直接显示在菜单里（可截屏反馈），不用抓 logcat。
                 SuperResStatus.reason?.let { reason ->
-                    AnchorMenuInfo(text = "原因：$reason", maxLines = 2)
+                    AnchorMenuInfo(text = tr("原因：$reason", "Reason: $reason"), maxLines = 2)
                 }
                 // Debug 开关打开时，模型列表末尾附加「测试·红/绿」管线探针
                 SuperRes.modelsFor(LocalDebugDetails.current).forEach { m ->
@@ -236,7 +237,7 @@ internal fun PlayerBottomBar(
             IconButton(onClick = onToggleFullscreen, modifier = Modifier.size(34.dp)) {
                 Icon(
                     if (isFullscreen) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen,
-                    contentDescription = "全屏",
+                    contentDescription = tr("全屏", "Fullscreen"),
                     tint = Color.White
                 )
             }
@@ -396,7 +397,7 @@ internal fun PlayerTopBar(
             IconButton(onClick = onBack, modifier = Modifier.size(36.dp)) {
                 Icon(
                     Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "返回",
+                    contentDescription = tr("返回", "Back"),
                     tint = Color.White
                 )
             }
@@ -414,7 +415,7 @@ internal fun PlayerTopBar(
                 IconButton(onClick = onOpenDiagnostics, modifier = Modifier.size(36.dp)) {
                     Icon(
                         Icons.Filled.MoreVert,
-                        contentDescription = "播放诊断",
+                        contentDescription = tr("播放诊断", "Playback diagnostics"),
                         tint = Color.White
                     )
                 }
@@ -480,7 +481,7 @@ private fun MenuChip(
             ) {
                 Icon(
                     Icons.Filled.Check,
-                    contentDescription = "已下载",
+                    contentDescription = tr("已下载", "Downloaded"),
                     tint = Color.White,
                     modifier = Modifier.size(8.dp)
                 )

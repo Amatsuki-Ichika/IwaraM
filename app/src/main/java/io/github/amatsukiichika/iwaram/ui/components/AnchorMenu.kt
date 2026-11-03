@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
+import io.github.amatsukiichika.iwaram.i18n.tr
 
 /** 进入：淡入 120ms、从锚点那一角放大 160ms（错开一点，观感是"先亮起来再长出来"）。 */
 private const val MENU_ENTER_FADE_MS = 120
@@ -197,7 +198,7 @@ fun AnchorMenuItem(
                 Spacer(Modifier.size(6.dp))
                 Icon(
                     Icons.Filled.Check,
-                    contentDescription = "已选中",
+                    contentDescription = tr("已选中", "Selected"),
                     tint = cs.primary,
                     modifier = Modifier.size(14.dp)
                 )

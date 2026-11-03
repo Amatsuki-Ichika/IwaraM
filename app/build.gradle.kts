@@ -155,6 +155,9 @@ dependencies {
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.effect)
     implementation(libs.media3.ui)
+    // FFmpeg audio decoder extension (GPL-3.0; combined with this AGPL-3.0 app under GPLv3 section 13).
+    // Media3 has no FFmpeg video renderer, so video keeps using platform decoders with fallback on.
+    implementation(libs.jellyfin.media3.ffmpeg)
 
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.androidx.documentfile)

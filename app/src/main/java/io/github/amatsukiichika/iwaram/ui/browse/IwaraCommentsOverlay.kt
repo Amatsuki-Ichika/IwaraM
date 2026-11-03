@@ -49,6 +49,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.amatsukiichika.iwaram.data.IwaraComment
+import io.github.amatsukiichika.iwaram.i18n.tr
+import io.github.amatsukiichika.iwaram.i18n.trCount
 import io.github.amatsukiichika.iwaram.ui.FastScrollbarBasic
 import io.github.amatsukiichika.iwaram.ui.components.debugAwareErrorText
 
@@ -65,7 +67,7 @@ fun CommentsOverlay(
     onClose: () -> Unit
 ) {
     Column(Modifier.fillMaxSize()) {
-        OverlayTopBar(title = "评论 · $title", onBack = onClose)
+        OverlayTopBar(title = tr("评论 · $title", "Comments · $title"), onBack = onClose)
         // 面板本体与播放页评论 tab 共用（唯一实现）；
         //   键盘只推面板，顶栏不被顶起。
         CommentsPanel(type, targetId, title, cvm, actions, modifier = Modifier.fillMaxSize())
@@ -140,14 +142,14 @@ fun CommentsPanel(
                             color = MaterialTheme.colorScheme.error,
                             style = MaterialTheme.typography.bodySmall
                         )
-                        TextButton(onClick = { cvm.loadMoreComments(force = true) }) { Text("重试") }
+                        TextButton(onClick = { cvm.loadMoreComments(force = true) }) { Text(tr("重试", "Retry")) }
                     }
                 }
             }
             if (!state.loading && state.items.isEmpty() && state.error == null) {
                 item {
                     Text(
-                        "还没有评论",
+                        tr("还没有评论", "No comments yet"),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(vertical = 24.dp)
@@ -171,14 +173,17 @@ fun CommentsPanel(
                     .padding(horizontal = 10.dp, vertical = 4.dp)
             ) {
                 Text(
-                    "回复 ${reply.user?.name ?: reply.user?.username ?: "…"}：${reply.body?.take(30) ?: ""}",
+                    tr(
+                        "回复 ${reply.user?.name ?: reply.user?.username ?: "…"}：${reply.body?.take(30) ?: ""}",
+                        "Replying to ${reply.user?.name ?: reply.user?.username ?: "…"}: ${reply.body?.take(30) ?: ""}"
+                    ),
                     style = MaterialTheme.typography.bodySmall,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
                 )
                 IconButton(onClick = { cvm.setReplyTo(null) }, modifier = Modifier.size(24.dp)) {
-                    Icon(Icons.Filled.Close, contentDescription = "取消回复", modifier = Modifier.size(14.dp))
+                    Icon(Icons.Filled.Close, contentDescription = tr("取消回复", "Cancel reply"), modifier = Modifier.size(14.dp))
                 }
             }
         }
@@ -210,7 +215,7 @@ fun CommentsPanel(
                         Box {
                             if (input.text.isEmpty()) {
                                 Text(
-                                    if (state.replyTo != null) "回复…" else "发表评论…",
+                                    if (state.replyTo != null) tr("回复…", "Reply…") else tr("发表评论…", "Write a comment…"),
                                     style = TextStyle(
                                         fontSize = 14.sp,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -253,7 +258,7 @@ fun CommentsPanel(
                 } else {
                     Icon(
                         Icons.AutoMirrored.Filled.Send,
-                        contentDescription = "发送",
+                        contentDescription = tr("发送", "Send"),
                         modifier = Modifier.size(18.dp),
                         tint = if (canSend) MaterialTheme.colorScheme.onPrimary
                         else MaterialTheme.colorScheme.onSurfaceVariant
@@ -283,7 +288,7 @@ private fun CommentItem(
                 Spacer(Modifier.size(8.dp))
                 Column(Modifier.weight(1f)) {
                     Text(
-                        comment.user?.name ?: comment.user?.username ?: "匿名",
+                        comment.user?.name ?: comment.user?.username ?: tr("匿名", "Anonymous"),
                         style = MaterialTheme.typography.labelLarge,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -294,7 +299,7 @@ private fun CommentItem(
                 }
                 if (isMine) {
                     IconButton(onClick = onDelete, modifier = Modifier.size(28.dp)) {
-                        Icon(Icons.Filled.Delete, contentDescription = "删除", modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.error)
+                        Icon(Icons.Filled.Delete, contentDescription = tr("删除", "Delete"), modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.error)
                     }
                 }
             }
@@ -305,7 +310,7 @@ private fun CommentItem(
             Spacer(Modifier.size(4.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 Text(
-                    "回复",
+                    tr("回复", "Reply"),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.clickable(onClick = onReply)
@@ -313,7 +318,7 @@ private fun CommentItem(
                 val n = comment.numReplies ?: 0
                 if (n > 0) {
                     Text(
-                        if (replies == null) "查看 $n 条回复" else "收起回复",
+                        if (replies == null) "View $n " + trCount(n, "条回复", "reply", "replies") else tr("收起回复", "Hide replies"),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.clickable {
@@ -339,7 +344,7 @@ private fun CommentItem(
                     Spacer(Modifier.size(6.dp))
                     Column {
                         Text(
-                            reply.user?.name ?: reply.user?.username ?: "匿名",
+                            reply.user?.name ?: reply.user?.username ?: tr("匿名", "Anonymous"),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )

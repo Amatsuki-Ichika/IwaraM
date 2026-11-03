@@ -1,5 +1,6 @@
 package io.github.amatsukiichika.iwaram.data
 
+import io.github.amatsukiichika.iwaram.i18n.tr
 import java.net.URI
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -51,19 +52,29 @@ internal suspend fun resolveDownloadTarget(
     val fileUrl = detail.fileUrl
     if (fileUrl.isNullOrBlank()) {
         throw IwaraSession.IwaraApiException(
-            if (detail.embedUrl != null) "外嵌视频暂不支持下载" else "该视频没有可下载的文件",
+            if (detail.embedUrl != null) {
+                tr("外嵌视频暂不支持下载", "Embedded videos cannot be downloaded yet")
+            } else {
+                tr("该视频没有可下载的文件", "This video has no downloadable file")
+            },
             isAuthError = false
         )
     }
     val qualities = withContext(Dispatchers.IO) { IwaraSign.fetchQualities(fileUrl) }
     val chosen = chooseDownloadQuality(qualities, qualityName ?: repo.getDownloadQuality())
-        ?: throw IwaraSession.IwaraApiException("没有可用的下载地址", isAuthError = false)
+        ?: throw IwaraSession.IwaraApiException(
+            tr("没有可用的下载地址", "No download address available"),
+            isAuthError = false
+        )
     val title = detail.title?.takeIf { it.isNotBlank() } ?: videoId
     // 文件名里带 [iwaraId] 与档位：扫描时据此识别视频身份，续传时据此确认档位一致。
     val fileName = "[$videoId] $title (${chosen.name}).mp4"
     val raw = chosen.src?.download?.takeIf { it.isNotBlank() } ?: chosen.src?.view.orEmpty()
     val url = IwaraSign.buildDownloadUrl(raw, fileName)
-        ?: throw IwaraSession.IwaraApiException("下载地址无效", isAuthError = false)
+        ?: throw IwaraSession.IwaraApiException(
+            tr("下载地址无效", "Invalid download address"),
+            isAuthError = false
+        )
     return DownloadTarget(url, title, fileName, chosen.name.orEmpty())
 }
 

@@ -34,6 +34,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.amatsukiichika.iwaram.data.VideoEntity
 import io.github.amatsukiichika.iwaram.data.qualityLabel
+import io.github.amatsukiichika.iwaram.i18n.tr
+import io.github.amatsukiichika.iwaram.i18n.trCount
 
 /**
  * 源文件管理面板：选择要移除的源，明确告知会删什么。
@@ -73,7 +75,7 @@ internal fun PlayerSourcesSheet(
         ) {
             Column(Modifier.padding(horizontal = 18.dp, vertical = 14.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("源文件", style = MaterialTheme.typography.titleMedium)
+                    Text(tr("源文件", "Sources"), style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.size(8.dp))
                     Text(
                         "${sources.size}",
@@ -81,10 +83,13 @@ internal fun PlayerSourcesSheet(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(Modifier.weight(1f))
-                    TextButton(onClick = onDismiss) { Text("完成") }
+                    TextButton(onClick = onDismiss) { Text(tr("完成", "Done")) }
                 }
                 Text(
-                    "勾选要移除的源。默认只从本地库移除，文件留在你的文件夹里。",
+                    tr(
+                        "勾选要移除的源。默认只从本地库移除，文件留在你的文件夹里。",
+                        "Select sources to remove. Only the local library entry is removed by default; files stay in your folder."
+                    ),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -113,13 +118,13 @@ internal fun PlayerSourcesSheet(
                             Column(Modifier.weight(1f)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(
-                                        source.qualityLabel() ?: "本地",
+                                        source.qualityLabel() ?: tr("本地", "Local"),
                                         style = MaterialTheme.typography.labelLarge
                                     )
                                     if (playing) {
                                         Spacer(Modifier.size(6.dp))
                                         Text(
-                                            "当前播放",
+                                            tr("当前播放", "Now playing"),
                                             style = MaterialTheme.typography.labelSmall,
                                             color = MaterialTheme.colorScheme.primary
                                         )
@@ -140,9 +145,12 @@ internal fun PlayerSourcesSheet(
                 Spacer(Modifier.height(10.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text("同时删除磁盘上的文件", style = MaterialTheme.typography.bodyMedium)
+                        Text(tr("同时删除磁盘上的文件", "Also delete the files on disk"), style = MaterialTheme.typography.bodyMedium)
                         Text(
-                            "默认关闭。关闭时文件仍在文件夹里，下次扫描会把它重新导入。",
+                            tr(
+                                "默认关闭。关闭时文件仍在文件夹里，下次扫描会把它重新导入。",
+                                "Off by default. When off, the files stay in your folder and are re-imported on the next scan."
+                            ),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -153,7 +161,10 @@ internal fun PlayerSourcesSheet(
                 if (allSelected) {
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        "选了全部源文件：删除后这个视频会从本地库消失。",
+                        tr(
+                            "选了全部源文件：删除后这个视频会从本地库消失。",
+                            "All sources selected: this video disappears from the local library after deletion."
+                        ),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error
                     )
@@ -163,19 +174,28 @@ internal fun PlayerSourcesSheet(
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     if (confirming) {
                         Text(
-                            "确认删除 ${chosen.size} 项？",
+                            tr(
+                                "确认删除 ${chosen.size} 项？",
+                                "Delete ${chosen.size} " + trCount(chosen.size, "项", "item", "items") + "?"
+                            ),
                             style = MaterialTheme.typography.bodyMedium,
                             modifier = Modifier.weight(1f)
                         )
-                        TextButton(onClick = { confirming = false }) { Text("取消") }
+                        TextButton(onClick = { confirming = false }) { Text(tr("取消", "Cancel")) }
                         TextButton(onClick = { onDelete(chosen, deleteFiles) }) {
-                            Text("删除", color = MaterialTheme.colorScheme.error)
+                            Text(tr("删除", "Delete"), color = MaterialTheme.colorScheme.error)
                         }
                     } else {
-                        TextButton(onClick = onDismiss) { Text("取消") }
+                        TextButton(onClick = onDismiss) { Text(tr("取消", "Cancel")) }
                         Spacer(Modifier.weight(1f))
                         TextButton(onClick = { confirming = true }, enabled = chosen.isNotEmpty()) {
-                            Text("删除选中项${if (chosen.isEmpty()) "" else " (${chosen.size})"}")
+                            Text(
+                                if (chosen.isEmpty()) {
+                                    tr("删除选中项", "Delete selected")
+                                } else {
+                                    tr("删除选中项 (${chosen.size})", "Delete selected (${chosen.size})")
+                                }
+                            )
                         }
                     }
                 }

@@ -27,6 +27,7 @@ import coil.compose.AsyncImage
 import io.github.amatsukiichika.iwaram.data.IwaraAccount
 import io.github.amatsukiichika.iwaram.data.IwaraClient
 import io.github.amatsukiichika.iwaram.data.videoKeys
+import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.ui.components.debugAwareErrorText
 
 /* ---------- 通用部件 ---------- */
@@ -62,7 +63,7 @@ fun OverlayTopBar(
         },
         navigationIcon = {
             IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = tr("返回", "Back"))
             }
         },
         actions = { trailing() }
@@ -87,7 +88,7 @@ fun TagVideosOverlay(tagId: String, cvm: IwaraClientViewModel, actions: IwaraNav
             itemKey = { it.id.orEmpty().ifEmpty { it.hashCode().toString() } },
             // tag 详情页也是内容列表 ⇒ 同样过全局筛选器。
             globalFilter = ::videoKeys,
-            emptyHint = "没有该 tag 的视频"
+            emptyHint = tr("没有该 tag 的视频", "No videos for this tag")
         ) { video ->
             OnlineVideoCard(video, actions)
         }
@@ -121,9 +122,13 @@ internal fun FeedbackText(message: String?) {
             // 人话/技术细节按 debug 开关取轨（成功类短句原样透传不受影响）
             debugAwareErrorText(it),
             style = MaterialTheme.typography.bodySmall,
-            // 颜色判定含「没有权限」（401/403 的人话映射里没有"失败/错误/无法"字样）
+            // 颜色判定含「没有权限」（401/403 的人话映射里没有"失败/错误/无法"字样）；
+            // 英文文案也要能命中，所以中英两套关键词一起判。
             color = if (it.contains("失败") || it.contains("错误") || it.contains("无法") ||
-                it.contains("请先登录") || it.contains("没有权限")
+                it.contains("请先登录") || it.contains("没有权限") ||
+                it.contains("failed", true) || it.contains("error", true) ||
+                it.contains("unable", true) || it.contains("sign in", true) ||
+                it.contains("permission", true)
             )
                 MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)

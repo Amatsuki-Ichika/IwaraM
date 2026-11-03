@@ -82,6 +82,7 @@ import io.github.amatsukiichika.iwaram.data.VideoEntity
 import io.github.amatsukiichika.iwaram.data.filterBy
 import io.github.amatsukiichika.iwaram.data.localVideoKeys
 import io.github.amatsukiichika.iwaram.data.videoKeys
+import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.ui.DiagLog
 import io.github.amatsukiichika.iwaram.ui.components.debugAwareErrorText
 import kotlin.math.roundToInt
@@ -160,9 +161,9 @@ internal fun ProfileStickyBar(
 /** 折叠态简介固定显示的行数；超出才出现「展开」。 */
 private const val BIO_COLLAPSED_LINES = 3
 
-/** 「展开」/「收起」—— 都是两个汉字，宽度相同（右侧预留宽按它算）。 */
-private const val BIO_EXPAND_LABEL = "展开"
-private const val BIO_COLLAPSE_LABEL = "收起"
+/** 「展开」/「收起」—— 切换语言时实时跟随（右侧预留宽按展开态量）。 */
+private val BIO_EXPAND_LABEL: String get() = tr("展开", "Expand")
+private val BIO_COLLAPSE_LABEL: String get() = tr("收起", "Collapse")
 
 /**
  * 可展开的作者简介。
@@ -237,11 +238,11 @@ internal fun CountRow(
     onOpenFollowers: () -> Unit
 ) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        CountItem("关注", counts.follows, onOpenFollowing)
+        CountItem(tr("关注", "Following"), counts.follows, onOpenFollowing)
         Spacer(Modifier.size(14.dp))
-        CountItem("粉丝", counts.followers, onOpenFollowers)
+        CountItem(tr("粉丝", "Followers"), counts.followers, onOpenFollowers)
         Spacer(Modifier.size(14.dp))
-        CountItem("视频", counts.videos, null)
+        CountItem(tr("视频", "Videos"), counts.videos, null)
     }
 }
 

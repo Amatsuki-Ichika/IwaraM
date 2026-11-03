@@ -16,6 +16,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import io.github.amatsukiichika.iwaram.i18n.tr
 
 /**
  * 播放页视频区的中央覆盖层（自 PlayerScreen 抽出）。
@@ -57,11 +58,15 @@ internal fun ResolveErrorOverlay(
     ) {
         Text(
             text = when {
-                message.contains("privateVideo", true) || message.contains("私密") ->
-                    "该视频已被作者设为私密，无法在线播放"
-                message.contains("embed", true) ->
-                    "该视频是外嵌视频，暂不支持在线播放"
-                else -> "无法获取播放地址"
+                message.contains("privateVideo", true) || message.contains("私密") -> tr(
+                    "该视频已被作者设为私密，无法在线播放",
+                    "This video was made private by its author and cannot be streamed"
+                )
+                message.contains("embed", true) -> tr(
+                    "该视频是外嵌视频，暂不支持在线播放",
+                    "This is an embedded video and cannot be streamed here"
+                )
+                else -> tr("无法获取播放地址", "Could not get the playback URL")
             },
             color = Color.White,
             style = MaterialTheme.typography.bodyMedium
@@ -112,9 +117,9 @@ internal fun PlayErrorOverlay(
 private fun OverlayRetryExitRow(onRetry: (() -> Unit)?, onBack: () -> Unit) {
     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         onRetry?.let { retry ->
-            TextButton(onClick = retry) { Text("重试", color = Color.White) }
+            TextButton(onClick = retry) { Text(tr("重试", "Retry"), color = Color.White) }
         }
-        TextButton(onClick = onBack) { Text("退出", color = Color.White) }
+        TextButton(onClick = onBack) { Text(tr("退出", "Exit"), color = Color.White) }
     }
 }
 

@@ -66,6 +66,7 @@ import io.github.amatsukiichika.iwaram.data.loadDownloadHistory
 import io.github.amatsukiichika.iwaram.data.loadPendingDownloads
 import io.github.amatsukiichika.iwaram.data.removeDownloadHistory
 import io.github.amatsukiichika.iwaram.data.removePendingDownload
+import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.ui.FastScrollbarBasic
 import io.github.amatsukiichika.iwaram.ui.components.debugAwareErrorText
 import io.github.amatsukiichika.iwaram.ui.components.horizontalSlideSpec
@@ -81,7 +82,7 @@ import java.util.Locale
 @Composable
 fun FavoritesOverlay(cvm: IwaraClientViewModel, actions: IwaraNavActions, onClose: () -> Unit) {
     Column(Modifier.fillMaxSize()) {
-        OverlayTopBar(title = "我的收藏", onBack = onClose)
+        OverlayTopBar(title = tr("我的收藏", "My favorites"), onBack = onClose)
         FavoritesContent(cvm, actions)
     }
 }
@@ -92,7 +93,7 @@ private fun FavoritesContent(cvm: IwaraClientViewModel, actions: IwaraNavActions
     val session by cvm.session.collectAsStateWithLifecycle()
 
     if (!session.loggedIn && !session.checking) {
-        LoginRequiredPanel("收藏需要登录后查看")
+        LoginRequiredPanel(tr("收藏需要登录后查看", "Sign in to view favorites"))
         return
     }
 
@@ -120,7 +121,12 @@ private fun FavoritesContent(cvm: IwaraClientViewModel, actions: IwaraNavActions
     }
 }
 
-private enum class FavSegment(val label: String) { VIDEOS("视频"), IMAGES("图片") }
+private enum class FavSegment(private val labelZh: String, private val labelEn: String) {
+    VIDEOS("视频", "Videos"),
+    IMAGES("图片", "Images");
+
+    val label: String get() = tr(labelZh, labelEn)
+}
 
 @Composable
 private fun FavoriteVideosGrid(cvm: IwaraClientViewModel, actions: IwaraNavActions) {
@@ -139,7 +145,7 @@ private fun FavoriteVideosGrid(cvm: IwaraClientViewModel, actions: IwaraNavActio
         error = state.error,
         onLoadMore = { cvm.loadMoreFavoriteVideos() },
         onRetry = { cvm.loadMoreFavoriteVideos(force = true) },
-        emptyHint = "还没有收藏的视频",
+        emptyHint = tr("还没有收藏的视频", "No favorite videos yet"),
         // 全局筛选器也管到这里（"全局"= 所有内容列表，不只是首页那几个分段）。
         globalFilter = ::videoKeys,
         entranceKey = "favVideos",
@@ -166,7 +172,7 @@ private fun FavoriteImagesGrid(cvm: IwaraClientViewModel, actions: IwaraNavActio
         onLoadMore = { cvm.loadMoreFavoriteImages() },
         onRetry = { cvm.loadMoreFavoriteImages(force = true) },
         columns = GridCells.Adaptive(120.dp),
-        emptyHint = "还没有收藏的图片",
+        emptyHint = tr("还没有收藏的图片", "No favorite images yet"),
         globalFilter = ::imageKeys,
         entranceKey = "favImages",
         itemKey = { it.id.orEmpty().ifEmpty { it.hashCode().toString() } },
@@ -191,8 +197,8 @@ private val downloadTimeFormat = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm",
 fun DownloadsOverlay(cvm: IwaraClientViewModel, onClose: () -> Unit) {
     var segment by remember { mutableStateOf(0) }
     Column(Modifier.fillMaxSize()) {
-        OverlayTopBar(title = "下载列表", onBack = onClose)
-        PillSegmentSelector(listOf("正在下载", "已完成"), segment) { segment = it }
+        OverlayTopBar(title = tr("下载列表", "Downloads"), onBack = onClose)
+        PillSegmentSelector(listOf(tr("正在下载", "Downloading"), tr("已完成", "Completed")), segment) { segment = it }
         Box(Modifier.weight(1f)) {
             // 内容区：按方向左右滑动切换（与本地页 modeContent 同规格：300ms 滑动 + 220ms 淡入淡出）。
             AnimatedContent(
@@ -229,7 +235,7 @@ private fun ActiveDownloadsList(cvm: IwaraClientViewModel, modifier: Modifier = 
     }
     if (active.isEmpty()) {
         Box(modifier, contentAlignment = Alignment.Center) {
-            Text("没有正在进行的下载", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(tr("没有正在进行的下载", "No active downloads"), color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         return
     }
@@ -263,7 +269,7 @@ private fun ActiveDownloadsList(cvm: IwaraClientViewModel, modifier: Modifier = 
                             LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                             Spacer(Modifier.size(6.dp))
                             Text(
-                                "已接收 " + formatBytes(task.received),
+                                tr("已接收 ", "Received ") + formatBytes(task.received),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -276,12 +282,12 @@ private fun ActiveDownloadsList(cvm: IwaraClientViewModel, modifier: Modifier = 
                         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                             when (task.state) {
                                 DownloadState.STATE_RUNNING -> TextButton(onClick = { DownloadService.pause(task.videoId) }) {
-                                    Text("暂停", style = MaterialTheme.typography.bodySmall)
+                                    Text(tr("暂停", "Pause"), style = MaterialTheme.typography.bodySmall)
                                 }
                                 DownloadState.STATE_PAUSED, DownloadState.STATE_QUEUED -> {
                                     TextButton(onClick = {
                                         cvm.startDownloadById(task.videoId, scope = scope) { showDownloadToast(ctx, it) }
-                                    }) { Text("继续", style = MaterialTheme.typography.bodySmall) }
+                                    }) { Text(tr("继续", "Resume"), style = MaterialTheme.typography.bodySmall) }
                                     TextButton(onClick = {
                                         // 弃掉整个未完成任务：先让服务放下这个任务（排队中的会在出队时
                                         // 被丢弃，正好在跑的由读循环收尾），再删记录 + 删半成品文件。
@@ -293,20 +299,20 @@ private fun ActiveDownloadsList(cvm: IwaraClientViewModel, modifier: Modifier = 
                                                 ?.let { showDownloadToast(ctx, it) }
                                         }
                                     }) {
-                                        Text("取消", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                                        Text(tr("取消", "Cancel"), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                                     }
                                 }
                                 DownloadState.STATE_FAILED -> {
                                     TextButton(onClick = {
                                         cvm.startDownloadById(task.videoId, scope = scope) { showDownloadToast(ctx, it) }
-                                    }) { Text("重新下载", style = MaterialTheme.typography.bodySmall) }
+                                    }) { Text(tr("重新下载", "Retry download"), style = MaterialTheme.typography.bodySmall) }
                                     TextButton(onClick = {
                                         scope.launch {
                                             removePendingCompletely(ctx, task.videoId, task.docUri)
                                                 ?.let { showDownloadToast(ctx, it) }
                                         }
                                     }) {
-                                        Text("移除", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                                        Text(tr("移除", "Remove"), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                                     }
                                 }
                             }
@@ -334,7 +340,7 @@ private fun DownloadHistoryList(cvm: IwaraClientViewModel, modifier: Modifier = 
     }
     if (history.isEmpty()) {
         Box(modifier, contentAlignment = Alignment.Center) {
-            Text("还没有下载记录", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(tr("还没有下载记录", "No download history yet"), color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         return
     }
@@ -412,7 +418,7 @@ private fun DownloadHistoryList(cvm: IwaraClientViewModel, modifier: Modifier = 
                         }
                         if (fileMissing) {
                             Spacer(Modifier.size(4.dp))
-                            Text("文件丢失", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                            Text(tr("文件丢失", "File missing"), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                         }
                         Spacer(Modifier.size(2.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -420,12 +426,12 @@ private fun DownloadHistoryList(cvm: IwaraClientViewModel, modifier: Modifier = 
                             // ⋮ 菜单 —— 重新下载（丢失/失败）/ 移除任务 / 移除任务和文件。
                             var menuOpen by remember { mutableStateOf(false) }
                             IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(32.dp)) {
-                                Icon(Icons.Filled.MoreVert, contentDescription = "更多操作", modifier = Modifier.size(18.dp))
+                                Icon(Icons.Filled.MoreVert, contentDescription = tr("更多操作", "More actions"), modifier = Modifier.size(18.dp))
                             }
                             DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                                 if (!entry.success || fileMissing) {
                                     DropdownMenuItem(
-                                        text = { Text("重新下载") },
+                                        text = { Text(tr("重新下载", "Retry download")) },
                                         onClick = {
                                             menuOpen = false
                                             cvm.startDownloadById(entry.videoId, scope = scope) { showDownloadToast(ctx, it) }
@@ -433,7 +439,7 @@ private fun DownloadHistoryList(cvm: IwaraClientViewModel, modifier: Modifier = 
                                     )
                                 }
                                 DropdownMenuItem(
-                                    text = { Text("移除任务") },
+                                    text = { Text(tr("移除任务", "Remove task")) },
                                     onClick = {
                                         menuOpen = false
                                         // 删记录是同步的（SharedPreferences.apply 的改动立刻对读可见），
@@ -445,7 +451,7 @@ private fun DownloadHistoryList(cvm: IwaraClientViewModel, modifier: Modifier = 
                                     }
                                 )
                                 DropdownMenuItem(
-                                    text = { Text("移除任务和文件", color = MaterialTheme.colorScheme.error) },
+                                    text = { Text(tr("移除任务和文件", "Remove task and file"), color = MaterialTheme.colorScheme.error) },
                                     onClick = {
                                         menuOpen = false
                                         // 等删除**真的做完**再刷新列表，并把"文件没删掉"的原因
@@ -491,7 +497,10 @@ private suspend fun deleteDocument(context: android.content.Context, uri: String
             when {
                 df == null || !df.exists() -> null
                 df.delete() -> null
-                else -> "文件删除被系统拒绝（可能未授予该目录的写入权限，请在设置里重选下载目录）"
+                else -> tr(
+                    "文件删除被系统拒绝（可能未授予该目录的写入权限，请在设置里重选下载目录）",
+                    "The system refused to delete the file (the folder may lack write permission — reselect the download folder in settings)"
+                )
             }
         }.getOrElse { it.message ?: it.javaClass.simpleName }
     }
@@ -560,7 +569,7 @@ fun FollowingOverlay(cvm: IwaraClientViewModel, actions: IwaraNavActions, onClos
 
     fun load() {
         if (session.userId.isBlank()) {
-            error = "登录信息缺失，请重新登录"
+            error = tr("登录信息缺失，请重新登录", "Sign-in information is missing — please sign in again")
             loading = false
             return
         }
@@ -575,7 +584,7 @@ fun FollowingOverlay(cvm: IwaraClientViewModel, actions: IwaraNavActions, onClos
     LaunchedEffect(session.userId) { load() }
 
     Column(Modifier.fillMaxSize()) {
-        OverlayTopBar(title = "我的关注", onBack = onClose)
+        OverlayTopBar(title = tr("我的关注", "Following"), onBack = onClose)
         Box(Modifier.weight(1f)) {
             when {
                 loading && accounts.isEmpty() -> {
@@ -591,17 +600,17 @@ fun FollowingOverlay(cvm: IwaraClientViewModel, actions: IwaraNavActions, onClos
                     ) {
                         Text(
                             // 普通模式显示人话，debug 开关打开时显示原样技术串
-                            debugAwareErrorText(error) ?: "加载失败",
+                            debugAwareErrorText(error) ?: tr("加载失败", "Failed to load"),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.error
                         )
                         Spacer(Modifier.size(12.dp))
-                        TextButton(onClick = { load() }) { Text("重试") }
+                        TextButton(onClick = { load() }) { Text(tr("重试", "Retry")) }
                     }
                 }
                 accounts.isEmpty() -> {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("还没有关注任何用户", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(tr("还没有关注任何用户", "Not following anyone yet"), color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
                 else -> {
@@ -641,7 +650,7 @@ fun FollowingOverlay(cvm: IwaraClientViewModel, actions: IwaraNavActions, onClos
                                         Spacer(Modifier.size(12.dp))
                                         Column(Modifier.weight(1f)) {
                                             Text(
-                                                account.name ?: account.username ?: "未知用户",
+                                                account.name ?: account.username ?: tr("未知用户", "Unknown user"),
                                                 maxLines = 1,
                                                 overflow = TextOverflow.Ellipsis
                                             )
@@ -656,7 +665,7 @@ fun FollowingOverlay(cvm: IwaraClientViewModel, actions: IwaraNavActions, onClos
                                             }
                                         }
                                         account.username?.let { username ->
-                                            TextButton(onClick = { actions.openAccountProfile(account) }) { Text("主页") }
+                                            TextButton(onClick = { actions.openAccountProfile(account) }) { Text(tr("主页", "Profile")) }
                                         }
                                     }
                                 }

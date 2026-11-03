@@ -42,6 +42,8 @@ import io.github.amatsukiichika.iwaram.data.GlobalFilterHolder
 import io.github.amatsukiichika.iwaram.data.IwaraPlaylist
 import io.github.amatsukiichika.iwaram.data.filterBy
 import io.github.amatsukiichika.iwaram.data.videoKeys
+import io.github.amatsukiichika.iwaram.i18n.tr
+import io.github.amatsukiichika.iwaram.i18n.trCount
 import io.github.amatsukiichika.iwaram.ui.FastScrollbarBasic
 import io.github.amatsukiichika.iwaram.ui.components.debugAwareErrorText
 import kotlinx.coroutines.launch
@@ -58,11 +60,11 @@ fun PlaylistsOverlay(cvm: IwaraClientViewModel, actions: IwaraNavActions, onClos
 
     Column(Modifier.fillMaxSize()) {
         OverlayTopBar(
-            title = "我的播放列表",
+            title = tr("我的播放列表", "My playlists"),
             onBack = onClose,
             trailing = {
                 IconButton(onClick = { showCreateDialog = true }) {
-                    Icon(Icons.Filled.Add, contentDescription = "新建播放列表")
+                    Icon(Icons.Filled.Add, contentDescription = tr("新建播放列表", "New playlist"))
                 }
             }
         )
@@ -75,14 +77,16 @@ fun PlaylistsOverlay(cvm: IwaraClientViewModel, actions: IwaraNavActions, onClos
             Text(
                 it,
                 style = MaterialTheme.typography.bodySmall,
-                color = if (it.contains("缓存")) MaterialTheme.colorScheme.onSurfaceVariant
+                color = if (it.contains("缓存") || it.contains("cached content", true)) {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                }
                 else MaterialTheme.colorScheme.error,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
             )
         }
         if (playlists.loaded && playlists.items.isEmpty() && !playlists.loading) {
             Text(
-                "还没有播放列表",
+                tr("还没有播放列表", "No playlists yet"),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(16.dp)
@@ -97,7 +101,7 @@ fun PlaylistsOverlay(cvm: IwaraClientViewModel, actions: IwaraNavActions, onClos
                     Modifier
                         .fillMaxWidth()
                         .clickable {
-                            pl.id?.let { id -> actions.openPlaylist(id, pl.title ?: "播放列表") }
+                            pl.id?.let { id -> actions.openPlaylist(id, pl.title ?: tr("播放列表", "Playlist")) }
                         }
                 ) {
                     Row(
@@ -105,9 +109,9 @@ fun PlaylistsOverlay(cvm: IwaraClientViewModel, actions: IwaraNavActions, onClos
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(Modifier.weight(1f)) {
-                            Text(pl.title ?: "（未命名）", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(pl.title ?: tr("（未命名）", "(untitled)"), maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Text(
-                                "${pl.numVideos ?: 0} 个视频",
+                                "${pl.numVideos ?: 0} " + trCount(pl.numVideos ?: 0, "个视频", "video", "videos"),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -138,20 +142,20 @@ private fun CreatePlaylistDialog(onDismiss: () -> Unit, onCreate: (String) -> Un
     var title by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("新建播放列表") },
+        title = { Text(tr("新建播放列表", "New playlist")) },
         text = {
             OutlinedTextField(
                 value = title,
                 onValueChange = { title = it },
-                label = { Text("标题") },
+                label = { Text(tr("标题", "Title")) },
                 singleLine = true
             )
         },
         confirmButton = {
-            TextButton(onClick = { if (title.isNotBlank()) onCreate(title) }) { Text("创建") }
+            TextButton(onClick = { if (title.isNotBlank()) onCreate(title) }) { Text(tr("创建", "Create")) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+            TextButton(onClick = onDismiss) { Text(tr("取消", "Cancel")) }
         }
     )
 }
@@ -184,7 +188,7 @@ fun PlaylistDetailOverlay(
             onBack = onClose,
             trailing = {
                 IconButton(onClick = { confirmDelete = true }) {
-                    Icon(Icons.Filled.Delete, contentDescription = "删除播放列表", tint = MaterialTheme.colorScheme.error)
+                    Icon(Icons.Filled.Delete, contentDescription = tr("删除播放列表", "Delete playlist"), tint = MaterialTheme.colorScheme.error)
                 }
             }
         )
@@ -203,8 +207,8 @@ fun PlaylistDetailOverlay(
         val shown = remember(contents, filter) { contents.filterBy(filter, ::videoKeys) }
         if (playlist != null && shown.isEmpty()) {
             Text(
-                if (contents.isNotEmpty()) "筛选后没有符合的内容（已隐藏 ${contents.size} 项）"
-                else "播放列表为空（或该列表内容暂无法获取）",
+                if (contents.isNotEmpty()) tr("筛选后没有符合的内容（已隐藏 ${contents.size} 项）", "No content matches the filters (${contents.size} hidden)")
+                else tr("播放列表为空（或该列表内容暂无法获取）", "The playlist is empty (or its content is temporarily unavailable)"),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(16.dp)
@@ -255,15 +259,15 @@ fun PlaylistDetailOverlay(
     if (confirmDelete) {
         AlertDialog(
             onDismissRequest = { confirmDelete = false },
-            title = { Text("删除播放列表") },
-            text = { Text("确定删除「$title」吗？") },
+            title = { Text(tr("删除播放列表", "Delete playlist")) },
+            text = { Text(tr("确定删除「$title」吗？", "Delete “$title”?")) },
             confirmButton = {
                 TextButton(onClick = {
                     confirmDelete = false
                     cvm.deletePlaylist(playlistId, scope = pageScope) { _ -> onClose() }
-                }) { Text("删除") }
+                }) { Text(tr("删除", "Delete")) }
             },
-            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("取消") } }
+            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text(tr("取消", "Cancel")) } }
         )
     }
 }

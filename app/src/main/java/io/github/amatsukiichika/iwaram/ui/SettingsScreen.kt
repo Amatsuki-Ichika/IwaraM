@@ -51,6 +51,9 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import io.github.amatsukiichika.iwaram.i18n.AppLanguage
+import io.github.amatsukiichika.iwaram.i18n.LanguageMode
+import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.ui.browse.coverTargetFor
 import io.github.amatsukiichika.iwaram.ui.components.AppEntryCard
 import kotlin.math.roundToInt
@@ -65,14 +68,21 @@ import kotlinx.coroutines.CancellationException
  * - 存储 / 开发者 / 关于。
  * 页内的"集合区块"= [SettingsSection] 小标题 + 卡片，不占一层页面。
  */
-internal enum class SettingsCategory(val icon: ImageVector, val title: String) {
+internal enum class SettingsCategory(
+    val icon: ImageVector,
+    private val titleZh: String,
+    private val titleEn: String
+) {
     // 图标用 Tune（横向推子）而非 Palette：本页是"外观 + 内容分级"的通用设置，
     //   调色盘容易让人误以为只有主题色，Tune 是「偏好/通用设置」的通用符号。
-    GENERAL(Icons.Filled.Tune, "通用"),
-    PLAYBACK(Icons.Filled.Fullscreen, "播放"),
-    STORAGE(Icons.Filled.FolderOpen, "存储"),
-    DEVELOPER(Icons.Filled.Code, "开发者"),
-    ABOUT(Icons.Filled.Info, "关于")
+    GENERAL(Icons.Filled.Tune, "通用", "General"),
+    PLAYBACK(Icons.Filled.Fullscreen, "播放", "Playback"),
+    STORAGE(Icons.Filled.FolderOpen, "存储", "Storage"),
+    DEVELOPER(Icons.Filled.Code, "开发者", "Developer"),
+    ABOUT(Icons.Filled.Info, "关于", "About");
+
+    /** 当前界面语言下的分类名（组合期求值，切语言立即生效）。 */
+    val title: String get() = tr(titleZh, titleEn)
 }
 
 /**
@@ -104,7 +114,13 @@ fun SettingsScreen(
     /** 被更新的层盖住 → 与其它二级页一样让位（左移 + 压暗 + 收圆角）。 */
     covered: Boolean = false,
     /** 被盖住时让出系统返回键（PredictiveBackHandler 后注册者优先，不让就会被下层抢走手势）。 */
-    backEnabled: Boolean = true
+    backEnabled: Boolean = true,
+    /** 当前界面语言（通用页语言选项的选中值）。 */
+    language: LanguageMode = AppLanguage.mode,
+    /** 切换界面语言：由宿主负责落盘并同步 [AppLanguage]（不重建 Activity）。 */
+    onLanguageChange: (LanguageMode) -> Unit = {},
+    /** 重新查看首次引导（宿主重建引导页）。 */
+    onShowOnboarding: () -> Unit = {}
 ) {
     // 设置值全部收进分类子页（[CategoryPage]）按需收集；主页只剩分类入口、零收集。
 
@@ -211,10 +227,10 @@ fun SettingsScreen(
             containerColor = MaterialTheme.colorScheme.background,
             topBar = {
                 TopAppBar(
-                    title = { Text("设置", style = MaterialTheme.typography.titleLarge) },
+                    title = { Text(tr("设置", "Settings"), style = MaterialTheme.typography.titleLarge) },
                     navigationIcon = {
                         IconButton(onClick = onBack) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = tr("返回", "Back"))
                         }
                     }
                 )
@@ -272,6 +288,9 @@ fun SettingsScreen(
                         onBack = { openCategory = null },
                         onPickFolder = onPickFolder,
                         onPickDownloadFolder = onPickDownloadFolder,
+                        language = language,
+                        onLanguageChange = onLanguageChange,
+                        onShowOnboarding = onShowOnboarding,
                         backEnabled = backEnabled && openCategory != null,
                         // 圆角自适应用：子页进出场动画中裁物理圆角（读 subVisible.isIdle，
                         // 只在动画起止两个布尔翻转点重组）。

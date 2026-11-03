@@ -3,6 +3,7 @@ package io.github.amatsukiichika.iwaram.ui
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import io.github.amatsukiichika.iwaram.i18n.tr
 import kotlin.math.roundToInt
 
 /* ---------- 超分运行状态（原 SuperResolution.kt 状态区块） ---------- */
@@ -66,9 +67,9 @@ object SuperResStatus {
         val ratio = if (isUpscalingModel && scale != null && scale > 1.01f) {
             " · ${formatScale(scale)}"
         } else {
-            " · 不放大"
+            tr(" · 不放大", " · no upscaling")
         }
-        return "源 $src · 输出 $out$ratio"
+        return tr("源 $src · 输出 $out$ratio", "Source $src · Output $out$ratio")
     }
 
     fun reset() {
@@ -99,9 +100,9 @@ object SuperResStatus {
      * 恒为单行短串，避免把右侧清晰度 chip 挤出屏幕。
      */
     fun chipLabel(enabled: Boolean, model: String, scale: Float?, degraded: Boolean): String = when {
-        !enabled && pipelineFailed -> "SR 自动停用"
+        !enabled && pipelineFailed -> tr("SR 自动停用", "SR auto-off")
         !enabled -> "SR"
-        degraded -> "SR 未生效"
+        degraded -> tr("SR 未生效", "SR inactive")
         scale != null && scale > 1.01f -> "SR·${SuperRes.shortTag(model)} ${formatScale(scale)}"
         else -> "SR·${SuperRes.shortTag(model)}"
     }

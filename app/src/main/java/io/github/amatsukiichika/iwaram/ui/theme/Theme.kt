@@ -72,6 +72,7 @@ fun resolveDarkTheme(mode: String, systemDark: Boolean): Boolean = when (mode) {
 data class ThemeColorOption(
     val value: String,
     val label: String,
+    val labelEn: String,
     val light: Color,
     val lightSecondary: Color,
     val dark: Color,
@@ -79,12 +80,12 @@ data class ThemeColorOption(
 )
 
 val THEME_COLOR_OPTIONS = listOf(
-    ThemeColorOption("blue", "蓝", Color(0xFF2F5BD8), Color(0xFF5A66C2), Color(0xFF8AB4FF), Color(0xFFB7C5FF)),
-    ThemeColorOption("green", "绿", Color(0xFF2E7D46), Color(0xFF4F9A6B), Color(0xFF93D6A6), Color(0xFFA8D8B8)),
-    ThemeColorOption("purple", "紫", Color(0xFF7B4FD0), Color(0xFF9568E0), Color(0xFFC9B2FF), Color(0xFFD6C6FF)),
-    ThemeColorOption("red", "红", Color(0xFFC2185B), Color(0xFFD05680), Color(0xFFFFAFC7), Color(0xFFFFC4D6)),
-    ThemeColorOption("orange", "橙", Color(0xFFC2661F), Color(0xFFD98A4A), Color(0xFFFFB77E), Color(0xFFFFCCA4)),
-    ThemeColorOption("teal", "青", Color(0xFF00838F), Color(0xFF26A0AC), Color(0xFF7FD8DD), Color(0xFF9FE4E8))
+    ThemeColorOption("blue", "蓝", "Blue", Color(0xFF2F5BD8), Color(0xFF5A66C2), Color(0xFF8AB4FF), Color(0xFFB7C5FF)),
+    ThemeColorOption("green", "绿", "Green", Color(0xFF2E7D46), Color(0xFF4F9A6B), Color(0xFF93D6A6), Color(0xFFA8D8B8)),
+    ThemeColorOption("purple", "紫", "Purple", Color(0xFF7B4FD0), Color(0xFF9568E0), Color(0xFFC9B2FF), Color(0xFFD6C6FF)),
+    ThemeColorOption("red", "红", "Red", Color(0xFFC2185B), Color(0xFFD05680), Color(0xFFFFAFC7), Color(0xFFFFC4D6)),
+    ThemeColorOption("orange", "橙", "Orange", Color(0xFFC2661F), Color(0xFFD98A4A), Color(0xFFFFB77E), Color(0xFFFFCCA4)),
+    ThemeColorOption("teal", "青", "Teal", Color(0xFF00838F), Color(0xFF26A0AC), Color(0xFF7FD8DD), Color(0xFF9FE4E8))
 )
 
 /**

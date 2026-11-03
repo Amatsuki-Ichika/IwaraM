@@ -7,6 +7,10 @@ import coil.ImageLoaderFactory
 import io.github.amatsukiichika.iwaram.data.AppDatabase
 import io.github.amatsukiichika.iwaram.data.IwaraRepository
 import io.github.amatsukiichika.iwaram.data.IwaraSession
+import io.github.amatsukiichika.iwaram.data.APP_PREFS_NAME
+import io.github.amatsukiichika.iwaram.data.KEY_LANGUAGE
+import io.github.amatsukiichika.iwaram.i18n.AppLanguage
+import io.github.amatsukiichika.iwaram.i18n.LanguageMode
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -38,6 +42,12 @@ class IwaraApp : Application(), ImageLoaderFactory {
     override fun onCreate() {
         super.onCreate()
         CrashLogger.install(this)
+        // 界面语言必须在首帧前恢复：Compose 首次组合就按当前语言取词。
+        // 直接读 prefs 而不触发 `repository` 懒加载——构造期要解析整份 prefs，放主线程会卡首帧。
+        // 没写过偏好（全新安装）时 fromPref(null) = SYSTEM，即跟随系统语言。
+        val languagePref = getSharedPreferences(APP_PREFS_NAME, MODE_PRIVATE)
+            .getString(KEY_LANGUAGE, null)
+        AppLanguage.set(LanguageMode.fromPref(languagePref))
         // 会话恢复放在进程起点：下载/扫描服务先于浏览 tab 触发时，元数据请求从第一次起就带可用 token。
         IwaraSession.restore(this)
 

@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.ui.DiagLog
 import java.util.concurrent.atomic.AtomicBoolean
 import io.github.amatsukiichika.iwaram.data.countVideos
@@ -90,13 +91,13 @@ class ScanService : Service() {
                 if (p != null && p.total > 0) {
                     progressNotification("${p.phase}  ${p.done} / ${p.total}", p.done, p.total, false)
                 } else {
-                    progressNotification("扫描进行中…", 0, 0, true)
+                    progressNotification(tr("扫描进行中…", "Scanning…"), 0, 0, true)
                 }
             )
             return START_NOT_STICKY
         }
-        startForeground(PROGRESS_NOTIF_ID, progressNotification("准备扫描…", 0, 0, true))
-        ScanState.set(ScanState.Progress("准备扫描", 0, 0))
+        startForeground(PROGRESS_NOTIF_ID, progressNotification(tr("准备扫描…", "Preparing scan…"), 0, 0, true))
+        ScanState.set(ScanState.Progress(tr("准备扫描", "Preparing scan"), 0, 0))
         scope.launch { runScan() }
         return START_NOT_STICKY
     }
@@ -129,31 +130,37 @@ class ScanService : Service() {
         val repo = (application as IwaraApp).repository
         val root = repo.getRoot()
         if (root.isNullOrBlank()) {
-            finish(false, "尚未设置根目录，请先在设置里选择文件夹")
+            finish(false, tr("尚未设置根目录，请先在设置里选择文件夹", "No library folder is set. Choose one in Settings first"))
             return
         }
         try {
             val imported = repo.importFolder(Uri.parse(root)) { done, total ->
-                pushProgress("扫描文件", done, total)
+                pushProgress(tr("扫描文件", "Scanning files"), done, total)
             }
             if (!imported) {
                 // 根目录打不开（SAF 授权失效等）：必须报错。以前这里静默继续，
                 // 最后照样提示"检索完成：本地共 0 个视频"。
-                finish(false, "无法访问该文件夹（授权可能已失效），请在设置里重新选择")
+                finish(
+                    false,
+                    tr(
+                        "无法访问该文件夹（授权可能已失效），请在设置里重新选择",
+                        "Cannot access the folder (permission may have expired). Choose it again in Settings"
+                    )
+                )
                 return
             }
             repo.fetchAllMissing { done, total ->
-                pushProgress("抓取信息", done, total)
+                pushProgress(tr("抓取信息", "Fetching metadata"), done, total)
             }
             val count = repo.countVideos()
-            finish(true, "检索完成：本地共 $count 个视频")
+            finish(true, tr("检索完成：本地共 $count 个视频", "Scan complete: $count local videos"))
         } catch (e: kotlinx.coroutines.CancellationException) {
             // 服务销毁/协程取消时原样传播：不发"检索中断"的假失败通知。
             throw e
         } catch (e: Exception) {
             // Debug 模式开关：通知文案人话化，技术细节（异常 message/类名）进 DiagLog。
             DiagLog.log("Scan", "检索中断: ${e.message ?: e.javaClass.simpleName}")
-            finish(false, "检索中断，可重新扫描")
+            finish(false, tr("检索中断，可重新扫描", "Scan interrupted. You can scan again"))
         }
     }
 
@@ -169,7 +176,7 @@ class ScanService : Service() {
         NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(title)
-            .setContentText(if (total > 0) "$done / $total" else "正在处理，请稍候…")
+            .setContentText(if (total > 0) "$done / $total" else tr("正在处理，请稍候…", "Processing, please wait…"))
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setContentIntent(openAppIntent())
@@ -179,7 +186,7 @@ class ScanService : Service() {
     private fun doneNotification(success: Boolean, message: String): Notification =
         NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle(if (success) "检索完成" else "检索失败")
+            .setContentTitle(if (success) tr("检索完成", "Scan complete") else tr("检索失败", "Scan failed"))
             .setContentText(message)
             .setStyle(NotificationCompat.BigTextStyle().bigText(message))
             .setContentIntent(openAppIntent())
@@ -197,9 +204,9 @@ class ScanService : Service() {
     private fun createChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val ch = NotificationChannel(
-                CHANNEL_ID, "检索进度", NotificationManager.IMPORTANCE_LOW
+                CHANNEL_ID, tr("检索进度", "Scan progress"), NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "后台检索本地视频与 iwara 元数据的进度通知"
+                description = tr("后台检索本地视频与 iwara 元数据的进度通知", "Background scan progress notification")
             }
             getSystemService(NotificationManager::class.java).createNotificationChannel(ch)
         }

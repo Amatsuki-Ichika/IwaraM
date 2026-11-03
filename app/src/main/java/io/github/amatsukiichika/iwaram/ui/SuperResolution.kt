@@ -10,6 +10,7 @@ import androidx.media3.effect.GlEffect
 import androidx.media3.effect.GlShaderProgram
 import androidx.media3.effect.LanczosResample
 import androidx.media3.effect.PassthroughShaderProgram
+import io.github.amatsukiichika.iwaram.i18n.tr
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
@@ -106,40 +107,84 @@ object SuperRes {
     /** 模型名 —— 播放器下拉菜单与设置页 chip 直接显示的就是它（不使用场景描述当选项名）。 */
     fun label(model: String): String = when (model) {
         A4K_3D -> "Anime4K 3D AA"
-        A4K_BAL -> "Anime4K 修复 S + 放大 S"
-        A4K_HQ -> "Anime4K 修复 M + 放大 M"
-        A4K_UP_S -> "Anime4K 仅放大 S"
-        A4K_RST -> "Anime4K 仅修复 S"
-        A4K_SOFT -> "Anime4K 仅修复 S · 柔和"
-        DN_MEAN -> "降噪 · 轻度"
-        DN_MEDIAN -> "降噪 · 均衡"
-        DN_MODE -> "降噪 · 强力"
+        A4K_BAL -> tr("Anime4K 修复 S + 放大 S", "Anime4K Restore S + Upscale S")
+        A4K_HQ -> tr("Anime4K 修复 M + 放大 M", "Anime4K Restore M + Upscale M")
+        A4K_UP_S -> tr("Anime4K 仅放大 S", "Anime4K Upscale only S")
+        A4K_RST -> tr("Anime4K 仅修复 S", "Anime4K Restore only S")
+        A4K_SOFT -> tr("Anime4K 仅修复 S · 柔和", "Anime4K Restore only S · Soft")
+        DN_MEAN -> tr("降噪 · 轻度", "Denoise · Light")
+        DN_MEDIAN -> tr("降噪 · 均衡", "Denoise · Balanced")
+        DN_MODE -> tr("降噪 · 强力", "Denoise · Strong")
         LANCZOS -> "Lanczos"
-        TEST_RED -> "测试 · 红"
-        TEST_GREEN -> "测试 · 绿"
+        TEST_RED -> tr("测试 · 红", "Test · Red")
+        TEST_GREEN -> tr("测试 · 绿", "Test · Green")
         else -> "Anime4K"
     }
 
     /** 各模型的适用场景说明：只在设置页的 ⓘ 弹窗里展示，不占菜单宽度。 */
     fun desc(model: String): String = when (model) {
-        A4K_3D -> "MMD / 3D CG 专用：3D 画面放大 + 抗锯齿。模型最小、最省电，边缘干净、不动线条。" +
-            "已按官方要求前置高光钳制，不会过冲出白边。"
-        A4K_BAL -> "先做轻度线稿修复（Restore CNN S）再 2× 放大，并前置高光钳制。" +
-            "2D 番剧的均衡档。"
-        A4K_HQ -> "更强的线稿修复（Restore CNN M）+ 2× 放大，并前置高光钳制。" +
-            "最吃 GPU，低端机可能掉帧。"
-        A4K_UP_S -> "只做 2× CNN 放大、不做线条修复。Anime4K 最轻的一档。"
-        A4K_RST -> "只修复、不放大，在原分辨率上运行。1080p 源最实用的一档：" +
-            "放大受屏幕宽度限制几乎没有空间，画质提升主要来自这里。"
-        A4K_SOFT -> "同上但不放大，改用官方柔和变体（Restore CNN Soft）：" +
-            "最不容易出现白边/过冲，适合已经很干净或噪点较多的源。"
-        DN_MEAN -> "双边滤波（加权均值）：最快、最轻的去噪，适合噪点不明显的源。"
-        DN_MEDIAN -> "双边滤波（中值）：保边去噪，专门对付压缩块、脉冲噪点。MMD 1080p 推荐这一档。"
-        DN_MODE -> "双边滤波（众数）：最强去噪，能压色带与压缩纹，但细节损失也最大。"
-        LANCZOS -> "media3 自带 Lanczos 重采样（非 AI）。比双线性清晰很多、几乎不吃 GPU；源分辨率已超过屏幕时没有效果。"
+        A4K_3D -> tr(
+            "MMD / 3D CG 专用：3D 画面放大 + 抗锯齿。模型最小、最省电，边缘干净、不动线条。" +
+                "已按官方要求前置高光钳制，不会过冲出白边。",
+            "For MMD / 3D CG: upscales 3D footage and antialiases edges. The smallest, most power-efficient " +
+                "model — clean edges, line art left untouched. Highlight clamping runs up front as officially " +
+                "required, so there are no overshoot halos."
+        )
+        A4K_BAL -> tr(
+            "先做轻度线稿修复（Restore CNN S）再 2× 放大，并前置高光钳制。" +
+                "2D 番剧的均衡档。",
+            "Light line-art restore (Restore CNN S), then 2× upscale, with highlight clamping up front. " +
+                "The balanced pick for 2D anime."
+        )
+        A4K_HQ -> tr(
+            "更强的线稿修复（Restore CNN M）+ 2× 放大，并前置高光钳制。" +
+                "最吃 GPU，低端机可能掉帧。",
+            "Stronger line-art restore (Restore CNN M) plus 2× upscale, with highlight clamping up front. " +
+                "Heaviest on the GPU; low-end devices may drop frames."
+        )
+        A4K_UP_S -> tr(
+            "只做 2× CNN 放大、不做线条修复。Anime4K 最轻的一档。",
+            "2× CNN upscale only, no line-art restore. The lightest Anime4K tier."
+        )
+        A4K_RST -> tr(
+            "只修复、不放大，在原分辨率上运行。1080p 源最实用的一档：" +
+                "放大受屏幕宽度限制几乎没有空间，画质提升主要来自这里。",
+            "Restore only, no upscale — runs at source resolution. The most practical tier for 1080p sources: " +
+                "screen width leaves little room to upscale, so most of the quality gain comes from here."
+        )
+        A4K_SOFT -> tr(
+            "同上但不放大，改用官方柔和变体（Restore CNN Soft）：" +
+                "最不容易出现白边/过冲，适合已经很干净或噪点较多的源。",
+            "Same as above without upscaling, using the official soft variant (Restore CNN Soft): " +
+                "least prone to halos/overshoot, best for already-clean or noisy sources."
+        )
+        DN_MEAN -> tr(
+            "双边滤波（加权均值）：最快、最轻的去噪，适合噪点不明显的源。",
+            "Bilateral filter (weighted mean): the fastest, lightest denoise; suits sources with little noise."
+        )
+        DN_MEDIAN -> tr(
+            "双边滤波（中值）：保边去噪，专门对付压缩块、脉冲噪点。MMD 1080p 推荐这一档。",
+            "Bilateral filter (median): edge-preserving denoise aimed at compression blocks and impulse noise. " +
+                "Recommended for 1080p MMD."
+        )
+        DN_MODE -> tr(
+            "双边滤波（众数）：最强去噪，能压色带与压缩纹，但细节损失也最大。",
+            "Bilateral filter (mode): the strongest denoise; crushes banding and compression artifacts, " +
+                "but loses the most detail."
+        )
+        LANCZOS -> tr(
+            "media3 自带 Lanczos 重采样（非 AI）。比双线性清晰很多、几乎不吃 GPU；源分辨率已超过屏幕时没有效果。",
+            "media3's built-in Lanczos resampling (not AI). Much sharper than bilinear and nearly free on the " +
+                "GPU; no effect once the source already exceeds the screen resolution."
+        )
         TEST_RED, TEST_GREEN ->
-            "开发者测试特效：走与超分完全相同的特效管线，直接输出纯色帧。" +
-                "切到该档画面变色 = 特效管线与「切模型重建」路径正常；它不做任何画质处理。"
+            tr(
+                "开发者测试特效：走与超分完全相同的特效管线，直接输出纯色帧。" +
+                    "切到该档画面变色 = 特效管线与「切模型重建」路径正常；它不做任何画质处理。",
+                "Developer test effect: runs through the exact same effect pipeline as super resolution and " +
+                    "outputs a solid-color frame. If the picture changes color on this tier, the pipeline and " +
+                    "the \u2018rebuild on model switch\u2019 path are working; it does no image processing."
+            )
         else -> ""
     }
 
@@ -147,13 +192,13 @@ object SuperRes {
     fun shortTag(model: String): String = when (model) {
         A4K_3D -> "3D"
         A4K_BAL, A4K_HQ, A4K_UP_S -> "A4K"
-        A4K_RST -> "修复"
-        A4K_SOFT -> "柔修"
-        DN_MEAN, DN_MEDIAN -> "降噪"
-        DN_MODE -> "强降"
+        A4K_RST -> tr("修复", "RST")
+        A4K_SOFT -> tr("柔修", "SFT")
+        DN_MEAN, DN_MEDIAN -> tr("降噪", "DN")
+        DN_MODE -> tr("强降", "SDN")
         LANCZOS -> "LZ"
-        TEST_RED -> "测红"
-        TEST_GREEN -> "测绿"
+        TEST_RED -> tr("测红", "TR")
+        TEST_GREEN -> tr("测绿", "TG")
         else -> "SR"
     }
 
@@ -260,7 +305,7 @@ object SuperRes {
      */
     private fun testColorEffect(model: String): Effect = object : GlEffect {
         override fun toGlShaderProgram(context2: Context, useHdr: Boolean): GlShaderProgram {
-            SuperResStatus.engine = "测试特效"
+            SuperResStatus.engine = tr("测试特效", "Test effect")
             return TestColorProgram(
                 if (model == TEST_RED) floatArrayOf(1f, 0f, 0f) else floatArrayOf(0f, 1f, 0f)
             )
@@ -284,7 +329,7 @@ object SuperRes {
                 DiagLog.log(TAG, "Anime4K($model) 构建失败，降级为 Lanczos: ${t.message}")
                 SuperResStatus.markDegraded(describeThrowable(t))
                 try {
-                    SuperResStatus.engine = "Lanczos(降级)"
+                    SuperResStatus.engine = tr("Lanczos(降级)", "Lanczos (fallback)")
                     LanczosResample.scaleToFit(maxW, maxH).toGlShaderProgram(context2, useHdr)
                 } catch (lanczosError: Throwable) {
                     Log.e(TAG, "Lanczos 也失败，降级为直通", lanczosError)
