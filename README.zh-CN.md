@@ -61,7 +61,7 @@
 构建目标为 **arm64-v8a**、**Android 8.0（API 26）** 及以上。
 
 测试版（RC）也会发布在 [Releases 页面](https://github.com/Amatsuki-Ichika/IwaraM/releases)并标注为
-pre-release；上面的下载链接始终指向最新的正式版（当前为 0.2.1）。
+pre-release；上面的下载链接始终指向最新的正式版（当前为 0.2.2）。
 
 每个版本都用同一张证书签名，因此后续版本通常可以原地覆盖安装；由他人签名的包则不能——
 若你之前用的是别的签名包，请先卸载。例外：0.1.0 到 0.2.0 更换了 `applicationId`，Android
@@ -85,7 +85,7 @@ echo "sdk.dir=$ANDROID_HOME" > local.properties
 ```
 
 版本名的唯一来源是 `gradle.properties` 里的 `app.versionName`，也可在构建时用
-`-Papp.versionName=0.2.1` 覆盖；`versionCode` 由 `app/build.gradle.kts` 从版本名推导
+`-Papp.versionName=0.2.2` 覆盖；`versionCode` 由 `app/build.gradle.kts` 从版本名推导
 （`major * 10000 + minor * 100 + patch`，忽略预发布后缀）。
 
 ## 架构
