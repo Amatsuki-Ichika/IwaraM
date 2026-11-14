@@ -3,6 +3,7 @@ package io.github.amatsukiichika.iwaram.ui
 import androidx.compose.foundation.lazy.LazyListLayoutInfo
 import androidx.compose.foundation.lazy.grid.LazyGridLayoutInfo
 import kotlin.math.floor
+import kotlin.math.roundToInt
 
 /**
  * 滚动进度几何（纯数据 + 纯函数，单测见 `app/src/test/java/.../ui/ScrollGeometryTest.kt`）。
@@ -144,6 +145,139 @@ internal fun listScrollGeometry(
         firstUnit = firstItemIndex,
         unitOffsetPx = (-firstItemTopPx).toFloat().coerceAtLeast(0f),
         unitSizePx = firstItemHeightPx.toFloat(),
+        itemsPerUnit = 1
+    )
+}
+
+/* ---------- 连续滚动：像素距离与「通栏头」几何 ---------- */
+
+/**
+ * 可滚动的总像素数：`scrollSpanUnits × unitSizePx`。
+ *
+ * 单位高未知（0）或内容不足一屏时结果为 0（视作不可滚动）；调用方不要拿它做除数，
+ * 用 [scrollDeltaPx]，它会把 0 当成"不可滚"返回 0。
+ */
+internal val ScrollGeometry.spanPx: Float
+    get() = (scrollSpanUnits * unitSizePx).coerceAtLeast(0f)
+
+/**
+ * 两个滚动比例之间的像素距离：`(target − current) × spanPx`。
+ *
+ * 比例先夹到 0f..1f —— 拖到轨道末端之外不会多滚（末端夹取），起点越界也从顶端算起。
+ * [spanPx] 非正（内容不足一屏 / 单位高未知）或非有限值时返回 0f：不可滚的列表上拖动
+ * 不该产生 NaN，也不该出现反向跳变。
+ */
+internal fun scrollDeltaPx(currentFraction: Float, targetFraction: Float, spanPx: Float): Float {
+    if (!(spanPx > 0f) || !spanPx.isFinite()) return 0f
+    if (currentFraction.isNaN() || targetFraction.isNaN()) return 0f
+    val current = currentFraction.coerceIn(0f, 1f)
+    val target = targetFraction.coerceIn(0f, 1f)
+    return (target - current) * spanPx
+}
+
+/**
+ * 带「通栏头」列表的滚动几何：单位 = 内容行，通栏头按实测像素折算成若干行计入总长。
+ *
+ * 普通 [listScrollGeometry] 把首项当"第一个单位"：头高远大于内容行高时，头还没滚出时
+ * `firstUnit = 0`、`unitOffsetPx` 量的是**头内**偏移；头一滚出 `firstUnit` 变成 1，却按
+ * **内容行高**折算 —— 同一段滚动前后分属两种比例，进度在边界处跳变。这里统一成像素口径：
+ *
+ * - 头高 ÷ 内容行高 = 头折算的单位数，与内容行一起进总长；
+ * - 头未滚出：滚动量 = 头已滚出的像素 ÷ 内容行高（头内偏移也按同一行高连续折算）；
+ * - 头已滚出：滚动量 = 头折算的单位数 + 已滚出的内容行数 + 首行内偏移 ÷ 内容行高。
+ *
+ * 于是「头刚滚出」边界两侧 [scrollFraction] 连续（单测按 ±0.001 断言），
+ * [spanPx] 也等于真实可滚像素（内容总高 + 头高 − 视口高）。
+ *
+ * 参数与 `LazyListState` / `LazyGridState` 的 `layoutInfo` 对齐：
+ * - [firstVisibleItemIndex] / [firstVisibleItemScrollOffset]：首个可见项的 `index` 与
+ *   `−offset`（即被滚出视口的像素）；
+ * - [headerHeightPx]：通栏头实测总高（调用方用 `onSizeChanged` 量）；
+ * - [headerItemCount]：通栏头占几个 item（通常 1；多项拼成的头按实际数量传）；
+ * - [visibleItemSizesPx]：当前可见项的高度，含头部项，顺序与 `visibleItemsInfo` 一致；
+ * - [totalItemCount]：总条目数（`layoutInfo.totalItemsCount`）。建议必传；不传只能按
+ *   可见窗口底端估一个下界，进度/拇指长度是近似值；
+ * - [viewportHeightPx]：视口高（`layoutInfo.viewportSize.height`）。不传时可见行数按
+ *   可见项高度之和估算（末项被视口裁掉时最多高估一行）。
+ *
+ * 返回 null（都不做除法）：
+ * - 可见项里一个正高度的内容项都没有（只剩通栏头，即头高 ≥ 视口高）—— 测不到内容行高；
+ * - 传了 [viewportHeightPx] 且 [headerHeightPx] > 视口高 —— 头独占一屏，给不出连续进度；
+ * - 可见项列表为空。
+ *
+ * 没有通栏头（[headerItemCount] ≤ 0，或头高为 0）时退化为 [listScrollGeometry] 的等价结果，
+ * 调用方不需要自己分支。
+ *
+ * 注意：本几何的单位是折叠后的内容行，[seekTarget] 返回的"行号"**含头折算行**；需要跳到
+ * 具体条目时，优先用 [spanPx] / [scrollDeltaPx] 按像素滚动（[seekTarget] 语义未改）。
+ */
+internal fun headerScrollGeometry(
+    firstVisibleItemIndex: Int,
+    firstVisibleItemScrollOffset: Int,
+    headerHeightPx: Int,
+    headerItemCount: Int,
+    visibleItemSizesPx: List<Int>,
+    totalItemCount: Int = 0,
+    viewportHeightPx: Int = 0
+): ScrollGeometry? {
+    val index = firstVisibleItemIndex.coerceAtLeast(0)
+    val offset = firstVisibleItemScrollOffset.coerceAtLeast(0)
+    // 没有通栏头（或头高没测到）：直接给现有列表几何的等价结果，调用方不必分支。
+    if (headerItemCount <= 0 || headerHeightPx <= 0) {
+        return listScrollGeometry(
+            totalItems = if (totalItemCount > 0) totalItemCount else index + visibleItemSizesPx.size,
+            firstItemIndex = index,
+            firstItemTopPx = -offset,
+            firstItemHeightPx = visibleItemSizesPx.firstOrNull() ?: 0,
+            visibleCount = visibleItemSizesPx.size
+        )
+    }
+    // 通栏头比视口还高：它自己就占满一屏，给不出以内容行折算的连续进度（也绝不会除零）。
+    if (viewportHeightPx > 0 && headerHeightPx > viewportHeightPx) return null
+    // 可见项里还剩几个头部项：头部可能由多个 item 拼成，也可能已整段滚出。
+    val visibleHeaderCount = (headerItemCount - index).coerceIn(0, visibleItemSizesPx.size)
+    val contentSizesPx = visibleItemSizesPx.drop(visibleHeaderCount).filter { it > 0 }
+    // 内容行高取可见内容项的最大高度：行高均匀时精确，又不会被"末项残缺/细分隔条"带偏。
+    // 一个正高度的内容项都没有 ⇒ 只有通栏头可见，测不到行高，返回 null。
+    val contentRowPx = contentSizesPx.maxOrNull()?.toFloat() ?: return null
+    val headerUnits = headerHeightPx / contentRowPx
+    // 头已滚出的像素：头部还有一截在视口里时 = 头总高 − 可见头剩余高；整段滚出时就是头总高。
+    val headerScrolledPx = if (visibleHeaderCount > 0) {
+        val visibleHeaderPx = visibleItemSizesPx.take(visibleHeaderCount).sum()
+        (headerHeightPx - (visibleHeaderPx - offset)).coerceIn(0, headerHeightPx)
+    } else {
+        headerHeightPx
+    }
+    // 折叠后的滚动位置（单位 = 内容行）：头内偏移与内容行内偏移按同一个行高连续折算，
+    // 于是「头刚滚出」的边界两侧进度严格相接。
+    val scrolledUnits = if (visibleHeaderCount > 0) {
+        headerScrolledPx / contentRowPx
+    } else {
+        headerUnits + (index - headerItemCount) + offset / contentRowPx
+    }
+    // 总长 = 头折算的行数 + 内容行数。没给总条目数时只能把"当前可见窗口的底端"当结尾估
+    // 一个下界（进度/拇指是近似值），调用方应尽量传 layoutInfo.totalItemsCount。
+    val contentItemsTotal = if (totalItemCount > 0) {
+        (totalItemCount - headerItemCount).coerceAtLeast(0)
+    } else {
+        (visibleItemSizesPx.size - visibleHeaderCount).coerceAtLeast(0)
+    }
+    val totalUnits = (headerUnits + contentItemsTotal).roundToInt().coerceAtLeast(1)
+    // 可见行数 = 视口高 ÷ 行高（精确）。没给视口高时按"可见项像素和 − 首项已滚出"估算，
+    // 末项被视口裁掉时会高估（最多一行）。
+    val visibleUnits = if (viewportHeightPx > 0) {
+        viewportHeightPx / contentRowPx
+    } else {
+        (visibleItemSizesPx.sum() - offset).toFloat() / contentRowPx
+    }.coerceAtLeast(1f)
+    // firstUnit 以内容行为轴：0 = 列表最顶部（头未滚出）。
+    val firstUnit = floor(scrolledUnits).toInt().coerceIn(0, totalUnits - 1)
+    return ScrollGeometry(
+        totalUnits = totalUnits,
+        visibleUnits = visibleUnits,
+        firstUnit = firstUnit,
+        unitOffsetPx = (scrolledUnits - firstUnit).coerceIn(0f, 1f) * contentRowPx,
+        unitSizePx = contentRowPx,
         itemsPerUnit = 1
     )
 }

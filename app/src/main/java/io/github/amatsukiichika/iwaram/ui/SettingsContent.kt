@@ -35,13 +35,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.github.amatsukiichika.iwaram.LocalAppRepository
 import io.github.amatsukiichika.iwaram.i18n.LanguageMode
 import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.ui.browse.accentChipColors
@@ -402,6 +402,12 @@ internal fun StorageContent(
     onPickFolder: () -> Unit,
     onPickDownloadFolder: () -> Unit
 ) {
+    // 下载自动继续：状态归 IwaraRepository 的 StateFlow 所有（同一份真源，不新造全局）。
+    // 屏幕经 LocalAppRepository 取它——与 PlayerScreen、下载列表一致，不绕过仓库。
+    // 注：SettingsCategoryPage 目前不往 StorageContent 传仓库/回调，用组合局部变量可避免
+    //   改动它（本任务只允许改本文件与 IwaraSecondaryFeeds.kt）。
+    val repo = LocalAppRepository.current
+    val autoResumeDownloads by repo.autoResumeDownloads.collectAsStateWithLifecycle()
     AppEntryCard(
         title = tr("视频根目录", "Video root folder"),
         subtitle = tr("选择后自动递归导入其中所有视频", "Imports every video inside automatically, recursively")
@@ -445,6 +451,17 @@ internal fun StorageContent(
             }
         }
     }
+    // 总开关：关掉后打开 App 不自动续跑排队/进行中的下载（暂停中的从不自动开始）。
+    AppEntryCard(
+        title = tr("下载自动继续", "Auto-resume downloads"),
+        subtitle = tr(
+            "打开应用时自动续跑排队/中断的下载；暂停中的任务不会自动开始",
+            "Resume queued/interrupted downloads when the app opens; paused downloads never auto-start"
+        ),
+        trailing = {
+            Switch(checked = autoResumeDownloads, onCheckedChange = repo::setAutoResumeDownloads)
+        }
+    )
 }
 
 @Composable
@@ -502,18 +519,7 @@ private fun BarTuningCard(
 
 @Composable
 internal fun AboutContent(onShowOnboarding: () -> Unit = {}) {
-    val context = LocalContext.current
-    val version = remember {
-        runCatching {
-            context.packageManager.getPackageInfo(context.packageName, 0).versionName
-        }.getOrNull() ?: "?"
-    }
-    AppEntryCard(
-        title = tr("版本", "Version"),
-        trailing = {
-            Text(version, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    )
+    // 版本号与更新入口由 UpdateContent（同一分类下的更新卡片）展示，这里不重复。
     AppEntryCard(
         title = tr("再次查看首次引导", "Show the first-run guide again"),
         subtitle = tr("重看语言、文件夹与偏好设置的介绍", "Replay the language, folder and preference tour"),

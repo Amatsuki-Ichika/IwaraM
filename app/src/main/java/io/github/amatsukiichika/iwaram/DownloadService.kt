@@ -19,6 +19,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ReceiveChannel
@@ -27,6 +28,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import io.github.amatsukiichika.iwaram.data.DOWNLOAD_MAX_AUTO_RETRIES
 import io.github.amatsukiichika.iwaram.data.DownloadHistoryEntry
 import io.github.amatsukiichika.iwaram.data.FileNameSanitizer
 import io.github.amatsukiichika.iwaram.data.IwaraClient
@@ -34,6 +36,8 @@ import io.github.amatsukiichika.iwaram.data.IwaraSign
 import io.github.amatsukiichika.iwaram.data.PendingDownload
 import io.github.amatsukiichika.iwaram.data.VideoEntity
 import io.github.amatsukiichika.iwaram.data.addDownloadHistory
+import io.github.amatsukiichika.iwaram.data.downloadCardFailureReason
+import io.github.amatsukiichika.iwaram.data.downloadRetryDelayMs
 import io.github.amatsukiichika.iwaram.data.fetchAndApplyMetadata
 import io.github.amatsukiichika.iwaram.data.generateLocalThumbnail
 import io.github.amatsukiichika.iwaram.data.isSignedUrlExpired
@@ -41,6 +45,7 @@ import io.github.amatsukiichika.iwaram.data.loadPendingDownloads
 import io.github.amatsukiichika.iwaram.data.removePendingDownload
 import io.github.amatsukiichika.iwaram.data.resolveDownloadTarget
 import io.github.amatsukiichika.iwaram.data.savePendingDownload
+import io.github.amatsukiichika.iwaram.data.shouldRetryDownload
 import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.ui.DiagLog
 import okhttp3.Request
@@ -59,6 +64,22 @@ internal fun isStaleRowForSameVideo(
     newLocalUri: String,
     oldFileExists: Boolean
 ): Boolean = rowUri != newLocalUri && !rowIwaraId.isNullOrBlank() && !oldFileExists
+
+/**
+ * 带状态码的下载失败（替代原先的 RuntimeException("HTTP 状态码")）。
+ * 只有拿到具体 code 才能区分可重试的 408/429/5xx 与不可重试的 401/403/404，
+ * 分类规则见 [shouldRetryDownload]。
+ */
+internal class DownloadHttpException(val code: Int) : RuntimeException("HTTP $code")
+
+/** 一次下载尝试的收尾方式；网络/IO 异常不在这里表示，由调用方按 [shouldRetryDownload] 分类重试。 */
+private data class DownloadAttemptResult(
+    val completed: Boolean = false,
+    val paused: Boolean = false,
+    val cancelled: Boolean = false,
+    val received: Long = 0,
+    val total: Long = -1
+)
 
 /** 下载任务状态（UI 可观察）；列表只保留最近的任务用于界面提示。 */
 object DownloadState {
@@ -177,7 +198,19 @@ internal fun pendingToTask(p: PendingDownload): DownloadState.Task = DownloadSta
     },
     message = when (p.state) {
         DownloadState.STATE_PAUSED -> tr("已暂停", "Paused")
-        DownloadState.STATE_FAILED -> tr("下载失败（可重新下载续传）", "Download failed (you can resume)")
+        DownloadState.STATE_FAILED -> {
+            // 自动重试过 n 次才失败的记录，恢复后也要让用户知道"不是没试过"；
+            // attempts=0（不可重试的失败）保持原文案。
+            val retries = downloadCardFailureReason(p.state, p.attempts) ?: 0
+            if (retries > 0) {
+                tr(
+                    "下载失败（已自动重试 $retries 次，可重新下载续传）",
+                    "Download failed after $retries automatic retries (you can resume)"
+                )
+            } else {
+                tr("下载失败（可重新下载续传）", "Download failed (you can resume)")
+            }
+        }
         else -> tr("下载中断（点「继续」重新下载）", "Download interrupted (tap Resume to continue)")
     },
     fileName = p.fileName, quality = p.quality, docUri = p.docUri
@@ -241,7 +274,9 @@ class DownloadService : Service() {
         val fileName: String,
         val quality: String,
         /** 框架交付序：onStartCommand 的 startId；onIdle 凭最后一个它安全 stopSelf（见 onCreate 注释）。 */
-        val startId: Int = 0
+        val startId: Int = 0,
+        /** 已自动重试次数（新任务为 0，runDownload 的重试循环内累加）。 */
+        val attempt: Int = 0
     )
 
     override fun onCreate() {
@@ -289,7 +324,8 @@ class DownloadService : Service() {
                 url = it.getStringExtra(EXTRA_URL) ?: return@let null,
                 fileName = it.getStringExtra(EXTRA_FILE_NAME) ?: "$id.mp4",
                 quality = it.getStringExtra(EXTRA_QUALITY) ?: "Source",
-                startId = startId
+                startId = startId,
+                attempt = it.getIntExtra(EXTRA_ATTEMPTS, 0)
             )
         }
         if (job == null) {
@@ -328,7 +364,8 @@ class DownloadService : Service() {
                         fileName = job.fileName, quality = job.quality,
                         received = 0, total = -1, docUri = null,
                         updatedAt = System.currentTimeMillis(),
-                        state = DownloadState.STATE_QUEUED
+                        state = DownloadState.STATE_QUEUED,
+                        attempts = job.attempt
                     )
                 )
             }
@@ -398,7 +435,8 @@ class DownloadService : Service() {
                     fileName = job.fileName, quality = job.quality,
                     received = 0, total = -1, docUri = null,
                     updatedAt = System.currentTimeMillis(),
-                    state = DownloadState.STATE_RUNNING
+                    state = DownloadState.STATE_RUNNING,
+                    attempts = job.attempt
                 )
             )
         }
@@ -478,13 +516,11 @@ class DownloadService : Service() {
             rootDocUri = rootDoc?.uri?.toString(), rootLength = rootDoc?.length() ?: -1L,
             treeDocUri = treeDoc?.uri?.toString(), treeLength = treeDoc?.length() ?: -1L
         )
-        var resumeFrom = 0L
         var doc: DocumentFile? = null
         if (target != null) {
             val d = documentOf(target.docUri)
             if (d != null) {
                 doc = d
-                resumeFrom = target.length
             }
         }
         if (doc == null) {
@@ -503,146 +539,296 @@ class DownloadService : Service() {
             return@withContext
         }
 
-        // 读循环里被用户取消时置位：走完 use 块（关流）之后再删文件、清记录。
-        var cancelledByUser = false
-        try {
-            // mediaHttp 对带 expires 的地址自动附加 X-Version 签名并带浏览器头，
-            // 与播放同栈，避免下载地址被 CDN 拒签；这里再做一次协议补全防御。
-            val url = IwaraSign.httpsUrl(sourceUrl.trim())
-            val reqBody = Request.Builder()
-                .url(url)
-                .get()
-            if (resumeFrom > 0) reqBody.header("Range", "bytes=$resumeFrom-")
-            IwaraClient.mediaHttp.newCall(reqBody.build()).execute().use { resp ->
-                val total: Long
-                var received = 0L
-                val input: java.io.InputStream
-                val append: Boolean
-                if (resp.code == 206 && resumeFrom > 0) {
-                    // 续传成功：Content-Range: bytes start-end/total。
-                    val contentRange = resp.header("Content-Range")
-                    total = contentRange?.substringAfterLast('/')?.toLongOrNull() ?: -1L
-                    input = resp.body?.byteStream() ?: throw RuntimeException("空响应")
-                    append = true
-                    received = resumeFrom
-                    if (total > 0 && resumeFrom >= total) {
-                        // 半成品其实已经齐了（上次在收尾阶段被打断）——直接走完成路径。
-                        input.close()
-                        finishDownload(job, repo, dao, doc)
-                        return@withContext
-                    }
-                    DiagLog.log("Download", "续传 ${job.title}：从 $resumeFrom 字节继续（总 $total）")
-                } else {
-                    if (!resp.isSuccessful) throw RuntimeException("HTTP ${resp.code}")
-                    // 服务器不支持 Range（200 全量）或没有半成品：截断重下，绝不把两次内容拼在一起。
-                    total = resp.body?.contentLength() ?: -1L
-                    input = resp.body?.byteStream() ?: throw RuntimeException("空响应")
-                    append = false
+        // 自动重试：网络抖动/断流按 3s/10s/30s 退避重试，最多 DOWNLOAD_MAX_AUTO_RETRIES 次。
+        // 重试留在**同一个 Job、同一条前台通知**里完成：不重新入队 —— 否则 attempt 计数、
+        // 半成品长度与暂停/取消标记都会被重复处理，串行 drain 的既有语义也会被打乱。
+        // 401/403 先按同一 videoId + 同一档位重新解析一次地址（签名过期最常见），
+        // 仍被拒签才按「下载地址已过期」收尾。
+        var attempt = job.attempt
+        var reResolvedAuth = false
+        while (true) {
+            // 续传起点每轮都从磁盘真实长度取：失败重试前可能已经写入了一部分字节。
+            val resumeFrom = (doc?.length() ?: 0L).coerceAtLeast(0L)
+            try {
+                val result = downloadOnce(job, doc, sourceUrl, resumeFrom)
+                when {
+                    result.cancelled -> cancelDownload(job, repo, doc)
+                    result.paused -> pauseTask(job, repo, doc, result.received, result.total, attempt)
+                    else -> finishDownload(job, repo, dao, doc)
                 }
-                val mode = if (append) "wa" else "w"
-                val output = contentResolver.openOutputStream(doc.uri, mode)
-                    ?: throw RuntimeException("无法写入文件")
-                input.use { ins ->
-                    output.use { outs ->
-                        val buf = ByteArray(64 * 1024)
-                        // 进度限流：每收 64KB 就 upsert + 发通知会在高速网络下造成
-                        // 每秒数百次 StateFlow 重组与通知栏 IPC（"进度风暴"）。最密 400ms 一次，
-                        // 收尾由 finishDownload() 兜底刷到完成态，观感无差别、开销降两个数量级。
-                        var lastProgressAt = 0L
-                        while (true) {
-                            // 用户在排队/下载中点「取消」：直接收尾，不把文件下完。
-                            if (cancelRequested.remove(job.videoId)) {
-                                cancelledByUser = true
-                                break
-                            }
-                            // 服务被销毁（scope.cancel）时也必须停：阻塞的 read 不响应协程取消，
-                            // 只检查暂停标记会让它在服务销毁后继续把文件读完，最后卡在
-                            // finishDownload 的第一个挂起点上抛 CancellationException ——
-                            // 磁盘上留下一个既没入库、也不在续传列表里的孤儿文件。
-                            currentCoroutineContext().ensureActive()
-                            if (pauseRequested.remove(job.videoId)) {
-                                // 暂停：关流保留半成品，任务记为 PAUSED 并持久化，等用户点「继续」。
-                                outs.flush()
-                                DiagLog.log("Download", "暂停 ${job.title}：已接收 $received 字节")
-                                val t = DownloadState.Task(
-                                    job.videoId, job.title, received,
-                                    if (total > 0) total else -1,
-                                    state = DownloadState.STATE_PAUSED,
-                                    message = tr(
-                                        "已暂停（已接收 ${received / 1024} KB）",
-                                        "Paused (${received / 1024} KB received)"
-                                    ),
+                return@withContext
+            } catch (e: CancellationException) {
+                // 服务被销毁/协程被取消时原样传播：不发「下载失败」通知、不写失败记录
+                //（半成品文件保留，符合断点续传预期）。
+                throw e
+            } catch (e: Throwable) {
+                val httpCode = (e as? DownloadHttpException)?.code
+                if (httpCode == 401 || httpCode == 403) {
+                    // 签名地址：同一个 Job 内只重新解析一次，避免被 CDN 反复拒签时打转。
+                    val freshUrl = if (reResolvedAuth) {
+                        null
+                    } else {
+                        reResolvedAuth = true
+                        DiagLog.log("Download", "下载被拒签($httpCode)，重新解析地址：${job.title}")
+                        runCatching { resolveDownloadTarget(repo, job.videoId, job.quality) }.getOrNull()?.url
+                    }
+                    if (freshUrl != null) {
+                        sourceUrl = freshUrl
+                        continue
+                    }
+                    // 重新解析仍失败：队列里的地址确实过期了，让用户手动重下。
+                    finalizeFailure(
+                        job, repo, doc, attempt, e,
+                        tr("下载地址已过期，请重新下载", "The download link expired. Please download again")
+                    )
+                    return@withContext
+                }
+                if (!shouldRetryDownload(httpCode, e, attempt)) {
+                    finalizeFailure(job, repo, doc, attempt, e)
+                    return@withContext
+                }
+                // 可重试失败：同一 Job 内等一等继续，先不清记录、不写历史（最终失败才写）。
+                val waitMs = downloadRetryDelayMs(attempt)
+                attempt += 1
+                val receivedNow = (doc?.length() ?: 0L).coerceAtLeast(0L)
+                DiagLog.log(
+                    "Download",
+                    "下载失败(${httpCode ?: e.javaClass.simpleName})，${waitMs}ms 后第 $attempt/$DOWNLOAD_MAX_AUTO_RETRIES 次自动重试：${job.title}"
+                )
+                retryTask(job, attempt, waitMs, receivedNow)
+                if (!awaitRetryWindow(job, waitMs)) {
+                    // 退避期间用户暂停/取消：中止重试，按标记收尾，不把这次失败算成最终失败。
+                    if (cancelRequested.remove(job.videoId)) {
+                        cancelDownload(job, repo, doc)
+                    } else if (pauseRequested.remove(job.videoId)) {
+                        pauseTask(job, repo, doc, (doc?.length() ?: 0L).coerceAtLeast(0L), -1L, attempt)
+                    }
+                    return@withContext
+                }
+            }
+        }
+    }
+
+    /**
+     * 单次下载尝试：发请求 + 读循环写文件。
+     * 完成/暂停/取消用返回值表达，真正的失败抛异常，由 runDownload 的重试循环分类。
+     */
+    private suspend fun downloadOnce(
+        job: Job,
+        doc: DocumentFile,
+        sourceUrl: String,
+        resumeFrom: Long
+    ): DownloadAttemptResult {
+        // mediaHttp 对带 expires 的地址自动附加 X-Version 签名并带浏览器头，
+        // 与播放同栈，避免下载地址被 CDN 拒签；这里再做一次协议补全防御。
+        val url = IwaraSign.httpsUrl(sourceUrl.trim())
+        val reqBody = Request.Builder()
+            .url(url)
+            .get()
+        if (resumeFrom > 0) reqBody.header("Range", "bytes=$resumeFrom-")
+        IwaraClient.mediaHttp.newCall(reqBody.build()).execute().use { resp ->
+            val total: Long
+            var received = 0L
+            val input: java.io.InputStream
+            val append: Boolean
+            if (resp.code == 206 && resumeFrom > 0) {
+                // 续传成功：Content-Range: bytes start-end/total。
+                val contentRange = resp.header("Content-Range")
+                total = contentRange?.substringAfterLast('/')?.toLongOrNull() ?: -1L
+                input = resp.body?.byteStream() ?: throw java.io.IOException("空响应")
+                append = true
+                received = resumeFrom
+                if (total > 0 && resumeFrom >= total) {
+                    // 半成品其实已经齐了（上次在收尾阶段被打断）——直接走完成路径。
+                    input.close()
+                    return DownloadAttemptResult(completed = true, received = received, total = total)
+                }
+                DiagLog.log("Download", "续传 ${job.title}：从 $resumeFrom 字节继续（总 $total）")
+            } else {
+                if (!resp.isSuccessful) throw DownloadHttpException(resp.code)
+                // 服务器不支持 Range（200 全量）或没有半成品：截断重下，绝不把两次内容拼在一起。
+                total = resp.body?.contentLength() ?: -1L
+                input = resp.body?.byteStream() ?: throw java.io.IOException("空响应")
+                append = false
+            }
+            val mode = if (append) "wa" else "w"
+            val output = contentResolver.openOutputStream(doc.uri, mode)
+                ?: throw java.io.IOException("无法写入文件")
+            input.use { ins ->
+                output.use { outs ->
+                    val buf = ByteArray(64 * 1024)
+                    // 进度限流：每收 64KB 就 upsert + 发通知会在高速网络下造成
+                    // 每秒数百次 StateFlow 重组与通知栏 IPC（"进度风暴"）。最密 400ms 一次，
+                    // 收尾由 finishDownload() 兜底刷到完成态，观感无差别、开销降两个数量级。
+                    var lastProgressAt = 0L
+                    while (true) {
+                        // 用户在排队/下载中点「取消」：直接收尾，不把文件下完。
+                        if (cancelRequested.remove(job.videoId)) {
+                            return DownloadAttemptResult(cancelled = true, received = received, total = total)
+                        }
+                        // 服务被销毁（scope.cancel）时也必须停：阻塞的 read 不响应协程取消，
+                        // 只检查暂停标记会让它在服务销毁后继续把文件读完，最后卡在
+                        // finishDownload 的第一个挂起点上抛 CancellationException ——
+                        // 磁盘上留下一个既没入库、也不在续传列表里的孤儿文件。
+                        currentCoroutineContext().ensureActive()
+                        if (pauseRequested.remove(job.videoId)) {
+                            // 暂停：关流保留半成品，状态由 pauseTask 记 PAUSED 并持久化。
+                            outs.flush()
+                            DiagLog.log("Download", "暂停 ${job.title}：已接收 $received 字节")
+                            return DownloadAttemptResult(paused = true, received = received, total = total)
+                        }
+                        val n = ins.read(buf)
+                        if (n < 0) break
+                        outs.write(buf, 0, n)
+                        received += n
+                        val now = SystemClock.elapsedRealtime()
+                        if (now - lastProgressAt >= PROGRESS_THROTTLE_MS) {
+                            lastProgressAt = now
+                            DownloadState.upsert(
+                                DownloadState.Task(
+                                    job.videoId, job.title, received, total,
                                     url = job.url, fileName = job.fileName, quality = job.quality,
                                     docUri = doc.uri.toString()
                                 )
-                                DownloadState.upsert(t)
-                                repo.savePendingDownload(
-                                    PendingDownload(
-                                        job.videoId, job.title, job.fileName, job.quality,
-                                        received, if (total > 0) total else -1,
-                                        doc.uri.toString(), System.currentTimeMillis(),
-                                        state = DownloadState.STATE_PAUSED
-                                    )
-                                )
-                                notify(DONE_NOTIF_ID, doneNotification(true, tr("已暂停：${job.title}", "Paused: ${job.title}")))
-                                return@withContext
-                            }
-                            val n = ins.read(buf)
-                            if (n < 0) break
-                            outs.write(buf, 0, n)
-                            received += n
-                            val now = SystemClock.elapsedRealtime()
-                            if (now - lastProgressAt >= PROGRESS_THROTTLE_MS) {
-                                lastProgressAt = now
-                                DownloadState.upsert(
-                                    DownloadState.Task(
-                                        job.videoId, job.title, received, total,
-                                        url = job.url, fileName = job.fileName, quality = job.quality,
-                                        docUri = doc.uri.toString()
-                                    )
-                                )
-                                notify(
-                                    PROGRESS_NOTIF_ID,
-                                    progressNotification(job.title, received, total, total <= 0)
-                                )
-                            }
+                            )
+                            notify(
+                                PROGRESS_NOTIF_ID,
+                                progressNotification(job.title, received, total, total <= 0)
+                            )
                         }
-                        outs.flush()
                     }
+                    outs.flush()
+                    return DownloadAttemptResult(completed = true, received = received, total = total)
                 }
             }
-
-            if (cancelledByUser) {
-                // 取消 = "这个文件我不要了"：记录、列表条目、半成品一起清。
-                // 与 UI 的 removePendingCompletely 同语义，两边都幂等。
-                runCatching { repo.removePendingDownload(job.videoId) }
-                DownloadState.remove(job.videoId)
-                runCatching { doc.delete() }
-                DiagLog.log("Download", "已取消：${job.title}")
-                return@withContext
-            }
-
-            finishDownload(job, repo, dao, doc)
-        } catch (e: CancellationException) {
-            // 服务被销毁/协程被取消时原样传播：不发"下载失败"通知、不写失败记录
-            // （半成品文件保留，符合断点续传预期）。
-            throw e
-        } catch (e: Throwable) {
-            // 失败不删半成品：保留文件与记录，「重新下载」可从断点继续。
-            runCatching {
-                repo.savePendingDownload(
-                    PendingDownload(
-                        job.videoId, job.title, job.fileName, job.quality,
-                        doc.length(), -1, doc.uri.toString(), System.currentTimeMillis(),
-                        state = DownloadState.STATE_FAILED
-                    )
-                )
-            }
-            // Debug 模式开关：用户可见文案（列表/历史/通知）一律人话；
-            // 技术细节（HTTP 码/异常串）转投 DiagLog。
-            DiagLog.log("Download", "下载失败 ${job.title}: ${e.message ?: e.javaClass.simpleName}")
-            fail(job, repo, tr("下载失败（半成品已保留，可重新下载续传）", "Download failed (the partial file was kept; you can resume)"), doc.uri.toString())
         }
+        // 读循环正常结束都会在上面带 received 返回，这里只是兜底（让所有分支都有返回值）。
+        return DownloadAttemptResult(completed = true)
+    }
+
+    /** 取消收尾：记录、列表条目、半成品一起清（与 UI 的 removePendingCompletely 同语义，两边幂等）。 */
+    private suspend fun cancelDownload(
+        job: Job,
+        repo: io.github.amatsukiichika.iwaram.data.IwaraRepository,
+        doc: DocumentFile
+    ) {
+        runCatching { repo.removePendingDownload(job.videoId) }
+        DownloadState.remove(job.videoId)
+        runCatching { doc.delete() }
+        DiagLog.log("Download", "已取消：${job.title}")
+    }
+
+    /** 暂停收尾：保留半成品，记 PAUSED（带 attempts）并持久化，等用户点「继续」。 */
+    private suspend fun pauseTask(
+        job: Job,
+        repo: io.github.amatsukiichika.iwaram.data.IwaraRepository,
+        doc: DocumentFile,
+        received: Long,
+        total: Long,
+        attempt: Int
+    ) {
+        DiagLog.log("Download", "暂停 ${job.title}：已接收 $received 字节")
+        val normalizedTotal = if (total > 0) total else -1L
+        DownloadState.upsert(
+            DownloadState.Task(
+                job.videoId, job.title, received, normalizedTotal,
+                state = DownloadState.STATE_PAUSED,
+                message = tr(
+                    "已暂停（已接收 ${received / 1024} KB）",
+                    "Paused (${received / 1024} KB received)"
+                ),
+                url = job.url, fileName = job.fileName, quality = job.quality,
+                docUri = doc.uri.toString()
+            )
+        )
+        runCatching {
+            repo.savePendingDownload(
+                PendingDownload(
+                    job.videoId, job.title, job.fileName, job.quality,
+                    received, normalizedTotal,
+                    doc.uri.toString(), System.currentTimeMillis(),
+                    state = DownloadState.STATE_PAUSED,
+                    attempts = attempt
+                )
+            )
+        }
+        notify(DONE_NOTIF_ID, doneNotification(true, tr("已暂停：${job.title}", "Paused: ${job.title}")))
+    }
+
+    /** 退避等待中的任务展示：列表保持 RUNNING + 通知副标题写清第几次重试，不写失败记录/历史。 */
+    private fun retryTask(job: Job, retryNo: Int, waitMs: Long, received: Long) {
+        val seconds = (waitMs / 1000L).coerceAtLeast(1L)
+        val message = tr(
+            "网络异常，${seconds} 秒后自动重试（第 $retryNo/$DOWNLOAD_MAX_AUTO_RETRIES 次）",
+            "Network error; retrying automatically in ${seconds}s (retry $retryNo/$DOWNLOAD_MAX_AUTO_RETRIES)"
+        )
+        DownloadState.upsert(
+            DownloadState.Task(
+                job.videoId, job.title, received, -1,
+                message = message,
+                url = job.url, fileName = job.fileName, quality = job.quality
+            )
+        )
+        notify(
+            PROGRESS_NOTIF_ID,
+            progressNotification(job.title, received, -1, true, retryNote = message)
+        )
+    }
+
+    /**
+     * 退避期间等待 [waitMs]，同时轮询用户的暂停/取消标记（250ms 一次，
+     * 好让「暂停/取消」不必等满 30s 才生效）。返回 true = 等待结束可重试。
+     */
+    private suspend fun awaitRetryWindow(job: Job, waitMs: Long): Boolean {
+        var remaining = waitMs
+        while (remaining > 0) {
+            if (cancelRequested.contains(job.videoId) || pauseRequested.contains(job.videoId)) return false
+            val step = minOf(remaining, RETRY_WAIT_POLL_MS)
+            delay(step)
+            remaining -= step
+        }
+        return !cancelRequested.contains(job.videoId) && !pauseRequested.contains(job.videoId)
+    }
+
+    /**
+     * 最终失败收尾：**只有这里**写 FAILED 记录与下载历史；重试过程中不写，
+     * 否则「自动重试」会在历史里留下多条失败。
+     */
+    private suspend fun finalizeFailure(
+        job: Job,
+        repo: io.github.amatsukiichika.iwaram.data.IwaraRepository,
+        doc: DocumentFile,
+        attempts: Int,
+        error: Throwable,
+        message: String? = null
+    ) {
+        // 失败不删半成品：保留文件与记录，「重新下载」可从断点继续。
+        runCatching {
+            repo.savePendingDownload(
+                PendingDownload(
+                    job.videoId, job.title, job.fileName, job.quality,
+                    doc.length(), -1, doc.uri.toString(), System.currentTimeMillis(),
+                    state = DownloadState.STATE_FAILED,
+                    attempts = attempts
+                )
+            )
+        }
+        // Debug 模式开关：用户可见文案（列表/历史/通知）一律人话；
+        // 技术细节（HTTP 码/异常串）转投 DiagLog。
+        DiagLog.log("Download", "下载失败 ${job.title}: ${error.message ?: error.javaClass.simpleName}")
+        val retries = downloadCardFailureReason(DownloadState.STATE_FAILED, attempts) ?: 0
+        val text = message ?: if (retries > 0) {
+            tr(
+                "下载失败（已自动重试 $retries 次，半成品已保留，可重新下载续传）",
+                "Download failed after $retries automatic retries (the partial file was kept; you can resume)"
+            )
+        } else {
+            tr(
+                "下载失败（半成品已保留，可重新下载续传）",
+                "Download failed (the partial file was kept; you can resume)"
+            )
+        }
+        fail(job, repo, text, doc.uri.toString())
     }
 
     /** 下载成功共用收尾：入库 + 本地缩略图 + 元数据补全 + 历史/待续记录清理。
@@ -825,12 +1011,15 @@ class DownloadService : Service() {
         title: String,
         received: Long,
         total: Long,
-        indeterminate: Boolean
+        indeterminate: Boolean,
+        /** 自动重试文案（"第 n/3 次"）；非空时附加在进度副标题后面，且不泄露到锁屏 public 版本。 */
+        retryNote: String? = null
     ): Notification {
         // 进度值先过纯函数钳制（received>total 会让 progress 超过 max、
         // 超大文件 total/1024 有 Int 溢出风险），详见 notificationProgressBounds。
         val (max, progress) = notificationProgressBounds(received, total)
-        val detail = if (total > 0) "${sizeText(received)} / ${sizeText(total)}" else tr("正在准备", "Preparing")
+        val baseDetail = if (total > 0) "${sizeText(received)} / ${sizeText(total)}" else tr("正在准备", "Preparing")
+        val detail = if (retryNote.isNullOrBlank()) baseDetail else "$baseDetail · $retryNote"
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(tr("正在下载", "Downloading"))
@@ -909,6 +1098,10 @@ class DownloadService : Service() {
         private const val EXTRA_URL = "url"
         private const val EXTRA_FILE_NAME = "file_name"
         private const val EXTRA_QUALITY = "quality"
+        private const val EXTRA_ATTEMPTS = "attempts"
+
+        /** 自动重试退避期间暂停/取消标记的轮询间隔（毫秒）。 */
+        private const val RETRY_WAIT_POLL_MS = 250L
 
         /** 暂停标记：UI 置入，读循环每 64KB 检查一次；服务进程内单例，跨组件共享。 */
         private val pauseRequested = CopyOnWriteArraySet<String>()
@@ -933,6 +1126,7 @@ class DownloadService : Service() {
                 .putExtra(EXTRA_URL, job.url)
                 .putExtra(EXTRA_FILE_NAME, job.fileName)
                 .putExtra(EXTRA_QUALITY, job.quality)
+                .putExtra(EXTRA_ATTEMPTS, job.attempt)
             context.startForegroundService(i)
         }
 

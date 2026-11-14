@@ -198,6 +198,102 @@ class IwaraRepository(
     /** 卡片是否显示标签的单一真源（设置页经窄流订阅，不再收整份 UiState）。 */
     val showTags: StateFlow<Boolean> = _showTags.asStateFlow()
 
+    /* ---------- 下载自动继续 ---------- */
+
+    /** 打开 App 时是否自动续跑「排队 / 进行中」的下载；暂停的任务永不自动开始。 */
+    fun setAutoResumeDownloads(value: Boolean) {
+        prefs.edit().putBoolean("auto_resume_downloads", value).apply()
+        _autoResumeDownloads.value = value
+    }
+
+    fun getAutoResumeDownloads(): Boolean = prefs.getBoolean("auto_resume_downloads", true)
+
+    private val _autoResumeDownloads = MutableStateFlow(getAutoResumeDownloads())
+
+    /** 下载自动继续开关的单一真源。 */
+    val autoResumeDownloads: StateFlow<Boolean> = _autoResumeDownloads.asStateFlow()
+
+    /* ---------- 应用内检查更新 ---------- */
+
+    /** 更新通道：stable（正式版）/ beta（含 rc 与预发布）。缺省跟随正式版。 */
+    fun setUpdateChannel(value: String) {
+        val normalized = if (value == "beta") "beta" else "stable"
+        prefs.edit()
+            .putString("update_channel", normalized)
+            // 切通道后旧通道的「上次检查时间」与「忽略版本」不再适用：清掉让新通道立即生效，
+            // 否则用户切到测试版后可能被正式版遗留的忽略项挡住，或要等到下一个周期才检查。
+            .putLong("update_last_check", 0L)
+            .remove("update_ignored_version")
+            .apply()
+        _updateChannel.value = normalized
+        _updateLastCheck.value = 0L
+        _updateIgnoredVersion.value = ""
+    }
+
+    fun getUpdateChannel(): String =
+        if (prefs.getString("update_channel", "stable") == "beta") "beta" else "stable"
+
+    private val _updateChannel = MutableStateFlow(getUpdateChannel())
+
+    /** 更新通道的单一真源（见 [io.github.amatsukiichika.iwaram.data.UpdateChannel]）。 */
+    val updateChannel: StateFlow<String> = _updateChannel.asStateFlow()
+
+    /** 是否按 [getUpdateInterval] 在打开 App 时自动检查更新。 */
+    fun setUpdateAutoCheck(value: Boolean) {
+        prefs.edit().putBoolean("update_auto_check", value).apply()
+        _updateAutoCheck.value = value
+    }
+
+    fun getUpdateAutoCheck(): Boolean = prefs.getBoolean("update_auto_check", true)
+
+    private val _updateAutoCheck = MutableStateFlow(getUpdateAutoCheck())
+
+    /** 自动检查开关的单一真源。 */
+    val updateAutoCheck: StateFlow<Boolean> = _updateAutoCheck.asStateFlow()
+
+    /** 自动检查频率：each_start / daily / weekly（缺省每周）。 */
+    fun setUpdateInterval(value: String) {
+        val normalized = value.takeIf { it in setOf("each_start", "daily", "weekly") } ?: "weekly"
+        prefs.edit().putString("update_interval", normalized).apply()
+        _updateInterval.value = normalized
+    }
+
+    fun getUpdateInterval(): String =
+        prefs.getString("update_interval", "weekly")?.takeIf { it in setOf("each_start", "daily", "weekly") } ?: "weekly"
+
+    private val _updateInterval = MutableStateFlow(getUpdateInterval())
+
+    /** 自动检查频率的单一真源。 */
+    val updateInterval: StateFlow<String> = _updateInterval.asStateFlow()
+
+    /** 上次自动检查的时间戳（毫秒）；0 = 从未检查。 */
+    fun setUpdateLastCheck(value: Long) {
+        prefs.edit().putLong("update_last_check", value).apply()
+        _updateLastCheck.value = value
+    }
+
+    fun getUpdateLastCheck(): Long = prefs.getLong("update_last_check", 0L)
+
+    private val _updateLastCheck = MutableStateFlow(getUpdateLastCheck())
+
+    /** 上次自动检查时间的单一真源。 */
+    val updateLastCheck: StateFlow<Long> = _updateLastCheck.asStateFlow()
+
+    /** 自动检查要忽略的版本（tag 或 versionName）；空串 = 不忽略。手动检查不受它影响。 */
+    fun setUpdateIgnoredVersion(value: String?) {
+        if (value.isNullOrBlank()) prefs.edit().remove("update_ignored_version").apply()
+        else prefs.edit().putString("update_ignored_version", value).apply()
+        _updateIgnoredVersion.value = value.orEmpty()
+    }
+
+    fun getUpdateIgnoredVersion(): String? =
+        prefs.getString("update_ignored_version", null)?.takeIf { it.isNotBlank() }
+
+    private val _updateIgnoredVersion = MutableStateFlow(getUpdateIgnoredVersion().orEmpty())
+
+    /** 被忽略版本的单一真源（空串 = 未忽略）。 */
+    val updateIgnoredVersion: StateFlow<String> = _updateIgnoredVersion.asStateFlow()
+
     /* ---------- 界面语言（简体中文 / English，见 i18n.AppLanguage） ---------- */
 
     /**
@@ -564,5 +660,7 @@ data class PendingDownload(
     val docUri: String? = null,
     val updatedAt: Long,
     /** "queued" / "paused" / "failed" / "running"（与 DownloadState.STATE_* 同值字符串）。 */
-    val state: String = "paused"
+    val state: String = "paused",
+    /** 本轮已自动重试次数；旧记录缺省 0，无需数据迁移。 */
+    val attempts: Int = 0
 )

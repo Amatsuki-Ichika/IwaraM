@@ -54,7 +54,9 @@ import androidx.compose.ui.unit.dp
 import io.github.amatsukiichika.iwaram.i18n.AppLanguage
 import io.github.amatsukiichika.iwaram.i18n.LanguageMode
 import io.github.amatsukiichika.iwaram.i18n.tr
+import io.github.amatsukiichika.iwaram.ui.settings.UpdateViewModel
 import io.github.amatsukiichika.iwaram.ui.browse.coverTargetFor
+import io.github.amatsukiichika.iwaram.ui.browse.layerStillOnScreen
 import io.github.amatsukiichika.iwaram.ui.components.AppEntryCard
 import kotlin.math.roundToInt
 import kotlinx.coroutines.CancellationException
@@ -99,6 +101,8 @@ internal enum class SettingsCategory(
 @Composable
 fun SettingsScreen(
     vm: VideoViewModel,
+    /** 应用内更新状态机：设置页「关于」分类的内容与更新弹窗共用。 */
+    updateVm: UpdateViewModel,
     onBack: () -> Unit,
     onPickFolder: () -> Unit,
     onPickDownloadFolder: () -> Unit,
@@ -144,7 +148,26 @@ fun SettingsScreen(
             derivedStateOf { pageAnimating || backProgress > 0f || coverAnim.value > 0f }
         }.value
     )
-    PredictiveBackHandler(enabled = backEnabled) { flow ->
+    // ---- 二级分类子页 ----
+    // 用 plain remember（与 showDiagnostics 同理）：关掉设置页 = 状态丢弃，重开回主页。
+    var openCategory by remember { mutableStateOf<SettingsCategory?>(null) }
+    // 退场动画期间 openCategory 已是 null，内容改用 lastCategory 渲染（SideEffect 回写，无组合期写入）。
+    var lastCategory by remember { mutableStateOf<SettingsCategory?>(null) }
+    SideEffect { if (openCategory != null) lastCategory = openCategory }
+    val subVisible = remember { MutableTransitionState(false) }
+    SideEffect { subVisible.targetState = openCategory != null }
+
+    // 父页与二级子页的返回**互斥**：子页在屏时返回只归子页（父页不注册）；
+    //   子页退场那 320ms 里 openCategory 已是 null 而子页仍在屏 —— 父页此时注册但要吞掉这次返回，
+    //   否则「刚关掉子页又立刻返回」会连续退两层，把整个设置页关掉。
+    PredictiveBackHandler(
+        enabled = backEnabled && openCategory == null
+    ) { flow ->
+        if (layerStillOnScreen(openCategory != null, subVisible.currentState, subVisible.targetState)) {
+            // 子页还在退场：收下这次手势（不跟手、不退出），等它滑完。
+            flow.collect { }
+            return@PredictiveBackHandler
+        }
         // 每次手势一个新实例：对 progress 事件做时间差分，估算松手瞬间的跟手速度。
         val velocity = BackVelocityTracker()
         try {
@@ -165,14 +188,6 @@ fun SettingsScreen(
         }
     }
 
-    // ---- 二级分类子页 ----
-    // 用 plain remember（与 showDiagnostics 同理）：关掉设置页 = 状态丢弃，重开回主页。
-    var openCategory by remember { mutableStateOf<SettingsCategory?>(null) }
-    // 退场动画期间 openCategory 已是 null，内容改用 lastCategory 渲染（SideEffect 回写，无组合期写入）。
-    var lastCategory by remember { mutableStateOf<SettingsCategory?>(null) }
-    SideEffect { if (openCategory != null) lastCategory = openCategory }
-    val subVisible = remember { MutableTransitionState(false) }
-    SideEffect { subVisible.targetState = openCategory != null }
     // 主页被子页盖住 → 让位（同 CardStack 规格：左移 + 压暗，320ms 同速）。
     // 子页返回手势联动：子页拉住返回时主页实时回位（c = 1 − p）+ 变亮，语义与覆盖层栈的
     // gestureCover 一致（复用 [coverTargetFor]：手势中 snap、松手 tween 320ms）。
@@ -285,6 +300,7 @@ fun SettingsScreen(
                     CategoryPage(
                         category = category,
                         vm = vm,
+                        updateVm = updateVm,
                         onBack = { openCategory = null },
                         onPickFolder = onPickFolder,
                         onPickDownloadFolder = onPickDownloadFolder,

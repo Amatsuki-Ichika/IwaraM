@@ -25,6 +25,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -97,6 +98,10 @@ fun IwaraExploreScreen(
         val showSearchResults = activeTags.isNotEmpty() ||
             (searchMode && searchQuery.isNotBlank())
         val tab = if (showSearchResults) ExploreTab(-1, searchQuery) else ExploreTab(segment.ordinal, null)
+        // 内层分段（关注/视频/图片/帖子/搜索）各自保存状态：切走再切回时恢复滚动位置，
+        //   而不是回到顶部重来。key 取分段身份；搜索档额外带上 query（换词转场时新旧两档会
+        //   同时组合，同 key 会互相覆盖保存状态）。
+        val saveableStateHolder = rememberSaveableStateHolder()
         AnimatedContent(
             targetState = tab,
             modifier = Modifier
@@ -105,12 +110,19 @@ fun IwaraExploreScreen(
             transitionSpec = horizontalSlideSpec { target, initial -> if (target.index >= initial.index) 1 else -1 },
             label = "exploreContent"
         ) { t ->
-            when (t.index) {
-                -1 -> SearchResultsGrid(cvm, t.query.orEmpty(), actions, bottomPadding, topPadding = topPadding, backdrop = topBackdrop)
-                Segment.SUBSCRIBED.ordinal -> VideosGrid(cvm, actions, subscribedOnly = true, bottomPadding, topPadding = topPadding, backdrop = topBackdrop)
-                Segment.VIDEOS.ordinal -> VideosGrid(cvm, actions, subscribedOnly = false, bottomPadding, topPadding = topPadding, backdrop = topBackdrop)
-                Segment.IMAGES.ordinal -> ImagesGrid(cvm, actions, bottomPadding, topPadding = topPadding, backdrop = topBackdrop)
-                else -> PostsList(cvm, actions, bottomPadding, topPadding = topPadding, backdrop = topBackdrop)
+            // 分段内容各自进 SaveableStateProvider：切走的那个分段保留滚动位置/列表状态，
+            //   切回来时恢复（而不是从顶部重来）。搜索档的 key 带上 query —— 两次搜索同时在
+            //   转场里组合（新旧各一份）时，key 不能相同，否则旧的那份会在退场时覆盖新档状态。
+            saveableStateHolder.SaveableStateProvider(
+                key = if (t.index == -1) "search:" + t.query.orEmpty() else "segment:" + t.index
+            ) {
+                when (t.index) {
+                    -1 -> SearchResultsGrid(cvm, t.query.orEmpty(), actions, bottomPadding, topPadding = topPadding, backdrop = topBackdrop)
+                    Segment.SUBSCRIBED.ordinal -> VideosGrid(cvm, actions, subscribedOnly = true, bottomPadding, topPadding = topPadding, backdrop = topBackdrop)
+                    Segment.VIDEOS.ordinal -> VideosGrid(cvm, actions, subscribedOnly = false, bottomPadding, topPadding = topPadding, backdrop = topBackdrop)
+                    Segment.IMAGES.ordinal -> ImagesGrid(cvm, actions, bottomPadding, topPadding = topPadding, backdrop = topBackdrop)
+                    else -> PostsList(cvm, actions, bottomPadding, topPadding = topPadding, backdrop = topBackdrop)
+                }
             }
         }
         }   // Box(内容区 + 背景源)
@@ -272,10 +284,16 @@ fun VideosGrid(
     }
     // key 里带上 `session.checking` —— 冷启动时"已登录但凭证还没换新"窗口里拉到的订阅数据
     // 不可信（见 IwaraClientViewModel.loadMoreSubscribed 的说明）；会话就绪（checking 翻 false）
-    // 时这里会重跑一次，配合 VM 里的 `subscribedTrusted` 自动从第 0 页重拉，无需手动刷新。
+    // 时这里会重跑，但列表已有内容就直接跳过（见下）。不可信数据由 VM 的 `subscribedTrusted`
+    // 在用户下一次翻页/重试时自愈：那时 load 会强制从第 0 页重拉。
     LaunchedEffect(subscribedOnly, session.loggedIn, session.checking) {
-        val empty = state.items.isEmpty()
-        if (subscribedOnly) cvm.loadMoreSubscribed(force = empty) else cvm.loadMoreVideos(force = empty)
+        // 内层分段用 SaveableStateProvider 保留滚动位置：切回来时列表非空，这里不能再补拉一页。
+        //   FeedPager.load(force = false) 只挡 loading/endReached，分页器被重置后挡不住，
+        //   白拉一页还会把恢复的滚动位置顶掉。只有空列表才首拉。
+        if (state.items.isNotEmpty()) return@LaunchedEffect
+        // 冷启动"已登录但凭证还没换新"窗口里拉到的订阅数据不可信；此时列表为空，
+        //   force = true 让 VM 从第 0 页重拉（见 IwaraClientViewModel.loadMoreSubscribed 的说明）。
+        if (subscribedOnly) cvm.loadMoreSubscribed(force = true) else cvm.loadMoreVideos(force = true)
     }
     // 全局筛选器在渲染前过最后一道 —— 过滤实现收在 InfiniteGrid 内部
     // （所有在线列表共用一处，调用处只声明"怎么取键"）。

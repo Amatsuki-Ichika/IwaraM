@@ -7,7 +7,6 @@ import android.content.pm.ActivityInfo
 import android.net.Uri
 import android.util.Log
 import androidx.activity.BackEventCompat
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -816,8 +815,10 @@ fun PlayerScreen(
         }
     }
 
-    // 全屏时：返回仅退出全屏。
-    BackHandler(enabled = isFullscreen) {
+    // 全屏时：返回仅退出全屏（不跟手，手势完成才退出）。改走预测返回通道，
+    //   与页面级返回共用一套回调，避免淡出全屏那一刻两套返回机制抢同一个手势。
+    PredictiveBackHandler(enabled = isFullscreen) { flow: Flow<BackEventCompat> ->
+        flow.collect { }
         isFullscreen = false
     }
 

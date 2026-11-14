@@ -263,12 +263,14 @@ fun <T> InfiniteGrid(
             }
         }
         // 信息流无分类：连续比例滚动条 + 回到顶部
+        // 轨道顶部落在悬浮顶栏下沿：外层 fillMaxHeight 决定命中/绘制区域高度，
+        //   padding 再把可见可拖的区域整体下移 topPadding（页面下发），滚动条不会穿进顶栏。
         FastScrollbarBasic(
             state = gridState,
             modifier = Modifier
                 .align(Alignment.CenterEnd)
                 .fillMaxHeight()
-                .padding(horizontal = 2.dp)
+                .padding(top = topPadding, end = 2.dp)
         )
         val showTop by remember {
             derivedStateOf { gridState.firstVisibleItemIndex > 0 || gridState.firstVisibleItemScrollOffset > 0 }

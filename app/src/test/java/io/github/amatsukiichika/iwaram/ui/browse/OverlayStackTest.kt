@@ -265,4 +265,122 @@ class OverlayStackTest {
         val stack3 = listOf<IwaraOverlay>(IwaraOverlay.Favorites, inStack, IwaraOverlay.TagVideos("t1"))
         assertEquals(1, profileRevertIndex(stack3, fromPlayer))
     }
+
+    /* ---------- 返回键归属：引导 > 面板 > 页面（序号最大）> ROOT ---------- */
+
+    private fun backOwnerOf(
+        onboardingVisible: Boolean = false,
+        sheetOpen: Boolean = false,
+        overlaySeq: Long? = null,
+        overlayOnScreen: Boolean = false,
+        settingsSeq: Long? = null,
+        settingsOnScreen: Boolean = false,
+        playerSeq: Long? = null,
+        playerOnScreen: Boolean = false
+    ): BackOwner = backOwner(
+        onboardingVisible = onboardingVisible,
+        sheetOpen = sheetOpen,
+        overlaySeq = overlaySeq,
+        overlayOnScreen = overlayOnScreen,
+        settingsSeq = settingsSeq,
+        settingsOnScreen = settingsOnScreen,
+        playerSeq = playerSeq,
+        playerOnScreen = playerOnScreen
+    )
+
+    @Test
+    fun `nothing open hands back to the system`() {
+        assertEquals(BackOwner.ROOT, backOwnerOf())
+    }
+
+    @Test
+    fun `onboarding owns back above everything else`() {
+        assertEquals(
+            BackOwner.ONBOARDING,
+            backOwnerOf(
+                onboardingVisible = true,
+                sheetOpen = true,
+                overlaySeq = 3L, overlayOnScreen = true,
+                settingsSeq = 5L, settingsOnScreen = true,
+                playerSeq = 9L, playerOnScreen = true
+            )
+        )
+    }
+
+    @Test
+    fun `an open action sheet owns back before any page`() {
+        // 面板是独立窗口、压在所有页面之上：下面的页面开着也轮不到它们。
+        assertEquals(
+            BackOwner.SHEET,
+            backOwnerOf(
+                sheetOpen = true,
+                overlaySeq = 3L, overlayOnScreen = true,
+                settingsSeq = 5L, settingsOnScreen = true,
+                playerSeq = 9L, playerOnScreen = true
+            )
+        )
+    }
+
+    @Test
+    fun `each lone page owns back`() {
+        assertEquals(BackOwner.OVERLAY, backOwnerOf(overlaySeq = 3L, overlayOnScreen = true))
+        assertEquals(BackOwner.SETTINGS, backOwnerOf(settingsSeq = 3L, settingsOnScreen = true))
+        assertEquals(BackOwner.PLAYER, backOwnerOf(playerSeq = 3L, playerOnScreen = true))
+    }
+
+    @Test
+    fun `the page with the highest seq owns back`() {
+        // 覆盖层栈页码更大 ⇒ 它盖在设置页上，先关它。
+        assertEquals(
+            BackOwner.OVERLAY,
+            backOwnerOf(overlaySeq = 7L, overlayOnScreen = true, settingsSeq = 5L, settingsOnScreen = true)
+        )
+        // 反过来：设置页序号更大 ⇒ 先关设置页。
+        assertEquals(
+            BackOwner.SETTINGS,
+            backOwnerOf(overlaySeq = 5L, overlayOnScreen = true, settingsSeq = 7L, settingsOnScreen = true)
+        )
+    }
+
+    @Test
+    fun `the player opened after settings owns back`() {
+        // 播放页晚于设置页打开（序号更大）⇒ 返回键先关播放页，再关设置页。
+        assertEquals(
+            BackOwner.PLAYER,
+            backOwnerOf(settingsSeq = 4L, settingsOnScreen = true, playerSeq = 9L, playerOnScreen = true)
+        )
+    }
+
+    @Test
+    fun `a page that is not on screen is ignored`() {
+        // 覆盖层栈已退场（onScreen = false）但它旧序号最大 ⇒ 跳过它，交给在屏的设置页。
+        assertEquals(
+            BackOwner.SETTINGS,
+            backOwnerOf(overlaySeq = 9L, overlayOnScreen = false, settingsSeq = 3L, settingsOnScreen = true)
+        )
+        // 全都不在屏上 ⇒ 交给系统。
+        assertEquals(
+            BackOwner.ROOT,
+            backOwnerOf(
+                overlaySeq = 9L, overlayOnScreen = false,
+                settingsSeq = 7L, settingsOnScreen = false,
+                playerSeq = 5L, playerOnScreen = false
+            )
+        )
+    }
+
+    @Test
+    fun `seq zero still counts as an open layer`() {
+        // 存在性只看 null：序号 0 是合法序号，不能被当成"没打开"。
+        assertEquals(BackOwner.OVERLAY, backOwnerOf(overlaySeq = 0L, overlayOnScreen = true))
+        assertEquals(BackOwner.SETTINGS, backOwnerOf(settingsSeq = 0L, settingsOnScreen = true))
+        assertEquals(BackOwner.PLAYER, backOwnerOf(playerSeq = 0L, playerOnScreen = true))
+    }
+
+    @Test
+    fun `a missing seq is not an open layer`() {
+        // onScreen 亮着但序号是 null（层还没有序号）⇒ 不算存在。
+        assertEquals(BackOwner.ROOT, backOwnerOf(overlayOnScreen = true, settingsOnScreen = true, playerOnScreen = true))
+    }
 }
+

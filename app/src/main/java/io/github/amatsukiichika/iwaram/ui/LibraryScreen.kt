@@ -230,7 +230,12 @@ fun LibraryScreen(
                             )
                             // 换在线同款连续滚动条（拖动实时滚）+ 居中分节气泡；
                             //   左右 12dp 对称后滚动条悬浮右缘，不再占位。
-                            FastScrollbarBasicWithBubble(allState, markers, Modifier.fillMaxSize())
+                            //   轨道顶部让出悬浮顶栏：节点仍铺满，可见/可拖区域从顶栏下沿开始。
+                            FastScrollbarBasicWithBubble(
+                                allState,
+                                markers,
+                                Modifier.fillMaxSize().padding(top = topPadding)
+                            )
                         }
                     }
                     LibraryMode.FOLDER -> {
@@ -245,7 +250,8 @@ fun LibraryScreen(
                                 markers = markers,
                                 currentIndex = { firstVisible },
                                 onScrollToIndex = { idx -> pageScope.launch { listState.scrollToItem(idx) } },
-                                modifier = Modifier.fillMaxSize()
+                                // 顶部让出悬浮顶栏，右缘留 2dp（与连续滚动条对齐）。
+                                modifier = Modifier.fillMaxSize().padding(top = topPadding, end = 2.dp)
                             )
                         }
                     }
@@ -261,7 +267,8 @@ fun LibraryScreen(
                                 markers = markers,
                                 currentIndex = { firstVisible },
                                 onScrollToIndex = { idx -> pageScope.launch { listState.scrollToItem(idx) } },
-                                modifier = Modifier.fillMaxSize()
+                                // 顶部让出悬浮顶栏，右缘留 2dp（与连续滚动条对齐）。
+                                modifier = Modifier.fillMaxSize().padding(top = topPadding, end = 2.dp)
                             )
                         }
                     }
@@ -272,8 +279,12 @@ fun LibraryScreen(
                         Box(Modifier.fillMaxSize()) {
                             // 背景源已提升到页面级（见「全部」视图的说明）。
                             TimeList(state.timeBuckets, vm::selectTime, listState, bottomPadding, topPadding)
-                            // 连续滚动条 + 居中分节气泡（月份），同「全部」视图。
-                            FastScrollbarBasicWithBubble(listState, markers, Modifier.fillMaxSize())
+                            // 连续滚动条 + 居中分节气泡（月份），同「全部」视图；轨道顶部让出悬浮顶栏。
+                            FastScrollbarBasicWithBubble(
+                                listState,
+                                markers,
+                                Modifier.fillMaxSize().padding(top = topPadding)
+                            )
                         }
                     }
                     LibraryMode.TAG -> TagCloud(state.tags, state.selectedTags, vm::selectTag, bottomPadding, topPadding)

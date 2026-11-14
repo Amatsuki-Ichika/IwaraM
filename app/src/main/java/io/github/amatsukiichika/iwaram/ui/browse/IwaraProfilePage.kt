@@ -101,6 +101,11 @@ import kotlinx.coroutines.withContext
  * 上滑位移回涨期间只有内容动 → 内容到顶才把作者信息带回来。
  * 整页零形变：`LocalOverscrollConfiguration provides null` 关掉顶部拉伸（见内容区注释）。
  *
+ * 作者标识统一用 [iwaraProfileTargetOf] 归一（[IwaraProfileTarget]）：handle 用来解析资料、
+ * UUID 用来拉内容；「关注」把 handle 塞进 userId、username 为空等零散入口都收敛成同一个 target，
+ * 不会再发出必然失败的 `/profile/{UUID}` / `?user=<handle>` 请求。target 不可用（两者皆无）时
+ * 一个在线请求都不发，页内直接占位。
+ *
  * 同一个页面既服务在线作者（有 UUID），也服务纯本地作者（本地库里没匹配到 iwara 的「未指定」桶），
  * 后者不发网络请求即可进入。「视频」栏下本地条目首帧就渲染（零网络、点开即本地播放），
  * 在线数据返回后按 `iwaraId` 去重、其余以 `animateItem()` 淡入补在后面。
@@ -127,10 +132,11 @@ internal val SOURCE_FILTERS = listOf(
 /**
  * 作者页「在线内容能不能用」的状态。
  *
- * - [LOADING]：只有 handle、资料还没回来 → 转圈；
+ * - [LOADING]：归一 target 需要先解析资料（有 handle 没 UUID）、资料还没回来 → 转圈；
  * - [READY]：拿到 UUID → 正常拉取；
- * - [FAILED]：解析失败 → 显示"在线内容加载失败 · 重试"，不再无限转圈；
- * - [UNAVAILABLE]：没有 handle 也没有 UUID（纯本地作者）→ "需要联网才能查看"。
+ * - [FAILED]：解析失败（非致命）→ 显示"在线内容加载失败 · 重试"，不再无限转圈；
+ * - [UNAVAILABLE]：target 没有任何可用标识（纯本地「未指定」桶），或资料回来却没带 UUID
+ *   → 一个在线请求都不发，页内占位（信息不完整 / 无法获取在线内容）。
  *
  * 关键：资料"还没解析完"必须与"解析失败"区分开 —— 否则解析失败后会永远停在转圈。
  */
@@ -176,6 +182,20 @@ fun ProfileOverlay(
     /** 头部计数的兜底来源（`/profile` 不返回计数时用各分页端点的 `count`）。 */
     var fetchedCounts by remember { mutableStateOf(IwaraRelationCounts()) }
 
+    // ---- 归一作者标识（同一作者从关注、信息流、播放页进入都得到同一个 target）----
+    // 入口参数本来是零散拼的：username 可能是 handle 也可能是空串，userId 可能是 UUID
+    //   也可能塞的是 handle（关注入口就有这种形态）。旧逻辑会拿 handle 当 UUID 拉内容（恒空）
+    //   或对空 handle 打请求（必败）。归一后只认 target：handle 解析资料、uid 拉内容。
+    val target = remember(username, userId) { iwaraProfileTargetOf(username, userId) }
+    /** P1 判定：target 连一个可用于请求的标识都没有（致命）→ 不发在线请求、页内占位而不是重试。 */
+    val targetFatal = profileFailureIsFatal(target)
+    /** 页内占位文案：target 不可用 = 信息不完整；资料回来却没 UUID = 拿不到在线内容。 */
+    val unavailableText = if (targetFatal) {
+        tr("该用户信息不完整", "User information is incomplete")
+    } else {
+        tr("无法获取该作者的在线内容", "Can't load this author's online content")
+    }
+
     // ---- 本地视频：订阅本地库全量列表 → 按**键集合**过滤（固定"发布最新 → 最旧"）----
     // 本地分组键（VideoEntity.authorId）存的是 handle（匹配时取 resp.user?.username），
     //   而在线入口可能传 UUID —— 单键匹配会失配。改用键集合：入口键 + handle + UUID 任一命中，
@@ -204,7 +224,9 @@ fun ProfileOverlay(
         }
     }
 
-    val uid = profile?.uid ?: userId
+    // 内容 / 关注 / 关系键只认 UUID（target.uid 只收真 UUID）：`?user=<handle>` 恒空，
+    //   旧逻辑在"userId 里是 handle"的入口会把内容请求打空。
+    val uid = profile?.uid ?: target.uid
     val followingState = uid?.let { cvm.followStates[it] } ?: false
     /** 「未指定」桶：本地没匹配到 iwara，不存在在线内容（提示文案与非未匹配情况不同）。 */
     val unmatchedLocal = localAuthorKey == VideoViewModel.UNKNOWN_AUTHOR_KEY
@@ -251,8 +273,8 @@ fun ProfileOverlay(
     // 关注请求的忙碌态：大按钮与精简顶栏的小按钮共用同一条 toggle 通路，任一处发起两处都转圈。
     var followBusy by remember { mutableStateOf(false) }
     val followAccount = profile?.asAccount() ?: IwaraAccount(
-        id = userId,
-        username = username.takeIf { it.isNotBlank() },
+        id = uid ?: userId,
+        username = profile?.handle ?: target.handle,
         name = displayName ?: localAuthorName
     )
 
@@ -311,6 +333,15 @@ fun ProfileOverlay(
         }
     }
 
+    /**
+     * 资料拉取失败后的重试：先清掉错误（页面回到"加载中"骨架），再自增重试键重发一次资料请求。
+     * 致命失败（target 没有任何可用标识）不调用它 —— 重试也构造不出请求。
+     */
+    fun retryProfile() {
+        profileError = null
+        profileRetry += 1
+    }
+
     // 作者信息（**不含**分段栏/筛选 —— 那两个在吸顶块里，见 ProfileStickyBar）。
     // 作为通栏首 item 放进各分段网格；horizontal padding 缩到 4dp，加上网格的 12dp contentPadding
     // 正好回到原 16dp 观感；顶部 12dp 由 measuredHeader 补（网格 contentPadding 顶部已归零，
@@ -318,6 +349,10 @@ fun ProfileOverlay(
     val authorHeader: @Composable () -> Unit = {
         // 「主页 ↗」入口的浏览器跳转用。
         val browserContext = androidx.compose.ui.platform.LocalContext.current
+        // 归一后的展示名 / handle：资料还没回来时用入口兜底，最后才是「未知作者」。
+        val display = profile?.displayName ?: displayName ?: localAuthorName
+            ?: target.handle ?: tr("未知作者", "Unknown author")
+        val handle = profile?.handle ?: target.handle
         Column {
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 8.dp),
@@ -327,15 +362,14 @@ fun ProfileOverlay(
                 Spacer(Modifier.size(14.dp))
                 Column(Modifier.weight(1f)) {
                     Text(
-                        profile?.displayName ?: displayName ?: localAuthorName
-                            ?: username.ifBlank { tr("未知作者", "Unknown author") },
+                        display,
                         style = MaterialTheme.typography.titleMedium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    (profile?.handle ?: username.takeIf { it.isNotBlank() })?.let { handle ->
+                    handle?.let { h ->
                         Text(
-                            "@$handle",
+                            "@$h",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
@@ -356,10 +390,10 @@ fun ProfileOverlay(
                 }
                 // 「主页 ↗」浏览器入口放在**作者页**头部右侧。
                 // 有 handle/username 才显示；本地作者（只有 localAuthorKey）没有个人页链接，不显示。
-                (profile?.handle ?: username.takeIf { it.isNotBlank() })?.let { handle ->
+                handle?.let { h ->
                     Spacer(Modifier.size(8.dp))
                     Surface(
-                        onClick = { openInBrowser(browserContext, "https://www.iwara.tv/profile/$handle") },
+                        onClick = { openInBrowser(browserContext, "https://www.iwara.tv/profile/$h") },
                         shape = androidx.compose.foundation.shape.RoundedCornerShape(50),
                         color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.14f),
                         contentColor = MaterialTheme.colorScheme.primary
@@ -442,10 +476,27 @@ fun ProfileOverlay(
                 )
             }
 
-            profileError?.let {
+            // 资料解析失败（非致命）：页内给错误 + 「重试」按钮，不能只留一行字让用户无路可走。
+            //   致命失败（target 没有任何可用标识）不提示错误，改由下面的「信息不完整」占位说明。
+            profileError?.takeIf { !targetFatal }?.let { err ->
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        debugAwareErrorText(err),
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.weight(1f)
+                    )
+                    TextButton(onClick = { retryProfile() }) { Text(tr("重试", "Retry")) }
+                }
+            }
+            // target 没有任何可用标识（纯本地「未指定」桶）：页内直接说明，不发请求、不给重试。
+            if (targetFatal) {
                 Text(
-                    debugAwareErrorText(it),
-                    color = MaterialTheme.colorScheme.error,
+                    unavailableText,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)
                 )
@@ -471,17 +522,33 @@ fun ProfileOverlay(
         }
     }
 
-    // 在线可用性（见 [OnlineState] 的说明）。
+    // ---- 连续滚动条（视频 / 图片 / 帖子三段共用）----
+    // 头是网格的通栏首项（作者信息 + 吸顶块等高占位）⇒ headerItemCount = 1；
+    //   头高 = 作者信息实测高 + 吸顶占位高（与首项逐像素一致，头滚出前后比例才连续）。
+    // 轨道顶部从吸顶药丸栏（本页的"悬浮搜索栏"）下沿开始，不穿过顶栏/药丸栏。
+    val scrollbarTopPaddingPx = stickyHeightPx
+    val scrollbarHeaderHeightPx: () -> Int = { headerHeightPx + stickyHeightPx }
+    val scrollbarLabel = profile?.displayName ?: displayName ?: localAuthorName ?: target.handle
+        ?: tr("作者主页", "Author profile")
+
+    // 在线可用性（见 [OnlineState] 的说明）。全部按归一 target 判断，不再看零散的 username/userId：
+    //   有 UUID → 直接可用；致命失败 / 资料回来仍没 UUID → 不可用；
+    //   有 handle 没 UUID（needsProfileLookup）→ 必须先解析资料；解析失败 → FAILED（给重试）。
     val onlineState = when {
         uid != null -> OnlineState.READY
-        username.isNotBlank() && profileError != null -> OnlineState.FAILED
-        username.isNotBlank() -> OnlineState.LOADING
+        targetFatal || profile != null -> OnlineState.UNAVAILABLE
+        profileError != null -> OnlineState.FAILED
+        target.needsProfileLookup -> OnlineState.LOADING
         else -> OnlineState.UNAVAILABLE
     }
 
     // ---- 作者页空白排查：关键节点记诊断日志（设置 › 开发者 › 诊断日志）----
     LaunchedEffect(Unit) {
-        DiagLog.log("Profile", "作者页组合：username=$username userId=$userId localKey=$localAuthorKey onlineState=$onlineState")
+        DiagLog.log(
+            "Profile",
+            "作者页组合：target(handle=${target.handle},uid=${target.uid},needsLookup=${target.needsProfileLookup}) " +
+                "localKey=$localAuthorKey onlineState=$onlineState"
+        )
     }
     LaunchedEffect(stickyHeightPx) {
         if (stickyHeightPx > 0) DiagLog.log("Profile", "吸顶块已量高 sticky=${stickyHeightPx}px → 网格门开")
@@ -505,12 +572,17 @@ fun ProfileOverlay(
     }
 
     // ---- 资料 → 首段 ----
-    // 有 handle 就走 /profile/{username}；只有 UUID（handle 缺失、或纯本地作者）时跳过解析，
-    // 各分段仍能用 UUID 正常拉取（header 用传入的 displayName / 本地作者名兜底）。
-    // [profileRetry] 进 key：解析失败后点"重试"会重新拉一次。
-    LaunchedEffect(username, userId, profileRetry) {
-        if (username.isBlank()) return@LaunchedEffect
-        cvm.loadProfile(username, scope = scope) { p, err ->
+    // 只解析 target.handle（关注/信息流/播放页各入口的零散参数已归一）；
+    //   只有 UUID 的 target 直接用 UUID 拉内容，不白发 /profile；不可用 target 一个请求都不发。
+    // [profileRetry] 进 key：解析失败后点「重试」清掉错误会重新拉一次。
+    LaunchedEffect(target, profileRetry) {
+        if (target.handle == null) {
+            // 纯 UUID / 不可用：不需要资料请求（P1 的 loadProfile 对这两种 target 也是直接回调 null）。
+            profile = null
+            profileError = null
+            return@LaunchedEffect
+        }
+        cvm.loadProfile(target, scope = scope) { p, err ->
             profile = p
             profileError = err
         }
@@ -539,7 +611,7 @@ fun ProfileOverlay(
         //   精简状态右上角不放小关注按钮 —— 作者信息块里已有一个大的，滚下去再冒一个纯属重复，
         //   actions 槽留空。
         val topName = profile?.displayName ?: displayName ?: localAuthorName
-            ?: username.ifBlank { tr("作者主页", "Author profile") }
+            ?: target.handle ?: tr("作者主页", "Author profile")
         OverlayTopBar(
             title = topName,
             onBack = onClose,
@@ -617,7 +689,11 @@ fun ProfileOverlay(
                         actions = actions,
                         onLoadMore = { loadVideos(force = false) },
                         onRetry = { loadVideos(force = true) },
-                        onRetryProfile = { profileRetry += 1 }
+                        onRetryProfile = { retryProfile() },
+                        scrollbarLabel = scrollbarLabel,
+                        scrollbarTopPaddingPx = scrollbarTopPaddingPx,
+                        scrollbarHeaderHeightPx = scrollbarHeaderHeightPx,
+                        unavailableText = unavailableText
                     )
 
                     ProfileSegment.IMAGES -> when (onlineState) {
@@ -629,7 +705,10 @@ fun ProfileOverlay(
                             header = headerItem,
                             onLoadMore = { loadImages(force = false) },
                             onRetry = { loadImages(force = true) },
-                            key = { it.id ?: it.hashCode().toString() }
+                            key = { it.id ?: it.hashCode().toString() },
+                            scrollbarEmptyLabel = scrollbarLabel,
+                            scrollbarTopPaddingPx = scrollbarTopPaddingPx,
+                            scrollbarHeaderHeightPx = scrollbarHeaderHeightPx
                         ) { image ->
                             ImageCardOnline(
                                 image = image,
@@ -642,10 +721,19 @@ fun ProfileOverlay(
                         //   否则分段栏一起消失，切到「图片」后就切不回「视频」。
                         OnlineState.LOADING -> HeaderWithHint(measuredHeader) { SegmentLoading() }
                         OnlineState.FAILED -> HeaderWithHint(measuredHeader) {
-                            OnlineFailedHint { profileRetry += 1 }
+                            OnlineFailedHint { retryProfile() }
                         }
                         OnlineState.UNAVAILABLE -> HeaderWithHint(measuredHeader) {
-                            OfflineHint(unmatchedLocal, offlineText = tr("需要联网才能查看", "Connect to the internet to view this"))
+                            if (targetFatal) {
+                                // target 没有任何可用标识：说明「信息不完整」，不发请求也就没有重试。
+                                TargetUnavailableHint(unmatchedLocal)
+                            } else {
+                                // 有 handle 但资料回来没带 UUID：拿不到在线内容，重试资料也没用。
+                                OfflineHint(
+                                    unmatchedLocal,
+                                    offlineText = tr("无法获取该作者的在线内容", "Can't load this author's online content")
+                                )
+                            }
                         }
                     }
 
@@ -658,7 +746,10 @@ fun ProfileOverlay(
                             header = headerItem,
                             onLoadMore = { loadPosts(force = false) },
                             onRetry = { loadPosts(force = true) },
-                            key = { it.id ?: it.hashCode().toString() }
+                            key = { it.id ?: it.hashCode().toString() },
+                            scrollbarEmptyLabel = scrollbarLabel,
+                            scrollbarTopPaddingPx = scrollbarTopPaddingPx,
+                            scrollbarHeaderHeightPx = scrollbarHeaderHeightPx
                         ) { post ->
                             PostCard(
                                 post = post,
@@ -669,10 +760,19 @@ fun ProfileOverlay(
                         // 非 READY 也保留头部（分段栏是吸顶块，恒在，同「图片」栏说明）。
                         OnlineState.LOADING -> HeaderWithHint(measuredHeader) { SegmentLoading() }
                         OnlineState.FAILED -> HeaderWithHint(measuredHeader) {
-                            OnlineFailedHint { profileRetry += 1 }
+                            OnlineFailedHint { retryProfile() }
                         }
                         OnlineState.UNAVAILABLE -> HeaderWithHint(measuredHeader) {
-                            OfflineHint(unmatchedLocal, offlineText = tr("需要联网才能查看", "Connect to the internet to view this"))
+                            if (targetFatal) {
+                                // target 没有任何可用标识：说明「信息不完整」，不发请求也就没有重试。
+                                TargetUnavailableHint(unmatchedLocal)
+                            } else {
+                                // 有 handle 但资料回来没带 UUID：拿不到在线内容，重试资料也没用。
+                                OfflineHint(
+                                    unmatchedLocal,
+                                    offlineText = tr("无法获取该作者的在线内容", "Can't load this author's online content")
+                                )
+                            }
                         }
                     }
                 }
@@ -757,7 +857,15 @@ private fun AuthorVideosGrid(
     onLoadMore: () -> Unit,
     onRetry: () -> Unit,
     /** 解析资料失败后的重试。 */
-    onRetryProfile: () -> Unit
+    onRetryProfile: () -> Unit,
+    /** 连续滚动条：拖动气泡文案（作者名）；null = 不画。 */
+    scrollbarLabel: String?,
+    /** 滚动条轨道顶部下沿（吸顶药丸栏实测高，px）。 */
+    scrollbarTopPaddingPx: Int,
+    /** 通栏首项（作者信息 + 吸顶占位）总高（px），滚动条按它折算头高。 */
+    scrollbarHeaderHeightPx: () -> Int,
+    /** target 不可用（没有任何可用标识）时的占位文案。 */
+    unavailableText: String
 ) {
     val onlineReady = onlineState == OnlineState.READY
 
@@ -854,8 +962,8 @@ private fun AuthorVideosGrid(
                                 onlineState == OnlineState.LOADING -> SegmentLoading()
                                 onlineState == OnlineState.FAILED -> OnlineFailedHint(onRetryProfile)
                                 !onlineReady -> Text(
-                                    // 纯本地作者（没有 UUID）→ 不存在在线内容，别显示"重试"。
-                                    tr("暂无本地视频", "No local videos yet"),
+                                    // target 不可用（没有 UUID / 没有 handle）→ 不存在在线内容，别显示"重试"。
+                                    unavailableText,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 else -> SegmentPlaceholder(state, tr("暂无视频", "No videos yet"), onRetry)
@@ -908,7 +1016,15 @@ private fun AuthorVideosGrid(
             }
         }
 
-        // 作者页只保留回到顶部按钮，不做比例滚动条。
+        // 连续滚动条：轨道顶部从吸顶药丸栏（悬浮搜索栏）下沿开始，头按通栏首项折算；
+        //   回到顶部按钮在它左下方（end=24dp），两者不重叠。
+        ProfileGridScrollbar(
+            state = gridState,
+            topPaddingPx = scrollbarTopPaddingPx,
+            headerHeightPx = scrollbarHeaderHeightPx,
+            emptyLabel = scrollbarLabel,
+            modifier = Modifier.align(Alignment.CenterEnd)
+        )
         ScrollToTopButton(
             visible = showTop,
             onClick = { scope.launch { gridState.animateScrollToTop() } },
