@@ -12,6 +12,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -37,6 +38,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -614,8 +616,10 @@ private fun LazyListState.seekFor(
 /**
  * LazyGrid 版基础滚动条：进度 / 拇指长度 / 跳转目标全部由 [ScrollGeometry] 的纯函数从 [state] 派生。
  *
- * 拖动走**像素增量滚动**：拖动中只记录上一帧的比例，新比例到来时用 [spanPx] + [scrollDeltaPx] 算出
- * 这一帧该滚多少像素，交给单协程队列用 [scrollBy] 消费（新目标顶掉旧目标），列表跟手且不会堆积协程。
+ * 拖动走**像素增量滚动**：拖动中只记录上一帧的比例，新比例到来时按按下时的比例尺换成像素。
+ * 同一帧内的多份增量由 [FrameDeltaBatch] 合并后只派发一次 dispatchRawDelta（高采样屏一帧会来
+ * 好几个 pointer 事件）；按下第一帧先用一次 suspend scrollBy(0f) 抢占滚动 mutex，取消仍在跑的
+ * 惯性 fling / 点轨道触发的 scrollToItem —— 否则两股位移叠加，拖动会一顿一顿。
  *
  * @param headerItemCount 通栏头占几个条目（通常 1；0 = 没有通栏头）
  * @param headerHeightPx  通栏头实测高度（px；调用方用 onSizeChanged 量）。0/未量到 = 按无头处理
@@ -641,6 +645,10 @@ fun FastScrollbarBasic(
     val scope = rememberCoroutineScope()
     // 拖动用的像素比例尺（按下时采一次几何快照）。
     val dragScale = remember { DragPixelScale() }
+    // 拖动增量批量器：同一帧内的多份增量合并成一次 dispatchRawDelta。
+    val deltaBatch = remember { FrameDeltaBatch() }
+    // 本轮拖动是否已抢占过滚动 mutex（见 onDragProgress）。
+    val dragStarted = remember { booleanArrayOf(false) }
     // 拇指长度防闪烁：几何瞬空（visibleItemsInfo 短暂为空）时**保持上一帧长度**，
     //   不回退满格（否则拖动时实心部分会闪长闪短）；小幅变化被死区吸收。
     //   持有器是普通数组，只在绘制相位读写，不触发重组/重绘循环。
@@ -670,14 +678,34 @@ fun FastScrollbarBasic(
                 scope.launch { state.scrollToItem(index, offsetPx) }
             }
         },
-        // 拖动：把"手指比例增量"按按下时的比例尺换成像素，**同步**派发（dispatchRawDelta）。
-        //   不走 suspend 的 scrollBy：每帧 launch/取消协程会丢增量 ⇒ 拖动一顿一顿。
+        // 拖动：把"手指比例增量"按按下时的比例尺换成像素，同一帧只派发一次。
+        //   不走 suspend 的 scrollBy：逐帧 launch/取消协程会丢增量 ⇒ 拖动一顿一顿；
+        //   但每份增量都同步 dispatchRawDelta 又会让一帧内做多次滚动布局，所以先用
+        //   FrameDeltaBatch 合并，等下一帧开始再一次性派发（列表仍然逐帧跟手）。
         onDragFractionDelta = { fractionDelta ->
             val px = fractionDelta * dragScale.resolve { geometry() }
-            if (px.isFinite() && abs(px) > 0.01f) state.dispatchRawDelta(px)
+            if (px.isFinite() && abs(px) > 0.01f && deltaBatch.add(px)) {
+                scope.launch {
+                    withFrameNanos { }
+                    val delta = deltaBatch.drain()
+                    if (delta.isFinite() && delta != 0f) state.dispatchRawDelta(delta)
+                }
+            }
         },
         onDragProgress = { f ->
-            if (f == null) dragScale.reset()  // 松手/取消：下次按下重新采快照
+            if (f == null) {
+                dragScale.reset()  // 松手/取消：下次按下重新采快照
+                // 把还没派发的最后一小段补上（不丢尾巴），批量器归零。
+                val rest = deltaBatch.drain()
+                if (rest.isFinite() && rest != 0f) state.dispatchRawDelta(rest)
+                dragStarted[0] = false
+            } else if (!dragStarted[0]) {
+                // 按下第一帧：用 suspend scrollBy(0f) 抢 mutex，取消在途的惯性 fling /
+                //   点轨道触发的 scrollToItem 动画。dispatchRawDelta 不经过 mutatorMutex，
+                //   不取消的话两股位移叠加会让页面一顿一顿/跳。
+                dragStarted[0] = true
+                scope.launch { state.scrollBy(0f) }
+            }
             onDraggingChange?.invoke(f != null)
             onDragProgress?.invoke(f)
         },
@@ -704,6 +732,8 @@ fun FastScrollbarBasic(
     }
     val scope = rememberCoroutineScope()
     val dragScale = remember { DragPixelScale() }
+    val deltaBatch = remember { FrameDeltaBatch() }
+    val dragStarted = remember { booleanArrayOf(false) }
     // 防闪烁持有器，同 LazyGrid 版（条目高度可变，几何按可见数计，抖动全靠"保持上一帧 + 死区"吸收）。
     val lastSpan = remember { floatArrayOf(1f) }
     fun geometry(): ScrollGeometry? = state.scrollbarGeometry(headerItemCount, headerHeightPx)

@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Author pages now have a continuous scrollbar with the author's name in the drag bubble, like the other feeds.
 
-- Every scrollbar now starts below the floating search bar instead of running under it, and dragging moves the list continuously by pixels rather than jumping between items, applied frame by frame so a fast drag on a large library neither stutters nor drops movement. Releasing the thumb no longer makes it jump back before the list catches up.
+- Every scrollbar now starts below the floating search bar instead of running under it, and dragging moves the list continuously by pixels rather than jumping between items. A drag takes over from an in-flight fling or a track-tap jump instead of fighting it, and pointer events that arrive within one frame are merged into a single scroll step, so a fast drag on a large library neither stutters nor drops movement. Releasing the thumb no longer makes it jump back before the list catches up.
 
 - Scroll positions and already loaded pages survive switching between the library, Iwara and Me tabs, and between Iwara segments and searches. Returning to a tab no longer starts at the top or fetches the first page again.
 
@@ -29,7 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Scrolling a long list no longer re-records the frosted backdrop on every frame: recording pauses while the finger or fling is moving and resumes when the list stops, which removes a full-screen render pass per frame during the scroll.
 
-- Opening the player now composes the real page before the slide-in starts, so the 320 ms transition only moves the page instead of also laying out the player and details; the animation no longer drops frames and the page never shows a placeholder.
+- Opening the player still slides the real page in over 320 ms, but the video area now shows the video's cover while the page slides in and until the first video frame is ready; the player is only created after the slide settles and the cover then fades out, so the transition has no placeholder, no black flash and no dropped frames.
 
 - Fullscreen player controls inset from the cutout, navigation bar and gesture area with 48 dp touch targets, so buttons are no longer close to the screen corners or covered by system bars.
 

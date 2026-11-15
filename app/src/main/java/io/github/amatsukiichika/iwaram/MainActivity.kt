@@ -68,7 +68,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
@@ -93,7 +92,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
 import io.github.amatsukiichika.iwaram.data.VideoEntity
 import io.github.amatsukiichika.iwaram.data.IwaraVideoItem
 import io.github.amatsukiichika.iwaram.data.IwaraAccount
@@ -181,7 +179,6 @@ import io.github.amatsukiichika.iwaram.ui.theme.IwaraTheme
 import io.github.amatsukiichika.iwaram.ui.theme.resolveDarkTheme
 import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
 /**
@@ -194,9 +191,6 @@ private val overlaySeqCounter = java.util.concurrent.atomic.AtomicLong(0L)
 
 /** 二级页覆盖层（设置页 / 播放页）的滑入滑出时长 —— 与 `IwaraOverlayHost` 的 ENTER/EXIT_SLIDE_MS 一致。 */
 private const val PAGE_SLIDE_MS = 320
-
-/** 入场滑动等待播放页首帧的上限（正常 1-2 帧；只是兜底，避免上报遗漏导致永久屏外）。 */
-private const val PLAYER_ENTRY_READY_TIMEOUT_MS = 800L
 
 /*
  * 看门狗及其三个阈值常量已删除：它用整机帧间隔判断"玻璃太慢"，而冷启动 / 回前台的突发卡顿
@@ -725,13 +719,14 @@ class MainActivity : ComponentActivity() {
         var playerExitPending by remember { mutableStateOf(false) }
         var playerSliding by remember { mutableStateOf(false) }
         /**
-         * 播放页是否已经完成首次组合并画出第一帧（由 [PlayerScreen.onEntryReady] 上报）。
+         * 入场滑动是否已落位（补间到 0 之后置 true；下一次全新打开时复位）。
          *
-         * 入场滑动**等它**再启动：整页首组合（PlayerView inflate/attach、详情/评论/相关列表）
-         * 与滑动动画挤在同一帧是"滑入掉帧"的根因。这里保留真实页面（不做轻壳），只是把
-         * 首组合挪到滑动开始之前 —— 用户看到的是"点一下 → 立刻滑入"，滑动期间每帧只做位移。
+         * 播放页据此**延迟渲染视频画面**：滑入期间只画视频封面遮罩，不建 PlayerView；
+         * 落位后才挂载播放器画面，首帧出来前遮罩继续盖着，画面就绪后淡出。
+         * 这样 320ms 位移里既不含整页首组合、也不含 SurfaceView 首次 attach，
+         * 而用户看到的是"点一下 → 立刻滑入"，进入时是封面而不是黑屏或骨架壳。
          */
-        var playerContentReady by remember { mutableStateOf(false) }
+        var playerEntrySettled by remember { mutableStateOf(false) }
         val playerMounted = showingPlayer || playerExitPending
         // 播放页退场动画（下面的 LaunchedEffect）也要用屏宽换算"剩余距离"，声明提到它前面。
         val screenWidthPx = with(LocalDensity.current) { LocalConfiguration.current.screenWidthDp.dp.toPx() }
@@ -739,13 +734,6 @@ class MainActivity : ComponentActivity() {
             if (showingPlayer) {
                 // 重新进场：撤销"待摘页"，并把位移补间回 0（打断退场时就是从当前位置接着滑回来）。
                 playerExitPending = false
-                // 等播放页自己"组合 + 画出第一帧"再起步（正常 1-2 帧）；兜底超时避免任何
-                // 上报遗漏把整页永久卡在屏外。
-                if (!playerContentReady) {
-                    withTimeoutOrNull(PLAYER_ENTRY_READY_TIMEOUT_MS) {
-                        snapshotFlow { playerContentReady }.first { it }
-                    }
-                }
                 playerSliding = true
                 try {
                     playerSlide.animateTo(0f, tween(PAGE_SLIDE_MS, easing = FastOutSlowInEasing))
@@ -754,6 +742,8 @@ class MainActivity : ComponentActivity() {
                 } finally {
                     playerSliding = false
                 }
+                // 落位后才允许播放页挂 PlayerView：滑入动画里每帧只剩位移。
+                playerEntrySettled = true
             } else if (playerExitPending) {
                 playerSliding = true
                 try {
@@ -801,8 +791,8 @@ class MainActivity : ComponentActivity() {
             // 否则详情列表瞬间变矮，"滚回顶部"动画会被 LazyColumn 的位置钳制吃掉（见相关推荐预取处的注释）。
             if (!showingPlayer) {
                 prs.relatedVideos = emptyList()
-                // 全新挂载 ⇒ 下一次入场滑动要重新等这页的第一帧。
-                playerContentReady = false
+                // 全新挂载 ⇒ 入场滑动期间先不挂视频画面（封面遮罩），落位后再渲染。
+                playerEntrySettled = false
             }
             showingPlayer = true
         }
@@ -1676,8 +1666,8 @@ class MainActivity : ComponentActivity() {
                     // 每次打开都会变的层序号 → 播放页据此把预测返回的跟手位移（backProgress）清零，
                     // 避免退场被打断重进时残留位移留在屏上。
                     entryToken = playerSeq,
-                    // 首帧已画 → 放行入场滑动（本页不做轻壳，等真实页面先组合出来）。
-                    onEntryReady = { playerContentReady = true },
+                    // 入场滑动是否已落位：false 时本页只画封面遮罩、不挂 PlayerView。
+                    entrySettled = playerEntrySettled,
                     onBack = { closePlayer() },
                     // 手势进度回传：拖动中让主内容实时回位（与覆盖层/设置页同一套让位动效）
                     onBackProgress = { playerGesture = it },

@@ -1,6 +1,8 @@
 # 0021 — Compose the player page before starting its entry slide
 
-Status: accepted
+Status: superseded
+
+Superseded by: 0022
 
 ## Problem
 

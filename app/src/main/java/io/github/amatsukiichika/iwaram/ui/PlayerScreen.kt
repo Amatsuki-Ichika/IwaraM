@@ -32,7 +32,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalConfiguration
@@ -114,11 +113,13 @@ fun PlayerScreen(
      */
     entryToken: Long = 0L,
     /**
-     * 本页**首帧已经画出**（真实页面，不是轻壳）。宿主等这个回调才启动入场滑动：
-     * 整页首组合（PlayerView inflate/attach、详情/评论/相关列表）挪到滑动之前，
-     * 滑动期间每帧只做位移。每次 [entryToken] 变化会重新上报。
+     * 入场滑动是否已落位（宿主在 320ms 滑入补间结束后置 true）。
+     *
+     * false 时本页**不挂视频画面**：滑入期间只画视频封面遮罩，每帧只做位移；
+     * 落位后才建 PlayerView，视频首帧出来前遮罩继续盖着，画面就绪后淡出。
+     * 每次 [entryToken] 变化时"首帧已出"的判定随之复位（见 [entryFrameReady]）。
      */
-    onEntryReady: () -> Unit = {},
+    entrySettled: Boolean = true,
     onBack: () -> Unit,
     /** 预测式返回手势进度：拖动中回调 0f..1f，松手/取消回调 null（主界面据此实时让位）。 */
     onBackProgress: (Float?) -> Unit = {},
@@ -339,6 +340,15 @@ fun PlayerScreen(
     //   换片加载提示要靠它区分"新片还没出首帧"与"播放中网络卡顿"；在线互切时
     //   localUri 不变，旧 key 清不掉，新片缓冲期会没有转圈。
     var firstFrameSeen by remember(playerEpoch) { mutableStateOf(false) }
+
+    // ---- 入场遮罩：视频画面是否已画出首帧 ----
+    //   entrySettled = 宿主告诉"滑入已落位"；落位后才挂 PlayerView，首帧才可能出来。
+    //   按 entryToken 复位：退场被打断后重进时本页不会被销毁，上一轮的 true 会残留。
+    //   两者都满足才允许遮罩淡出（见 PlayerContent 的 PlayerEntryPoster）。
+    var entryFrameReady by remember(entryToken) { mutableStateOf(false) }
+    LaunchedEffect(entryToken, entrySettled, firstFrameSeen) {
+        if (entrySettled && firstFrameSeen) entryFrameReady = true
+    }
     // 播放源统一入口：本地取 localUri，在线取后台解析出的 mediaUrl；
     // 键变化（含重试时先清空再赋值）即重新装片，本地/在线只有这一条装片路径。
     val mediaUrl = video.localUri.ifBlank { online?.mediaUrl.orEmpty() }
@@ -883,18 +893,12 @@ fun PlayerScreen(
         }
     }
 
-    // ---- 入场就绪上报：本页"组合 + 画出第一帧"后才让宿主启动滑动 ----
-    // 用户反馈入场滑动本身掉帧：整页树（PlayerView inflate/attach、详情/评论/相关列表）
-    //   与滑动动画挤在同一帧里组合，主线程排不过队。早先的"先滑轻壳、落位再填内容"被
-    //   否决（丑）—— 换成：真实页面先组合，滑动等第一帧画完再起步；滑动期间每帧只做位移。
-    // 等两帧：第一帧完成首组合的测量/布局（页面此刻在屏外，绘制被裁掉，但重活已做完），
-    //   第二帧确认没有后续合成工作，再上报，避免滑动的第一帧又撞上首帧绘制。
-    // 代价：点击到滑动开始多约 1-2 帧（≈16-33ms）；换来的是一整个 320ms 都不掉帧。
-    LaunchedEffect(entryToken) {
-        withFrameNanos { }
-        withFrameNanos { }
-        onEntryReady()
-    }
+    // 入场封面遮罩的开关：滑入未落位 / 落位后视频首帧还没出时盖住视频区；
+    //   播放或解析错误在屏时立刻撤掉，让错误面板直接可见（遮罩不挡错误）。
+    //   封面图在 PlayerContent 里取 localThumbnailPath ?: thumbnailUrl。
+    val entryPosterVisible = (!entrySettled || !entryFrameReady) &&
+        playError == null && resolveError == null
+    val entryPosterLoading = entrySettled && !entryFrameReady
 
     PlayerContent(
         player = player,
@@ -916,6 +920,9 @@ fun PlayerScreen(
         showSwitchLoading = showSwitchLoading,
         switchBlackout = switchBlackout,
         switchLoadingText = switchLoadingText,
+        videoSurfaceEnabled = entrySettled,
+        entryPosterVisible = entryPosterVisible,
+        entryPosterLoading = entryPosterLoading,
         durationMs = durationMs,
         positionMs = { positionMs },
         scrubTargetMs = { scrubTargetMs },
