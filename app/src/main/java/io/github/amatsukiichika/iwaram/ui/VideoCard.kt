@@ -6,15 +6,16 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.LocalMinimumInteractiveComponentSize
@@ -24,10 +25,13 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -49,9 +53,6 @@ import io.github.amatsukiichika.iwaram.ui.theme.LocalTagContainer
  * - 作者行统一为作者名字本身可点（不再是整行大色块）；文字自带 clickable 即可命中，无需撑大触摸区；
  * - 「本地」标志只有在线卡片会显示（本地页整页都是本地的，标了没意义）。
  */
-
-/** 卡片底部最多展示的 tag 数量，其余折叠成 +N。 */
-private const val MAX_VISIBLE_TAGS = 3
 
 /**
  * 卡片渲染规格：本地 / 在线**共用同一组常量**。
@@ -113,7 +114,7 @@ data class VideoCardModel(
  * 三行恒渲染（标题 / 作者 / 标签）—— 没有作者名、没有 tag 时也保留最小高度，
  * 保证同一排卡片严格等高（这是"整齐统一"的硬保证）。
  */
-@OptIn(ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun VideoCardContent(
     model: VideoCardModel,
@@ -208,7 +209,9 @@ fun VideoCardContent(
                 }
                 Spacer(Modifier.height(VideoCardSpec.gapAuthorTags))
 
-                // 第 3 行：标签。固定一行、最多 MAX_VISIBLE_TAGS 个，其余折叠成 +N；
+                // 第 3 行：标签。永远是**一行**：按卡片实际可用宽度量出每枚药丸的宽度，
+                //   放不下的收进 "+N"；最后一枚自己太长就用省略号截断（"…" 不算一个标签，
+                //   "+N" 只数它后面没显示出来的那些）。规则见 [layoutTagRow]（纯逻辑，带单测）。
                 //   无标签也保留同一最小高度，左右卡片等高对齐。
                 Box(
                     modifier = Modifier
@@ -217,21 +220,69 @@ fun VideoCardContent(
                     contentAlignment = Alignment.CenterStart
                 ) {
                     if (model.tags.isNotEmpty()) {
-                        val shown = model.tags.take(MAX_VISIBLE_TAGS)
-                        val remaining = model.tags.size - shown.size
-                        FlowRow(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                            verticalArrangement = Arrangement.Center,
-                            maxLines = 1
-                        ) {
-                            shown.forEach { tag -> TagChip(text = tag, onClick = { onTagClick(tag) }) }
-                            if (remaining > 0) {
-                                TagChip(text = "+$remaining", onClick = {})
-                            }
-                        }
+                        TagRow(tags = model.tags, onTagClick = onTagClick)
                     }
                 }
+            }
+        }
+    }
+}
+
+/** 标签药丸之间的水平间距（[TagRow] 的测量口径与渲染必须同值）。 */
+private val TagGap = 4.dp
+
+/**
+ * 标签行：先量宽、再用 [layoutTagRow] 决定显示几枚，最后单行渲染。
+ *
+ * 为什么不在 Row 里直接裁：Compose 的 Row 不会在测量阶段"少摆几枚"——子项要么全组合、
+ * 要么由测量结果反推布局。这里用 [TextMeasurer] 按与 [TagChip] 完全相同的字号/行高把文字宽
+ * 先算出来，加上药丸内边距得到整宽，交给纯逻辑函数决定"显示哪几枚 + 隐藏几枚"，
+ * 渲染层只摆结果 —— 卡片因此严格等高、也不再受标签长度影响。
+ */
+@Composable
+private fun TagRow(tags: List<String>, onTagClick: (String) -> Unit) {
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        val density = LocalDensity.current
+        val measurer = rememberTextMeasurer()
+        // 与 TagChip 里的 Text 同源：MaterialTheme 默认 LocalTextStyle = bodyLarge，
+        //   TagChip 只覆盖 fontSize/lineHeight，所以这里也按 bodyLarge 派生前度量。
+        val textStyle = MaterialTheme.typography.bodyLarge.copy(fontSize = 10.sp, lineHeight = 13.sp)
+        val gapPx = with(density) { TagGap.roundToPx() }
+        val chipPaddingPx = with(density) { (5.dp * 2).roundToPx() }
+        val rowWidthPx = with(density) { maxWidth.roundToPx() }
+        val layout = remember(tags, rowWidthPx, gapPx, chipPaddingPx, textStyle) {
+            fun chipWidth(label: String): Int =
+                measurer.measure(
+                    text = label,
+                    style = textStyle,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Clip
+                ).size.width + chipPaddingPx
+            layoutTagRow(
+                chipWidthsPx = tags.map(::chipWidth),
+                gapPx = gapPx,
+                ellipsisChipMinPx = chipWidth("…"),
+                plusWidthPx = { hidden -> chipWidth("+" + hidden) },
+                availablePx = rowWidthPx
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(TagGap),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            for (index in 0 until layout.visibleCount) {
+                val tag = tags[index]
+                val ellipsized = layout.ellipsizeLast && index == layout.visibleCount - 1
+                TagChip(
+                    text = tag,
+                    onClick = { onTagClick(tag) },
+                    maxWidth = if (ellipsized) with(density) { layout.lastChipMaxPx.toDp() } else null
+                )
+            }
+            if (layout.hiddenCount > 0) {
+                TagChip(text = "+" + layout.hiddenCount, onClick = {})
             }
         }
     }
@@ -289,8 +340,13 @@ fun String?.splitTags(): List<String> =
         ?.filter { it.isNotEmpty() }
         ?: emptyList()
 
+/**
+ * 标签药丸。
+ *
+ * @param maxWidth 非 null = 这枚药丸最多这么宽（标签行收尾被压缩时用，文字自动省略号）。
+ */
 @Composable
-fun TagChip(text: String, onClick: () -> Unit) {
+fun TagChip(text: String, onClick: () -> Unit, maxWidth: Dp? = null) {
     // 取消 Material3 默认的 48dp 最小点击区域，避免 tag 之间过空。
     CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
         Surface(
@@ -298,7 +354,8 @@ fun TagChip(text: String, onClick: () -> Unit) {
             shape = MaterialTheme.shapes.small,
             // "比卡片底色稍深一档"的派生色（本地卡 / 在线卡 / 播放页详情三处共用本实现）。
             color = LocalTagContainer.current,
-            contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = if (maxWidth != null) Modifier.widthIn(max = maxWidth) else Modifier
         ) {
             Text(
                 text = text,
