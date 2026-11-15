@@ -4,9 +4,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -29,10 +27,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.Placeable
+import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -228,61 +227,98 @@ fun VideoCardContent(
     }
 }
 
-/** 标签药丸之间的水平间距（[TagRow] 的测量口径与渲染必须同值）。 */
+/** 标签药丸之间的水平间距。 */
 private val TagGap = 4.dp
 
+/** 单张卡片最多真实组合并测量多少枚标签；再往后的标签一定放不下，直接计入 "+N"。 */
+private const val TAG_MEASURE_LIMIT = 12
+
+/** "+N" 药丸宽度预留的安全余量（px）：别把最后一点空间用到亚像素边界。 */
+private const val TAG_PLUS_SAFETY_PX = 1
+
 /**
- * 标签行：先量宽、再用 [layoutTagRow] 决定显示几枚，最后单行渲染。
+ * 标签行：组合出**真实药丸**逐个测量，再交给 [layoutTagRow] 决定"整枚显示哪几枚、
+ * 最后一枚是否截断、后面还有几枚收进 +N"，最后单行摆放。
  *
- * 为什么不在 Row 里直接裁：Compose 的 Row 不会在测量阶段"少摆几枚"——子项要么全组合、
- * 要么由测量结果反推布局。这里用 [TextMeasurer] 按与 [TagChip] 完全相同的字号/行高把文字宽
- * 先算出来，加上药丸内边距得到整宽，交给纯逻辑函数决定"显示哪几枚 + 隐藏几枚"，
- * 渲染层只摆结果 —— 卡片因此严格等高、也不再受标签长度影响。
+ * 为什么用 [SubcomposeLayout] 而不是 TextMeasurer 估算：估算的宽度与真实排版有 1-2px 偏差，
+ * 累积后最后几枚会被 Row 按剩余宽度裁掉，出现"只有省略号"的药丸（用户截图里的第三个 …）。
+ * 这里直接量真实药丸宽度，并且**复用**这些测量结果去摆放（不再二次排版），
+ * 既精确又不比原来多组合几次 —— 顺序摆放到"再放一枚必然放不下"就停止组合后面的标签。
  */
 @Composable
 private fun TagRow(tags: List<String>, onTagClick: (String) -> Unit) {
-    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-        val density = LocalDensity.current
-        val measurer = rememberTextMeasurer()
-        // 与 TagChip 里的 Text 同源：MaterialTheme 默认 LocalTextStyle = bodyLarge，
-        //   TagChip 只覆盖 fontSize/lineHeight，所以这里也按 bodyLarge 派生前度量。
-        val textStyle = MaterialTheme.typography.bodyLarge.copy(fontSize = 10.sp, lineHeight = 13.sp)
-        val gapPx = with(density) { TagGap.roundToPx() }
-        val chipPaddingPx = with(density) { (5.dp * 2).roundToPx() }
-        val rowWidthPx = with(density) { maxWidth.roundToPx() }
-        val layout = remember(tags, rowWidthPx, gapPx, chipPaddingPx, textStyle) {
-            fun chipWidth(label: String): Int =
-                measurer.measure(
-                    text = label,
-                    style = textStyle,
-                    maxLines = 1,
-                    softWrap = false,
-                    overflow = TextOverflow.Clip
-                ).size.width + chipPaddingPx
-            layoutTagRow(
-                chipWidthsPx = tags.map(::chipWidth),
-                gapPx = gapPx,
-                ellipsisChipMinPx = chipWidth("…"),
-                plusWidthPx = { hidden -> chipWidth("+" + hidden) },
-                availablePx = rowWidthPx
-            )
+    SubcomposeLayout(modifier = Modifier.fillMaxWidth()) { constraints ->
+        val bounded = constraints.hasBoundedWidth
+        val availPx = if (bounded) constraints.maxWidth else Int.MAX_VALUE / 4
+        val gapPx = TagGap.roundToPx()
+        val maxHeight = Constraints.Infinity
+
+        // "+N" 药丸按隐藏数量分别组合测量（N 的位数影响宽度）；缓存避免重复组合。
+        val plusPlaceables = HashMap<Int, Placeable>()
+        fun plusPlaceable(hidden: Int): Placeable = plusPlaceables.getOrPut(hidden) {
+            subcompose("plus:$hidden") { TagChip(text = "+$hidden", onClick = {}) }
+                .map { it.measure(Constraints(maxWidth = availPx, maxHeight = maxHeight)) }
+                .first()
         }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(TagGap),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            for (index in 0 until layout.visibleCount) {
-                val tag = tags[index]
-                val ellipsized = layout.ellipsizeLast && index == layout.visibleCount - 1
-                TagChip(
-                    text = tag,
-                    onClick = { onTagClick(tag) },
-                    maxWidth = if (ellipsized) with(density) { layout.lastChipMaxPx.toDp() } else null
-                )
+
+        // 按显示顺序组合并测量真实药丸；一旦"再放一枚必然放不下"就停 —— 后面的标签不用组合。
+        val widths = ArrayList<Int>()
+        val shown = ArrayList<Placeable>()
+        val limit = minOf(tags.size, TAG_MEASURE_LIMIT)
+        for (index in 0 until limit) {
+            if (index > 0) {
+                val used = widths.sum() + gapPx * (index - 1)
+                // 已用宽度 + 一个间距 + 最窄的 "+1" + 余量都超了 ⇒ 后面的全都显示不了。
+                if (used + gapPx + plusPlaceable(1).width + TAG_PLUS_SAFETY_PX > availPx) break
             }
-            if (layout.hiddenCount > 0) {
-                TagChip(text = "+" + layout.hiddenCount, onClick = {})
+            val tag = tags[index]
+            val placeable = subcompose("tag:$index") { TagChip(text = tag, onClick = { onTagClick(tag) }) }
+                .map { it.measure(Constraints(maxWidth = availPx, maxHeight = maxHeight)) }
+                .first()
+            widths += placeable.width
+            shown += placeable
+        }
+
+        // 截断药丸至少要能显示"省略号 + 一个字"，否则宁可把这枚收进 +N ——
+        //   绝不允许出现"只有省略号"的药丸（用户截图里的第三枚 … 就是这么来的）。
+        val truncatedMinPx = subcompose("trunc-min") { TagChip(text = "…0", onClick = {}) }
+            .map { it.measure(Constraints(maxWidth = availPx, maxHeight = maxHeight)) }
+            .first().width
+
+        val layout = layoutTagRow(
+            chipWidthsPx = widths,
+            totalTagCount = tags.size,
+            gapPx = gapPx,
+            truncatedMinPx = truncatedMinPx,
+            plusWidthPx = { hidden -> plusPlaceable(hidden).width },
+            availablePx = availPx
+        )
+
+        // 要真正摆放的药丸：整枚的复用上面的测量结果；截断那枚按允许宽度重新组合；
+        //   "+N" 永远整枚显示（它是"还有多少"的唯一出口，不能被挤成省略号）。
+        val placed = ArrayList<Placeable>()
+        for (i in 0 until layout.visibleCount) {
+            if (layout.ellipsizeLast && i == layout.visibleCount - 1) {
+                val tag = tags[i]
+                val maxPx = layout.lastChipMaxPx
+                placed += subcompose("trunc") {
+                    TagChip(text = tag, onClick = { onTagClick(tag) }, maxWidth = maxPx.toDp())
+                }.map { it.measure(Constraints(maxWidth = maxPx, maxHeight = maxHeight)) }.first()
+            } else {
+                placed += shown[i]
+            }
+        }
+        if (layout.hiddenCount > 0) placed += plusPlaceable(layout.hiddenCount)
+
+        val rowHeight = placed.maxOfOrNull { it.height } ?: 0
+        val usedWidth = placed.sumOf { it.width } + gapPx * (placed.size - 1).coerceAtLeast(0)
+        val rowWidth = if (bounded) constraints.maxWidth else usedWidth
+        layout(rowWidth, rowHeight) {
+            var x = 0
+            for (placeable in placed) {
+                val y = (rowHeight - placeable.height) / 2
+                placeable.place(x, y)
+                x += placeable.width + gapPx
             }
         }
     }

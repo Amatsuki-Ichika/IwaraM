@@ -113,6 +113,12 @@ fun PlayerScreen(
      * 左缘就露出底页的一条缝。令牌一变即复位。
      */
     entryToken: Long = 0L,
+    /**
+     * 本页**首帧已经画出**（真实页面，不是轻壳）。宿主等这个回调才启动入场滑动：
+     * 整页首组合（PlayerView inflate/attach、详情/评论/相关列表）挪到滑动之前，
+     * 滑动期间每帧只做位移。每次 [entryToken] 变化会重新上报。
+     */
+    onEntryReady: () -> Unit = {},
     onBack: () -> Unit,
     /** 预测式返回手势进度：拖动中回调 0f..1f，松手/取消回调 null（主界面据此实时让位）。 */
     onBackProgress: (Float?) -> Unit = {},
@@ -867,8 +873,7 @@ fun PlayerScreen(
         tr("正在加载…", "Loading…")
     }
 
-    // 顶栏返回：全屏时先退全屏，否则暂停并退出。轻壳阶段也必须有同一语义的返回键，
-    // 所以抽出来给 [PlayerEntryShell] 与 [PlayerContent] 共用。
+    // 顶栏返回：全屏时先退全屏，否则暂停并退出。轻壳/真页面共用同一条顶栏，抽出来给两侧。
     val topBarBack: () -> Unit = {
         if (isFullscreen) {
             isFullscreen = false
@@ -878,49 +883,17 @@ fun PlayerScreen(
         }
     }
 
-    // ---- 入场过渡门：滑动期间只组合轻壳，重内容留到落位后的下一帧 ----
-    // 用户反馈"点进播放页的滑入动画本身掉帧"：整页树（PlayerView inflate/attach、详情/
-    //   评论/相关列表）与播放器首装挤在动画第一帧里组合，主线程排不过队 —— 掉帧发生在
-    //   动画而不是内容上。这里只推迟 UI 树；ExoPlayer 实例与装片逻辑照旧立刻执行，
-    //   不改变开播时机、恢复逻辑与返回栈。轻壳见 [PlayerEntryShell]。
-    // 判据：先观测到 pageAnimating = true（滑动开始）、再观测到 false（落位）。宿主先置
-    //   showingPlayer（本页开始组合）、之后才置 playerSliding 的时序见 [entryTransitionSettled]。
-    // 放行后 entryContentReady 永久为 true：退场动画会让 pageAnimating 再次变 true，若在这里
-    //   退回轻壳，播放实例与详情/滚动状态会被销毁（重置播放位置 = 回归）。
-    // 过渡期玻璃录制一并跳过：播放页唯一的玻璃背景源在 DetailsSection 内部（随重内容一起
-    //   推迟组合），控制条本身是黑渐变、不录制背景。
-    var entryAnimationSeen by remember { mutableStateOf(false) }
-    var entryContentReady by remember { mutableStateOf(false) }
-    LaunchedEffect(pageAnimating) {
-        if (pageAnimating) {
-            entryAnimationSeen = true
-            return@LaunchedEffect
-        }
-        if (entryContentReady || !entryTransitionSettled(pageAnimating, entryAnimationSeen)) {
-            return@LaunchedEffect
-        }
-        // 再等一帧：让"落位"那一帧先画出来，重内容从下一帧开始组合，不挤压动画最后一帧。
+    // ---- 入场就绪上报：本页"组合 + 画出第一帧"后才让宿主启动滑动 ----
+    // 用户反馈入场滑动本身掉帧：整页树（PlayerView inflate/attach、详情/评论/相关列表）
+    //   与滑动动画挤在同一帧里组合，主线程排不过队。早先的"先滑轻壳、落位再填内容"被
+    //   否决（丑）—— 换成：真实页面先组合，滑动等第一帧画完再起步；滑动期间每帧只做位移。
+    // 等两帧：第一帧完成首组合的测量/布局（页面此刻在屏外，绘制被裁掉，但重活已做完），
+    //   第二帧确认没有后续合成工作，再上报，避免滑动的第一帧又撞上首帧绘制。
+    // 代价：点击到滑动开始多约 1-2 帧（≈16-33ms）；换来的是一整个 320ms 都不掉帧。
+    LaunchedEffect(entryToken) {
         withFrameNanos { }
-        entryContentReady = true
-    }
-    // 兜底：宿主将来若不再播入场动画（pageAnimating 恒 false），最多等
-    //   PLAYER_ENTRY_GATE_FALLBACK_MS 也放行，不能把整页永久停在轻壳。
-    val latestPageAnimating by rememberUpdatedState(pageAnimating)
-    LaunchedEffect(Unit) {
-        delay(PLAYER_ENTRY_GATE_FALLBACK_MS)
-        if (!entryContentReady && !latestPageAnimating) {
-            withFrameNanos { }
-            entryContentReady = true
-        }
-    }
-
-    if (!entryContentReady) {
-        PlayerEntryShell(
-            video = video,
-            onBack = topBarBack,
-            screenHeightDp = screenHeightDp
-        )
-        return
+        withFrameNanos { }
+        onEntryReady()
     }
 
     PlayerContent(

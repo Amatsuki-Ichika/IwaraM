@@ -8,18 +8,40 @@ import org.junit.Test
 /**
  * 标签行单行自适应布局的规则测试。
  *
- * 覆盖：全放得下 / 需要收 +N / 只截断最后枚 / 截断+收 N / 一屏只截断一枚 /
- * 可用宽度极小 / 宽度边界（恰好相等仍算放得下）。
+ * 语义（用户 2026-11 反馈）：省略号只在"某一枚标签本身放不下"时出现在这枚药丸内部，
+ * 它仍算已显示；"+N" 只数它后面的标签；绝不出现"只有省略号"的药丸。
+ *
+ * 覆盖：全放得下 / 需要收 +N / 整枚 + N / 截断最后枚 / 截断 + N / 截断空间不足则收进 N /
+ * 可用宽度极小 / 只量了前几枚时的边界 / 宽度恰好相等仍算放得下。
  */
 class TagRowLayoutTest {
 
     private val gap = 4
-    private val ellipsisMin = 14
+    private val truncatedMin = 20
 
     private fun plusWidth(hidden: Int): Int = 12 + hidden.toString().length * 6
 
+    /** 全部标签的宽都量到了。 */
     private fun layout(widths: List<Int>, available: Int) =
-        layoutTagRow(widths, gap, ellipsisMin, ::plusWidth, available)
+        layoutTagRow(
+            chipWidthsPx = widths,
+            totalTagCount = widths.size,
+            gapPx = gap,
+            truncatedMinPx = truncatedMin,
+            plusWidthPx = ::plusWidth,
+            availablePx = available
+        )
+
+    /** 只量了前几枚（后面的宽未知 ⇒ 必然收进 +N）。 */
+    private fun layoutPartial(widths: List<Int>, total: Int, available: Int) =
+        layoutTagRow(
+            chipWidthsPx = widths,
+            totalTagCount = total,
+            gapPx = gap,
+            truncatedMinPx = truncatedMin,
+            plusWidthPx = ::plusWidth,
+            availablePx = available
+        )
 
     @Test
     fun emptyTags_showNothing() {
@@ -44,12 +66,14 @@ class TagRowLayoutTest {
         val r = layout(listOf(40, 40, 40), 128)
         assertEquals(3, r.visibleCount)
         assertEquals(0, r.hiddenCount)
+        assertFalse(r.ellipsizeLast)
     }
 
     @Test
-    fun overflow_truncatesLastAndCountsRemainder() {
-        // 4 枚各 40：整 3 枚 + "+1" = 150 > 140；于是第 3 枚截断（剩余 30px）+"+1" 放得下。
-        //   截断的那枚仍算"已显示"，所以 +N 只数它后面的 1 枚。
+    fun overflow_prefersWholeChipsPlusN() {
+        // 4 枚各 40：整 3 枚 + "+1" = 128 + 4 + 18 = 150 > 140；
+        //   整 2 枚 + "+2" = 84 + 4 + 18 = 106 <= 140。
+        //   再试着把第 3 枚截断：可用 140 - (84+4) - (4+18) = 30 >= 20 ⇒ 截断显示，+N 只数第 4 枚。
         val r = layout(listOf(40, 40, 40, 40), 140)
         assertEquals(3, r.visibleCount)
         assertEquals(1, r.hiddenCount)
@@ -59,7 +83,7 @@ class TagRowLayoutTest {
 
     @Test
     fun overflow_whenTruncationImpossible_collapsesIntoPlusN() {
-        // 140 → 120：整 2 枚 84 + 4 + "+2"(18) = 106 放得下；第 3 枚截断后只剩 10px（< 省略号 14px），
+        // 140 → 120：整 2 枚 + "+2" = 106 放得下；第 3 枚截断后只剩 120 - 88 - 22 = 10px（< 20），
         //   所以宁可少显示一枚、把它收进 "+2"。
         val r = layout(listOf(40, 40, 40, 40), 120)
         assertEquals(2, r.visibleCount)
@@ -79,12 +103,12 @@ class TagRowLayoutTest {
 
     @Test
     fun truncatedLast_plusCountExcludesEllipsizedTag() {
-        // 两枚 200：整枚都放不下 ⇒ 显示第一枚（截断），第二枚收进 "+1"。
+        // 两枚 200：一枚整枚都放不下 ⇒ 第一枚截断（算已显示），第二枚收进 "+1"。
         val r = layout(listOf(200, 200), 120)
         assertEquals(1, r.visibleCount)
         assertEquals(1, r.hiddenCount)
         assertTrue(r.ellipsizeLast)
-        // 120 - 0（前面没有药丸） - (4 + 18) = 98。
+        // 120 - 0（前面没有药丸） - (4 间距 + "+1" 18) = 98。
         assertEquals(98, r.lastChipMaxPx)
     }
 
@@ -99,6 +123,7 @@ class TagRowLayoutTest {
 
     @Test
     fun noRoomAtAll_onlyPlusN() {
+        // 连第一枚（截断后）都留不下 20px：只画 "+2"，不画省略号药丸。
         val r = layout(listOf(200, 200), 8)
         assertEquals(0, r.visibleCount)
         assertEquals(2, r.hiddenCount)
@@ -106,12 +131,43 @@ class TagRowLayoutTest {
     }
 
     @Test
+    fun partialMeasurement_trailingUnknownTagsCountIntoPlus() {
+        // 只量出前 2 枚（各 40），其实共 5 枚：整 2 枚 + "+3" = 84 + 4 + 18 = 106 <= 140，
+        //   第 3 枚没量宽度 ⇒ 不能截断，直接收进 "+3"。
+        val r = layoutPartial(listOf(40, 40), total = 5, available = 140)
+        assertEquals(2, r.visibleCount)
+        assertEquals(3, r.hiddenCount)
+        assertFalse(r.ellipsizeLast)
+    }
+
+    @Test
+    fun partialMeasurement_canStillTruncateMeasuredNextTag() {
+        // 量出前 2 枚：30 和一枚超宽 200；共 4 枚。整 2 枚 + "+2" 放不下；
+        //   整 1 枚 + "+3" = 30 + 4 + 18 = 52 <= 120 ⇒ 第 2 枚截断：
+        //   120 - (30+4) - (4+18) = 64 >= 20。
+        val r = layoutPartial(listOf(30, 200), total = 4, available = 120)
+        assertEquals(2, r.visibleCount)
+        assertEquals(2, r.hiddenCount)
+        assertTrue(r.ellipsizeLast)
+        assertEquals(64, r.lastChipMaxPx)
+    }
+
+    @Test
     fun plusWidthGrowsWithDigits_keepsFewerTags() {
-        // 10 枚各 40：可用宽度只够 10 枚里放一点，N 的位数会影响能放几枚。
+        // 10 枚各 40：可用宽度越窄，能显示的整枚越少、+N 里的数字越大。
         val widths = List(10) { 40 }
-        val ten = layout(widths, 80)
-        val two = layout(widths, 400)
-        assertTrue(ten.visibleCount < two.visibleCount)
-        assertTrue(ten.hiddenCount > two.hiddenCount)
+        val narrow = layout(widths, 80)
+        val wide = layout(widths, 400)
+        assertTrue(narrow.visibleCount < wide.visibleCount)
+        assertTrue(narrow.hiddenCount > wide.hiddenCount)
+    }
+
+    @Test
+    fun neverRendersEllipsisOnly_whenSpaceBelowThreshold() {
+        // 可用宽度 8 时第一枚截断后只剩 8px < 20：不允许出现只有省略号的药丸。
+        val r = layout(listOf(300), 8)
+        assertEquals(0, r.visibleCount)
+        assertFalse(r.ellipsizeLast)
+        assertEquals(1, r.hiddenCount)
     }
 }

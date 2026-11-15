@@ -34,14 +34,12 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.zIndex
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.PlayerView
-import coil.compose.AsyncImage
 import io.github.amatsukiichika.iwaram.data.VideoEntity
 
 /**
@@ -363,70 +361,6 @@ internal fun PlayerContent(
                     onAddToPlaylist = onAddToPlaylist
                 )
             }
-        }
-    }
-}
-
-/**
- * 播放页入场过渡期间显示的轻壳（重内容在 [PlayerContent] 里，滑动落位后才组合）。
- *
- * 只放"黑底视频位 + 封面 + 标题 + 返回"这几样轻的东西：滑入的 320ms 里它们也得跟着页面
- * 一起走，否则会露出空白/塌陷的观感；而 PlayerView 的 inflate/attach、详情/评论/相关列表
- * 这些重活全部留给 [PlayerContent]。组合成本是入场动画掉帧的主因（见 PlayerScreen 里的
- * 入场过渡门与 [entryTransitionSettled]）。
- *
- * 结构与配色逐项对齐 [PlayerContent] 的非全屏首屏：主题背景、黑色状态栏占位、整宽 16:9
- * 黑底视频位、同一条顶栏（同渐变、同返回键位置、同一条标题）。落位后真内容接管，背景/
- * 顶栏/视频位都在原位，不会有"先空白再刷出"的闪屏。
- *
- * 封面走 Coil 内存缓存（列表卡片刚显示过同一张图），命中时零 IO；未命中也不阻塞动画，
- * 图到了再画。视频画面本身不参与任何 insets，画面不缩。
- */
-@Composable
-internal fun PlayerEntryShell(
-    video: VideoEntity,
-    onBack: () -> Unit,
-    screenHeightDp: Dp,
-    modifier: Modifier = Modifier
-) {
-    val cover = video.localThumbnailPath ?: video.thumbnailUrl
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-    ) {
-        // 与 PlayerContent 同款：非全屏时状态栏这一格固定黑色（瞬间插入，不做补间）。
-        Spacer(
-            Modifier
-                .fillMaxWidth()
-                .background(Color.Black)
-                .statusBarsPadding()
-        )
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .aspectRatio(16f / 9f)
-                .heightIn(max = screenHeightDp * 0.5f)
-                .background(Color.Black)
-        ) {
-            if (!cover.isNullOrBlank()) {
-                AsyncImage(
-                    model = cover,
-                    // 封面纯粹是过渡期占位，标题在顶栏里已有文字说明，这里不需要朗读。
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
-            PlayerTopBar(
-                visible = true,
-                title = video.title,
-                onBack = onBack,
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .zIndex(1f)
-                    .fillMaxWidth()
-            )
         }
     }
 }

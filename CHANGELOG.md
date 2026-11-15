@@ -29,7 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Scrolling a long list no longer re-records the frosted backdrop on every frame: recording pauses while the finger or fling is moving and resumes when the list stops, which removes a full-screen render pass per frame during the scroll.
 
-- Opening the player now shows a light shell (cover, title, back) during the slide-in animation and lays out the player and details after the slide settles, so the transition no longer drops frames.
+- Opening the player now composes the real page before the slide-in starts, so the 320 ms transition only moves the page instead of also laying out the player and details; the animation no longer drops frames and the page never shows a placeholder.
 
 - Fullscreen player controls inset from the cutout, navigation bar and gesture area with 48 dp touch targets, so buttons are no longer close to the screen corners or covered by system bars.
 
