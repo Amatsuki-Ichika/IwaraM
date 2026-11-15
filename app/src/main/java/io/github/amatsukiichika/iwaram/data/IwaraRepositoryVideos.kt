@@ -19,5 +19,9 @@ fun IwaraRepository.observeTags(): Flow<List<TagEntity>> = dao.observeAllTags()
 /**
  * 删除一条本地库记录（连同标签关联），**不动磁盘文件**。
  * 主键是 localUri，所以调用方传哪一行就删哪一行 —— 多源共存时这是"删掉某一个源"的语义。
+ * 行没了封面文件就是孤儿，一并清掉（只删 filesDir/thumbs 内的文件，不会误删相册）。
  */
-suspend fun IwaraRepository.deleteVideo(video: VideoEntity) = dao.deleteVideoWithTags(video)
+suspend fun IwaraRepository.deleteVideo(video: VideoEntity) {
+    dao.deleteVideoWithTags(video)
+    deleteLocalThumbnailFile(video.localThumbnailPath)
+}

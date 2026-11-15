@@ -9,6 +9,7 @@ import io.github.amatsukiichika.iwaram.data.IwaraRepository
 import io.github.amatsukiichika.iwaram.data.IwaraSession
 import io.github.amatsukiichika.iwaram.data.APP_PREFS_NAME
 import io.github.amatsukiichika.iwaram.data.KEY_LANGUAGE
+import io.github.amatsukiichika.iwaram.data.migrateLegacyLocalThumbs
 import io.github.amatsukiichika.iwaram.i18n.AppLanguage
 import io.github.amatsukiichika.iwaram.i18n.LanguageMode
 import kotlinx.coroutines.CoroutineScope
@@ -55,6 +56,12 @@ class IwaraApp : Application(), ImageLoaderFactory {
         //   （主线程）——`IwaraRepository` 构造期要读 SharedPreferences，prefs 里还存着下载历史
         //   (≤100)/待续传(50)/播放列表缓存的 JSON，首次访问会触发整份 XML 的解析，那一帧就是
         //   白屏/卡顿。挪到 IO 线程预热后，主线程那一次访问拿到的已经是初始化好的实例。
-        appScope.launch { runCatching { repository } }
+        appScope.launch {
+            runCatching {
+                // 旧版本把本地封面写在 cacheDir/thumbs：清一次应用缓存封面就永久消失。
+                // 升级后先把还能救的旧封面搬进 filesDir/thumbs 并改写库里的路径（放 IO 线程，不阻塞首帧）。
+                repository.migrateLegacyLocalThumbs()
+            }
+        }
     }
 }

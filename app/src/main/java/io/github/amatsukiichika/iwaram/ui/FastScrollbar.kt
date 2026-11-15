@@ -12,7 +12,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
-import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -36,7 +35,6 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -55,8 +53,6 @@ import androidx.compose.ui.unit.sp
 import kotlin.math.abs
 import kotlin.math.floor
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -264,8 +260,8 @@ private fun ScrollBubble(visible: Boolean, label: () -> String, modifier: Modifi
  * 只失效这一小块绘制。
  *
  * 拖动行为分两档：
- * - 给了 [onDragScrollToFraction]（列表/网格状态版）：拖动只往它送"手指当前比例"，由它做像素增量
- *   滚动，列表跟手；
+ * - 给了 [onDragFractionDelta]（列表/网格状态版）：拖动把"这一帧手指比例的增量"交给它，
+ *   由它换算成像素后**同步**派发给列表（不经过协程、不取消上一帧增量），所以跟手且连续；
  * - 没给时沿用旧语义：每帧把目标比例交给 [onScrollToFraction] 跳转。
  *
  * 点击轨道始终走 [onScrollToFraction]（一次性跳转）。
@@ -279,7 +275,8 @@ private fun ScrollBubble(visible: Boolean, label: () -> String, modifier: Modifi
  * @param onScrollToFraction 点击轨道时回调目标比例（0f..1f）
  * @param onDragProgress     拖动进度回调 —— 拖动中每帧给 0f..1f、结束/取消给
  *                           null，供拖动居中气泡（[FastScrollbarBasicWithBubble]）显示当前分节。
- * @param onDragScrollToFraction 拖动中每帧的目标比例（像素增量滚动版）；null = 旧跳转语义。
+ * @param onDragFractionDelta 拖动中每帧"手指比例增量"（fraction 差值，可正可负）；
+ *                           null = 旧跳转语义（每帧按目标比例跳）。
  */
 @Composable
 fun FastScrollbarBasic(
@@ -289,7 +286,7 @@ fun FastScrollbarBasic(
     onScrollToFraction: (Float) -> Unit,
     canScroll: Boolean = true,
     onDragProgress: ((Float?) -> Unit)? = null,
-    onDragScrollToFraction: ((Float) -> Unit)? = null,
+    onDragFractionDelta: ((Float) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     if (!canScroll) return
@@ -346,10 +343,17 @@ fun FastScrollbarBasic(
         return ((y - thumbH / 2f) / maxOffset).coerceIn(0f, 1f)
     }
 
+    // 上一次推送的手指比例；< 0 = 本次按下还没记起点（按下第一帧只记起点、不发增量）。
+    var lastFraction by remember { mutableFloatStateOf(-1f) }
+
     /** 拖动每帧：给跟手/气泡的回调；按下第一帧由状态版自己判断"只记起点不滚"。 */
     fun pushDragFraction(fraction: Float) {
-        if (onDragScrollToFraction != null) {
-            onDragScrollToFraction(fraction)
+        if (onDragFractionDelta != null) {
+            // 增量 = 本帧比例 − 上帧比例：状态版拿它换算像素并同步滚动。
+            //   不在滚动条里直接调 scrollBy（suspend）：拖动时每帧都 launch/取消协程会丢增量 ⇒ 一顿一顿。
+            val last = lastFraction
+            lastFraction = fraction
+            if (last >= 0f) onDragFractionDelta(fraction - last)
         } else {
             onScrollToFraction(fraction)
         }
@@ -376,6 +380,7 @@ fun FastScrollbarBasic(
                         holdDragProgress = false
                         holdTick++
                         dragging = true
+                        lastFraction = -1f
                         dragProgress = yToProgress(pos.y)
                         pushDragFraction(dragProgress)
                     },
@@ -385,9 +390,11 @@ fun FastScrollbarBasic(
                         pushDragFraction(dragProgress)
                     },
                     onDragEnd = {
+                        lastFraction = -1f
                         finishDrag(keepHold = true)
                     },
                     onDragCancel = {
+                        lastFraction = -1f
                         finishDrag(keepHold = false)
                     }
                 )
@@ -427,26 +434,24 @@ fun FastScrollbarBasic(
 }
 
 /**
- * 拖动滚动的"单协程"队列：拖动每帧只写一个最新像素增量，由 snapshotFlow + collectLatest 消费。
+ * 拖动"比例→像素"的比例尺持有器：按下（第一次拖动事件）时记一次 [ScrollGeometry.spanPx]，
+ * 整次拖动都用它换算像素。
  *
- * 不在拖动回调里逐帧 scope.launch { scrollBy(...) }：拖动时比例每帧都在变，逐帧 launch 会堆一串
- * 协程、还会跟手指输入互相追打（"一拉就乱跳"）。这里永远只有一条协程，新目标直接顶掉旧目标。
+ * 为什么不用实时几何：拖动期间 layoutInfo 每帧都变，比例↔像素的关系会跟着漂移（拇指走到哪、
+ * 内容跟到哪就对不上），用按下时的快照才是一一对应的。
  */
-private class PendingScrollDelta(val seq: Int, val delta: Float)
+private class DragPixelScale {
+    var spanPx = 0f
+        private set
 
-@Composable
-private fun rememberScrollDeltaQueue(scrollBy: suspend (Float) -> Unit): (Float) -> Unit {
-    val currentScrollBy by rememberUpdatedState(scrollBy)
-    val target = remember { mutableStateOf<PendingScrollDelta?>(null) }
-    val seq = remember { intArrayOf(0) }
-    LaunchedEffect(Unit) {
-        snapshotFlow { target.value }.filterNotNull().collectLatest { currentScrollBy(it.delta) }
+    /** 首次调用时用 [geometry] 采快照，之后返回同一比例尺；几何暂时为空返回 0。 */
+    fun resolve(geometry: () -> ScrollGeometry?): Float {
+        if (spanPx <= 0f) spanPx = geometry()?.spanPx ?: 0f
+        return spanPx
     }
-    return remember {
-        { delta: Float ->
-            seq[0] += 1
-            target.value = PendingScrollDelta(seq[0], delta)
-        }
+
+    fun reset() {
+        spanPx = 0f
     }
 }
 
@@ -627,10 +632,8 @@ fun FastScrollbarBasic(
         }
     }
     val scope = rememberCoroutineScope()
-    // 拖动中的像素增量由单协程队列消费（collectLatest：新目标顶掉旧目标，不逐帧 launch）。
-    val scrollByDelta = rememberScrollDeltaQueue { delta -> state.scrollBy(delta) }
-    // 上一帧拖动比例（< 0 = 本次按下还没记录起点）：像素增量 = (新 − 上帧) × spanPx。
-    val lastDragFraction = remember { floatArrayOf(-1f) }
+    // 拖动用的像素比例尺（按下时采一次几何快照）。
+    val dragScale = remember { DragPixelScale() }
     // 拇指长度防闪烁：几何瞬空（visibleItemsInfo 短暂为空）时**保持上一帧长度**，
     //   不回退满格（否则拖动时实心部分会闪长闪短）；小幅变化被死区吸收。
     //   持有器是普通数组，只在绘制相位读写，不触发重组/重绘循环。
@@ -660,20 +663,14 @@ fun FastScrollbarBasic(
                 scope.launch { state.scrollToItem(index, offsetPx) }
             }
         },
-        // 拖动：像素增量滚动（第一帧只记起点、delta = 0）。
-        onDragScrollToFraction = { f ->
-            val g = geometry()
-            if (g != null) {
-                val last = lastDragFraction[0]
-                lastDragFraction[0] = f
-                if (last >= 0f) {
-                    val delta = scrollDeltaPx(last, f, g.spanPx)
-                    if (delta.isFinite() && abs(delta) > 0.01f) scrollByDelta(delta)
-                }
-            }
+        // 拖动：把"手指比例增量"按按下时的比例尺换成像素，**同步**派发（dispatchRawDelta）。
+        //   不走 suspend 的 scrollBy：每帧 launch/取消协程会丢增量 ⇒ 拖动一顿一顿。
+        onDragFractionDelta = { fractionDelta ->
+            val px = fractionDelta * dragScale.resolve { geometry() }
+            if (px.isFinite() && abs(px) > 0.01f) state.dispatchRawDelta(px)
         },
         onDragProgress = { f ->
-            if (f == null) lastDragFraction[0] = -1f  // 松手/取消：下次按下重新记起点
+            if (f == null) dragScale.reset()  // 松手/取消：下次按下重新采快照
             onDragProgress?.invoke(f)
         },
         modifier = modifier
@@ -696,8 +693,7 @@ fun FastScrollbarBasic(
         }
     }
     val scope = rememberCoroutineScope()
-    val scrollByDelta = rememberScrollDeltaQueue { delta -> state.scrollBy(delta) }
-    val lastDragFraction = remember { floatArrayOf(-1f) }
+    val dragScale = remember { DragPixelScale() }
     // 防闪烁持有器，同 LazyGrid 版（条目高度可变，几何按可见数计，抖动全靠"保持上一帧 + 死区"吸收）。
     val lastSpan = remember { floatArrayOf(1f) }
     fun geometry(): ScrollGeometry? = state.scrollbarGeometry(headerItemCount, headerHeightPx)
@@ -723,19 +719,12 @@ fun FastScrollbarBasic(
                 scope.launch { state.scrollToItem(index, offsetPx) }
             }
         },
-        onDragScrollToFraction = { f ->
-            val g = geometry()
-            if (g != null) {
-                val last = lastDragFraction[0]
-                lastDragFraction[0] = f
-                if (last >= 0f) {
-                    val delta = scrollDeltaPx(last, f, g.spanPx)
-                    if (delta.isFinite() && abs(delta) > 0.01f) scrollByDelta(delta)
-                }
-            }
+        onDragFractionDelta = { fractionDelta ->
+            val px = fractionDelta * dragScale.resolve { geometry() }
+            if (px.isFinite() && abs(px) > 0.01f) state.dispatchRawDelta(px)
         },
         onDragProgress = { f ->
-            if (f == null) lastDragFraction[0] = -1f
+            if (f == null) dragScale.reset()
             onDragProgress?.invoke(f)
         },
         modifier = modifier

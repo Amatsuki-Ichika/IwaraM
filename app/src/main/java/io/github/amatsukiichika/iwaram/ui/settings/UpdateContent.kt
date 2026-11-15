@@ -2,6 +2,7 @@ package io.github.amatsukiichika.iwaram.ui.settings
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -24,12 +25,18 @@ import io.github.amatsukiichika.iwaram.ui.components.AppEntryCard
 import io.github.amatsukiichika.iwaram.ui.components.PillSegment
 import io.github.amatsukiichika.iwaram.ui.components.PillSelector
 
-/** 检查频率选项；value 与 IwaraRepository 的存储值一致。 */
+/**
+ * 检查频率选项；除 [OFF] 外 value 与 IwaraRepository 的存储值一致。
+ *
+ * [OFF] 不是存储值：它表示"自动检查已关闭"（仓库里的 updateAutoCheck = false）。
+ * 关掉时保留上一次选的频率，重新选一个频率就会连同开关一起打开。
+ */
 private enum class IntervalOption(
     private val labelZh: String,
     private val labelEn: String,
     val value: String
 ) {
+    OFF("禁用自动检测", "Never check", "off"),
     EACH_START("每次启动", "Every launch", "each_start"),
     DAILY("每天", "Daily", "daily"),
     WEEKLY("每周", "Weekly", "weekly");
@@ -153,16 +160,27 @@ fun UpdateContent(updateVm: UpdateViewModel, modifier: Modifier = Modifier) {
                 )
             } else {
                 tr(
-                    "自动检查已关闭，此选项暂不生效",
-                    "Automatic checks are off; this setting has no effect"
+                    "自动检查已关闭（含禁用项），选一个频率即可重新开启",
+                    "Automatic checks are off; pick a frequency to turn them back on"
                 )
             }
         ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            // 四个选项在窄屏放不下一行，用 FlowRow 允许换行（禁用自动检测是常规诉求）。
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 IntervalOption.entries.forEach { option ->
                     FilterChip(
-                        selected = interval == option.value,
-                        onClick = { updateVm.setInterval(option.value) },
+                        selected = if (autoCheck) interval == option.value else option == IntervalOption.OFF,
+                        onClick = {
+                            if (option == IntervalOption.OFF) {
+                                updateVm.setAutoCheck(false)
+                            } else {
+                                updateVm.setInterval(option.value)
+                                if (!autoCheck) updateVm.setAutoCheck(true)
+                            }
+                        },
                         label = { Text(option.label) },
                         colors = accentChipColors()
                     )

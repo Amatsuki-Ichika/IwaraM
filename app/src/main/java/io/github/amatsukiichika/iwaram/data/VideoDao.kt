@@ -16,6 +16,12 @@ data class VideoRefRow(
     val fileModifiedAt: Long
 )
 
+/** videos 表的封面投影（扫描自愈丢失封面 / 旧 cacheDir 封面迁移用）。 */
+data class VideoThumbRow(
+    val localUri: String,
+    val localThumbnailPath: String?
+)
+
 @Dao
 interface VideoDao {
 
@@ -53,6 +59,13 @@ interface VideoDao {
     suspend fun getAllRefs(): List<VideoRefRow>
 
     /**
+     * 只取封面路径 —— 扫描时按"缺即补"重建本地封面（见 [needsThumbnailRepair]），
+     * 以及启动时把旧 cacheDir 封面搬到 filesDir。单读这两列，不把整行（tagsCsv 等）拉进内存。
+     */
+    @Query("SELECT localUri, localThumbnailPath FROM videos")
+    suspend fun getAllThumbRefs(): List<VideoThumbRow>
+
+    /**
      * 给「已入库但当时没识别出 ID」的老条目补上 ID，并重置为待补元数据。
      * 用途见 [IwaraRepository.importFolder] 的老条目补救分支。
      */
@@ -70,6 +83,16 @@ interface VideoDao {
     @Transaction
     suspend fun setFileModifiedAtBatch(items: List<Pair<String, Long>>) {
         for ((uri, mtime) in items) setFileModifiedAt(uri, mtime)
+    }
+
+    /** 回填单条记录的本地封面路径（null = 清空）。 */
+    @Query("UPDATE videos SET localThumbnailPath = :path WHERE localUri = :localUri")
+    suspend fun setLocalThumbnail(localUri: String, path: String?)
+
+    /** 批量回填本地封面路径 —— 单个事务一次提交，避免逐行 UPDATE 触发多次失效通知。 */
+    @Transaction
+    suspend fun setLocalThumbnailBatch(items: List<Pair<String, String?>>) {
+        for ((uri, path) in items) setLocalThumbnail(uri, path)
     }
 
     @Query("SELECT * FROM videos WHERE iwaraId = :iwaraId LIMIT 1")

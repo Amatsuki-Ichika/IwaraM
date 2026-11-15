@@ -11,13 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Failed or interrupted downloads resume automatically the next time the app opens. Only downloads that were queued or running when the app was closed are resumed, each address is resolved again before it is used, and a download that fails is retried up to three times with a 3 s / 10 s / 30 s backoff before it is marked failed. Settings > Storage > Auto-resume downloads turns this off.
 
-- The app can check for updates in-app and install them without leaving it. Settings > About > Updates shows the current version, a stable/beta update channel, an automatic check switch, a check frequency (every start, daily, weekly), a manual check, and the option to ignore a version; releases are read from GitHub Releases, the APK is verified against the published SHA-256 checksum and then handed to the system installer. Automatic checks stay quiet when the app is up to date, and the ignored version is cleared when the update channel changes.
+- The app can check for updates in-app and install them without leaving it. Settings > About > Updates shows the current version, a stable/beta update channel, an automatic check switch, a check frequency (every start, daily, weekly, or never — "never" turns the automatic switch off while remembering the last interval), a manual check, and the option to ignore a version; releases are read from GitHub Releases, the APK is verified against the published SHA-256 checksum and then handed to the system installer. Automatic checks stay quiet when the app is up to date, and the ignored version is cleared when the update channel changes.
 
 ### Changed
 
 - Author pages now have a continuous scrollbar with the author's name in the drag bubble, like the other feeds.
 
-- Every scrollbar now starts below the floating search bar instead of running under it, and dragging moves the list continuously by pixels rather than jumping between items. Releasing the thumb no longer makes it jump back before the list catches up.
+- Every scrollbar now starts below the floating search bar instead of running under it, and dragging moves the list continuously by pixels rather than jumping between items, applied frame by frame so a fast drag on a large library neither stutters nor drops movement. Releasing the thumb no longer makes it jump back before the list catches up.
 
 - Scroll positions and already loaded pages survive switching between the library, Iwara and Me tabs, and between Iwara segments and searches. Returning to a tab no longer starts at the top or fetches the first page again.
 
@@ -32,6 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Downloads no longer fail permanently on a transient network error. A temporary failure is retried inside the same download with a visible countdown instead of stopping the task.
 
 - Settings > About now lists the update settings instead of a duplicate read-only version card; the version is shown by the update card.
+
+- Local covers no longer disappear after the app cache is cleared. Generated covers moved into private storage, covers left in the old cache are carried over on the next launch, and rescanning a folder now regenerates any cover whose file is missing instead of leaving the card blank.
 
 ## [0.2.2] - 2026-11-03
 

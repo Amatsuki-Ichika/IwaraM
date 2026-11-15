@@ -36,12 +36,14 @@ import io.github.amatsukiichika.iwaram.data.IwaraSign
 import io.github.amatsukiichika.iwaram.data.PendingDownload
 import io.github.amatsukiichika.iwaram.data.VideoEntity
 import io.github.amatsukiichika.iwaram.data.addDownloadHistory
+import io.github.amatsukiichika.iwaram.data.deleteLocalThumbnailFile
 import io.github.amatsukiichika.iwaram.data.downloadCardFailureReason
 import io.github.amatsukiichika.iwaram.data.downloadRetryDelayMs
 import io.github.amatsukiichika.iwaram.data.fetchAndApplyMetadata
 import io.github.amatsukiichika.iwaram.data.generateLocalThumbnail
 import io.github.amatsukiichika.iwaram.data.isSignedUrlExpired
 import io.github.amatsukiichika.iwaram.data.loadPendingDownloads
+import io.github.amatsukiichika.iwaram.data.needsThumbnailRepair
 import io.github.amatsukiichika.iwaram.data.removePendingDownload
 import io.github.amatsukiichika.iwaram.data.resolveDownloadTarget
 import io.github.amatsukiichika.iwaram.data.savePendingDownload
@@ -49,6 +51,7 @@ import io.github.amatsukiichika.iwaram.data.shouldRetryDownload
 import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.ui.DiagLog
 import okhttp3.Request
+import java.io.File
 import java.util.concurrent.CopyOnWriteArraySet
 
 /**
@@ -867,7 +870,12 @@ class DownloadService : Service() {
                 localUri = doc.uri.toString(),
                 fileName = doc.name ?: job.fileName,
                 iwaraId = baseRow.iwaraId?.takeIf { it.isNotBlank() } ?: job.videoId,
-                localThumbnailPath = baseRow.localThumbnailPath ?: repo.generateLocalThumbnail(doc.uri),
+                // 旧行若指向已消失的封面文件（清过缓存/手动删过），必须重生成，别把死路径带进新行。
+                localThumbnailPath = if (needsThumbnailRepair(baseRow.localThumbnailPath) { File(it).isFile }) {
+                    repo.generateLocalThumbnail(doc.uri)
+                } else {
+                    baseRow.localThumbnailPath
+                },
                 // 文件刚落盘，刷新修改日期（也顺带把旧数据的 0 回填成真值）。
                 fileModifiedAt = doc.lastModified().coerceAtLeast(0L),
                 // 强制重拉一次元数据（刚下完，服务端信息最全）。
@@ -900,6 +908,10 @@ class DownloadService : Service() {
         if (staleRow != null) {
             // 旧行已被上面这条顶替：主键是 localUri，新行是新键，旧键必须显式删。
             dao.deleteVideoWithTags(staleRow)
+            // 旧行的封面文件只属于旧行；新行已换成自己的封面，这里顺手把孤儿文件清掉。
+            if (staleRow.localThumbnailPath != entity.localThumbnailPath) {
+                repo.deleteLocalThumbnailFile(staleRow.localThumbnailPath)
+            }
             DiagLog.log("Download", "替换了指向已丢失文件的旧库行：${job.videoId}")
         }
         repo.fetchAndApplyMetadata(entity)
