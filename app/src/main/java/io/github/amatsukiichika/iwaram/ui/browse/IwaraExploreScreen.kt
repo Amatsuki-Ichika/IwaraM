@@ -35,14 +35,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import io.github.amatsukiichika.iwaram.ui.components.GlassTopBar
 import io.github.amatsukiichika.iwaram.ui.components.TOP_BAR_CONTENT_HEIGHT
-import io.github.amatsukiichika.iwaram.ui.components.glassViewBackdrop
-import io.github.amatsukiichika.iwaram.ui.components.rememberGlassViewBackdrop
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.amatsukiichika.iwaram.data.imageKeys
 import io.github.amatsukiichika.iwaram.data.postKeys
 import io.github.amatsukiichika.iwaram.data.videoKeys
 import io.github.amatsukiichika.iwaram.ui.components.PillSegment
-import com.kyant.backdrop.backdrops.LayerBackdrop
 import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.ui.components.horizontalSlideSpec
 import io.github.amatsukiichika.iwaram.ui.components.PillSelector
@@ -84,12 +81,10 @@ fun IwaraExploreScreen(
     // 内容区铺满整页，网格顶部 contentPadding 预留顶栏高度，卡片因此从顶栏底下穿过。
     // 见 GlassBackdrop.kt 里 GlassTopBar 的结构约束。
     Box(Modifier.fillMaxSize()) {
-        val topBackdrop = rememberGlassViewBackdrop()
         // 页面条的实测高度不再由本页测量：悬浮顶栏已移入 MainActivity 那条静态材质条
         //   （见 [IwaraExploreScreen] 的 topPadding 参数说明），高度由它实测后下发。
 
-        // 这里不能再包一层 `glassViewBackdrop(topBackdrop)`：嵌套录制 + 模糊会把整层丢成透明。
-        // 改为把同一个源下沉给网格去挂载，网格与回顶按钮是它的兄弟节点，全屏只录一次。
+        // 背景源由各网格自建（滚动期可冻结的内容级源），回顶按钮消费网格那一份。
         Box(Modifier.fillMaxSize()) {
 
         // 内容区：按方向左右滑动切换（与本地页 modeContent 同规格：300ms 滑动 + 220ms 淡入淡出）。
@@ -117,15 +112,15 @@ fun IwaraExploreScreen(
                 key = if (t.index == -1) "search:" + t.query.orEmpty() else "segment:" + t.index
             ) {
                 when (t.index) {
-                    -1 -> SearchResultsGrid(cvm, t.query.orEmpty(), actions, bottomPadding, topPadding = topPadding, backdrop = topBackdrop)
-                    Segment.SUBSCRIBED.ordinal -> VideosGrid(cvm, actions, subscribedOnly = true, bottomPadding, topPadding = topPadding, backdrop = topBackdrop)
-                    Segment.VIDEOS.ordinal -> VideosGrid(cvm, actions, subscribedOnly = false, bottomPadding, topPadding = topPadding, backdrop = topBackdrop)
-                    Segment.IMAGES.ordinal -> ImagesGrid(cvm, actions, bottomPadding, topPadding = topPadding, backdrop = topBackdrop)
-                    else -> PostsList(cvm, actions, bottomPadding, topPadding = topPadding, backdrop = topBackdrop)
+                    -1 -> SearchResultsGrid(cvm, t.query.orEmpty(), actions, bottomPadding, topPadding = topPadding)
+                    Segment.SUBSCRIBED.ordinal -> VideosGrid(cvm, actions, subscribedOnly = true, bottomPadding, topPadding = topPadding)
+                    Segment.VIDEOS.ordinal -> VideosGrid(cvm, actions, subscribedOnly = false, bottomPadding, topPadding = topPadding)
+                    Segment.IMAGES.ordinal -> ImagesGrid(cvm, actions, bottomPadding, topPadding = topPadding)
+                    else -> PostsList(cvm, actions, bottomPadding, topPadding = topPadding)
                 }
             }
         }
-        }   // Box(内容区 + 背景源)
+        }   // Box(内容区)
 
         // 本页不再自己绘制顶栏：材质与内容都由 MainActivity 那条静态材质条绘制
         //   （内容体见本文件底部的 [IwaraTopBar]），本页只留内容区（网格），
@@ -273,8 +268,6 @@ fun VideosGrid(
     bottomPadding: Dp = 0.dp,
     /** 悬浮顶栏高度 → 网格顶部 contentPadding（内容从条底下穿过）。 */
     topPadding: Dp = 0.dp,
-    /** 悬浮顶栏共用的背景源（网格负责挂载，全屏只录一次）。 */
-    backdrop: LayerBackdrop? = null
 ) {
     val state by (if (subscribedOnly) cvm.subscribed else cvm.videos).collectAsStateWithLifecycle()
     val session by cvm.session.collectAsStateWithLifecycle()
@@ -311,7 +304,6 @@ fun VideosGrid(
         entranceKey = if (subscribedOnly) "subscribed" else "videos",
         bottomPadding = bottomPadding,
         topPadding = topPadding,
-        backdrop = backdrop,
         itemKey = { it.id.orEmpty().ifEmpty { it.hashCode().toString() } },
     ) { video ->
         OnlineVideoCard(video, actions)
@@ -326,8 +318,6 @@ private fun SearchResultsGrid(
     bottomPadding: Dp = 0.dp,
     /** 悬浮顶栏高度 → 网格顶部 contentPadding。 */
     topPadding: Dp = 0.dp,
-    /** 悬浮顶栏共用的背景源（网格负责挂载，全屏只录一次）。 */
-    backdrop: LayerBackdrop? = null
 ) {
     val state by cvm.searchResults.collectAsStateWithLifecycle()
     // 搜索结果为空时要说清"当前有几条看不见的规则在起作用"。
@@ -382,7 +372,6 @@ private fun SearchResultsGrid(
         emptyExtra = ratingHint,
         bottomPadding = bottomPadding,
         topPadding = topPadding,
-        backdrop = backdrop,
         itemKey = { it.id.orEmpty().ifEmpty { it.hashCode().toString() } },
     ) { video ->
         OnlineVideoCard(video, actions)
@@ -390,7 +379,7 @@ private fun SearchResultsGrid(
 }
 
 @Composable
-fun ImagesGrid(cvm: IwaraClientViewModel, actions: IwaraNavActions, bottomPadding: Dp = 0.dp, topPadding: Dp = 0.dp, backdrop: LayerBackdrop? = null) {
+fun ImagesGrid(cvm: IwaraClientViewModel, actions: IwaraNavActions, bottomPadding: Dp = 0.dp, topPadding: Dp = 0.dp) {
     val state by cvm.images.collectAsStateWithLifecycle()
     // 登录感知 key：LaunchedEffect(Unit) 只在首次组合跑一次，登录后进入页面不加载、
     // 首拉失败也不重试。守卫防循环：items 非空不 force（FeedPager 的 force=true 会
@@ -415,7 +404,6 @@ fun ImagesGrid(cvm: IwaraClientViewModel, actions: IwaraNavActions, bottomPaddin
         entranceKey = "images",
         bottomPadding = bottomPadding,
         topPadding = topPadding,
-        backdrop = backdrop,
         itemKey = { it.id.orEmpty().ifEmpty { it.hashCode().toString() } },
     ) { image ->
         ImageCardOnline(
@@ -428,7 +416,7 @@ fun ImagesGrid(cvm: IwaraClientViewModel, actions: IwaraNavActions, bottomPaddin
 }
 
 @Composable
-fun PostsList(cvm: IwaraClientViewModel, actions: IwaraNavActions, bottomPadding: Dp = 0.dp, topPadding: Dp = 0.dp, backdrop: LayerBackdrop? = null) {
+fun PostsList(cvm: IwaraClientViewModel, actions: IwaraNavActions, bottomPadding: Dp = 0.dp, topPadding: Dp = 0.dp) {
     val state by cvm.posts.collectAsStateWithLifecycle()
     // 同 ImagesGrid，登录感知 key + 防循环守卫。
     val session by cvm.session.collectAsStateWithLifecycle()
@@ -451,7 +439,6 @@ fun PostsList(cvm: IwaraClientViewModel, actions: IwaraNavActions, bottomPadding
         entranceKey = "posts",
         bottomPadding = bottomPadding,
         topPadding = topPadding,
-        backdrop = backdrop,
         itemKey = { it.id.orEmpty().ifEmpty { it.hashCode().toString() } },
     ) { post ->
         PostCard(

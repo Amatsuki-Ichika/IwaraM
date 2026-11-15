@@ -84,7 +84,13 @@ import io.github.amatsukiichika.iwaram.data.localVideoKeys
 import io.github.amatsukiichika.iwaram.data.videoKeys
 import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.ui.DiagLog
+import io.github.amatsukiichika.iwaram.ui.components.ScrollToTopButton
+import io.github.amatsukiichika.iwaram.ui.components.animateScrollToTop
+import io.github.amatsukiichika.iwaram.ui.components.scrollToTopBottomPadding
+import io.github.amatsukiichika.iwaram.ui.components.scrollToTopBottomPaddingOverlaid
 import io.github.amatsukiichika.iwaram.ui.components.debugAwareErrorText
+import io.github.amatsukiichika.iwaram.ui.components.glassScrollBackdropSource
+import io.github.amatsukiichika.iwaram.ui.components.rememberGlassScrollBackdrop
 import kotlin.math.roundToInt
 import io.github.amatsukiichika.iwaram.ui.VideoCard
 import io.github.amatsukiichika.iwaram.ui.VideoViewModel
@@ -917,11 +923,13 @@ private fun AuthorVideosGrid(
         if (shouldLoadMore) onLoadMore()
     }
 
+    // 滚动期可冻结的内容级源：拖动时停录（长列表掉帧大头），回顶按钮采样上一帧。
+    val scrollBackdrop = rememberGlassScrollBackdrop()
     Box(Modifier.fillMaxSize()) {
         LazyVerticalGrid(
             state = gridState,
             columns = GridCells.Fixed(2),
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize().glassScrollBackdropSource(scrollBackdrop) { gridState.isScrollInProgress },
             // 顶部不留 contentPadding —— 顶部 12dp 内缩由首项（作者信息）自带，
             //   "已滚出像素 → 吸顶块位移 = H − 已滚出"才是干净的线性关系。
             contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 12.dp),
@@ -1025,13 +1033,13 @@ private fun AuthorVideosGrid(
             emptyLabel = scrollbarLabel,
             modifier = Modifier.align(Alignment.CenterEnd)
         )
+        // 统一落点：与主页底栏同高（底栏块高 + 手势条 + 13dp），不再贴屏幕底。
         ScrollToTopButton(
             visible = showTop,
             onClick = { scope.launch { gridState.animateScrollToTop() } },
-            modifier = Modifier
-            .align(Alignment.BottomEnd)
-            // 统一落点（这些二级页盖住底栏，传 0 ⇒ 仍是贴屏幕底 + 13dp）。
-            .padding(end = 24.dp, bottom = scrollToTopBottomPadding(0.dp))
+            bottomPadding = scrollToTopBottomPaddingOverlaid(),
+            endPadding = 24.dp,
+            backdrop = scrollBackdrop
         )
     }
 }

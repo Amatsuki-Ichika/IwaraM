@@ -36,14 +36,16 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.kyant.backdrop.backdrops.LayerBackdrop
 import io.github.amatsukiichika.iwaram.data.GlobalFilterHolder
 import io.github.amatsukiichika.iwaram.data.filterBy
 import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.ui.FastScrollbarBasic
+import io.github.amatsukiichika.iwaram.ui.components.ScrollToTopButton
+import io.github.amatsukiichika.iwaram.ui.components.animateScrollToTop
+import io.github.amatsukiichika.iwaram.ui.components.scrollToTopBottomPaddingOverlaid
 import io.github.amatsukiichika.iwaram.ui.components.debugAwareErrorText
-import io.github.amatsukiichika.iwaram.ui.components.glassViewBackdrop
-import io.github.amatsukiichika.iwaram.ui.components.rememberGlassViewBackdrop
+import io.github.amatsukiichika.iwaram.ui.components.glassScrollBackdropSource
+import io.github.amatsukiichika.iwaram.ui.components.rememberGlassScrollBackdrop
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -110,15 +112,6 @@ fun <T> InfiniteGrid(
      * 卡片就再也不会"从顶栏底下穿过"了。
      */
     topPadding: Dp = 0.dp,
-    /**
-     * **外部背景源**（顶栏要用同一份）。
-     *
-     * 顶栏不能自己在上层再录一遍："**嵌套平台 RenderNode × 外层 RenderEffect 模糊**"这条
-     * 合成路径会把该层内容丢成透明。
-     * 所以顶栏用**网格自己那一份**源（由调用方从上面传进来，网格负责挂载；块是源的兄弟节点）。
-     * null = 网格自建（其它所有调用点行为不变）。
-     */
-    backdrop: LayerBackdrop? = null,
     itemContent: @Composable (T) -> Unit
 ) {
     val gridState = state
@@ -149,16 +142,17 @@ fun <T> InfiniteGrid(
     //   ① **录制时先铺页面底色** —— 否则录出来的层在"卡片之间的缝隙"全是透明像素，
     //      模糊算法无像素可采，玻璃里的卡片外边缘会"糊不动"；
     //   ② 统一判据（液态玻璃档 + API 31+）；非玻璃档返回 null ⇒ 零录制成本。
-    //   录制层挂在**网格**上、回顶按钮是它的兄弟节点（录制子树外，防自采样 SIGSEGV）。
-    // 外部给了源就用它（顶栏共用同一份），否则自建。
-    val viewBackdrop = backdrop ?: rememberGlassViewBackdrop()
+    // 录制层挂在**网格**上、回顶按钮是它的兄弟节点（录制子树外，防自采样 SIGSEGV）。
+    // 用滚动期可冻结的内容级源：拖动时停录（每帧全屏离屏 pass 是长列表掉帧的大头），
+    //   按钮继续采样上一帧；停止滚动立刻恢复实时录制。
+    val viewBackdrop = rememberGlassScrollBackdrop()
     Box(Modifier.fillMaxSize()) {
         LazyVerticalGrid(
             columns = columns,
             state = gridState,
             modifier = modifier
                 .fillMaxSize()
-                .glassViewBackdrop(viewBackdrop),
+                .glassScrollBackdropSource(viewBackdrop) { gridState.isScrollInProgress },
             // 卡片间距收一点（10 → [GRID_CARD_GAP]），外侧对称留白不动。
             horizontalArrangement = Arrangement.spacedBy(GRID_CARD_GAP),
             verticalArrangement = Arrangement.spacedBy(GRID_CARD_GAP),
@@ -275,15 +269,13 @@ fun <T> InfiniteGrid(
         val showTop by remember {
             derivedStateOf { gridState.firstVisibleItemIndex > 0 || gridState.firstVisibleItemScrollOffset > 0 }
         }
+        // 统一落点：与主页底栏同高（这些页面盖住底栏，自己把底栏高度算回来）。
         ScrollToTopButton(
             visible = showTop,
             onClick = { scope.launch { gridState.animateScrollToTop() } },
-            // 落在"底栏顶边之上 13dp"的右下角（贴内容区底会压在底栏右侧）。
-            // 液态玻璃档下消费本视图背景层（真模糊 + 折射）。
-            backdrop = viewBackdrop,
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(end = 24.dp, bottom = scrollToTopBottomPadding(bottomPadding))
+            bottomPadding = scrollToTopBottomPaddingOverlaid(),
+            endPadding = 24.dp,
+            backdrop = viewBackdrop
         )
     }
 }

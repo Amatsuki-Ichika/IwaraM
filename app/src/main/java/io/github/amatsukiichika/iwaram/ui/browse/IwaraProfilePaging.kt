@@ -86,7 +86,13 @@ import io.github.amatsukiichika.iwaram.data.videoKeys
 import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.ui.DiagLog
 import io.github.amatsukiichika.iwaram.ui.FastScrollbarBasicWithBubble
+import io.github.amatsukiichika.iwaram.ui.components.ScrollToTopButton
+import io.github.amatsukiichika.iwaram.ui.components.animateScrollToTop
+import io.github.amatsukiichika.iwaram.ui.components.scrollToTopBottomPadding
+import io.github.amatsukiichika.iwaram.ui.components.scrollToTopBottomPaddingOverlaid
 import io.github.amatsukiichika.iwaram.ui.components.debugAwareErrorText
+import io.github.amatsukiichika.iwaram.ui.components.glassScrollBackdropSource
+import io.github.amatsukiichika.iwaram.ui.components.rememberGlassScrollBackdrop
 import kotlin.math.roundToInt
 import io.github.amatsukiichika.iwaram.ui.VideoCard
 import io.github.amatsukiichika.iwaram.ui.VideoViewModel
@@ -236,6 +242,8 @@ internal fun <T> PagedGrid(
     itemContent: @Composable (T) -> Unit
 ) {
     val scope = rememberCoroutineScope()
+    // 滚动期可冻结的内容级源：拖动时停录（长列表掉帧大头），回顶按钮采样上一帧。
+    val scrollBackdrop = rememberGlassScrollBackdrop()
     val showTop by remember {
         derivedStateOf { gridState.firstVisibleItemIndex > 0 || gridState.firstVisibleItemScrollOffset > 0 }
     }
@@ -243,7 +251,7 @@ internal fun <T> PagedGrid(
         LazyVerticalGrid(
             state = gridState,
             columns = columns,
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize().glassScrollBackdropSource(scrollBackdrop) { gridState.isScrollInProgress },
             // 顶部 12dp 由首项（作者信息）自带 —— 与「视频」栏同样是吸顶位移的干净线性关系。
             contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 12.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -276,13 +284,13 @@ internal fun <T> PagedGrid(
             emptyLabel = scrollbarEmptyLabel,
             modifier = Modifier.align(Alignment.CenterEnd)
         )
+        // 统一落点：与主页底栏同高（底栏块高 + 手势条 + 13dp），不再贴屏幕底。
         ScrollToTopButton(
             visible = showTop,
             onClick = { scope.launch { gridState.animateScrollToTop() } },
-            modifier = Modifier
-            .align(Alignment.BottomEnd)
-            // 统一落点（这些二级页盖住底栏，传 0 ⇒ 仍是贴屏幕底 + 13dp）。
-            .padding(end = 24.dp, bottom = scrollToTopBottomPadding(0.dp))
+            bottomPadding = scrollToTopBottomPaddingOverlaid(),
+            endPadding = 24.dp,
+            backdrop = scrollBackdrop
         )
     }
 }

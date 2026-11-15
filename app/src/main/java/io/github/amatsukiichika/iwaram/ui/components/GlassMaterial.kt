@@ -153,18 +153,16 @@ fun glassMaterialFor(
             GlassMode.OFF -> GlassMaterial(
                 fill = surface, tints = emptyList(), blurRadius = 0.dp, noise = 0f, edgeHighlight = 0.12f
             )
-            // 液态玻璃档主题感知：深色 = 黑雾面，浅色 = surface 亮雾面（iOS 式浅玻璃）。
-            //   玻璃消费的是真实页面内容，浅色主题下再压一层黑罩会在亮内容上变成"脏黑块"。
-            // 液态玻璃档与半透明档同值：不透明度是全球唯一口径（100% 就必须完全不透明），
-            //   任何隐藏系数都会让"100% 还是能看见底"变成说不清的行为。两档的区别只剩有没有模糊。
+            // 与底栏（BAR）同源：统一用主题 surface 罩色，不再按深色写死黑罩。
+            //   同一页面里回顶按钮与底栏是同一套玻璃，深色下再压黑会让按钮比底栏更深一块
+            //   （用户反馈"材质不对"），所以两档都对齐 BAR 的 surface 罩色。
+            //   不透明度仍是全球唯一口径（100% 就必须完全不透明），两档的区别只剩高光强度。
             GlassMode.LIQUID_GLASS -> GlassMaterial(
-                fill = if (dark) Color.Black.copy(alpha = t) else surface.copy(alpha = t),
+                fill = surface.copy(alpha = t),
                 tints = emptyList(), blurRadius = 0.dp, noise = 0f, edgeHighlight = 0.18f
             )
             GlassMode.TRANSLUCENT -> GlassMaterial(
-                // 主题感知（与液态玻璃档同口径）：深色 = 黑雾面（白图标），浅色 = surface 亮雾面
-                //   （深色图标）。此前写死黑罩，浅色主题下回顶按钮是一颗黑圆 —— 已按反馈适配。
-                fill = if (dark) Color.Black.copy(alpha = t) else surface.copy(alpha = t),
+                fill = surface.copy(alpha = t),
                 tints = emptyList(), blurRadius = 0.dp, noise = 0f, edgeHighlight = 0.12f
             )
         }

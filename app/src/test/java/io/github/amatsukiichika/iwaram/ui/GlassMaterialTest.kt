@@ -139,8 +139,9 @@ class GlassMaterialTest {
     }
 
     @Test
-    fun `PILL液态玻璃档主题感知 浅色亮雾面 深色黑雾面`() {
-        // 回顶按钮玻璃在浅色主题下不再压黑罩；fill.copy(alpha=1f) 还原底色可精确断言。
+    fun `PILL液态玻璃档与底栏同源 深浅色都用主题 surface`() {
+        // 回顶按钮此前深色主题写死黑罩、与底栏材质不一致（用户反馈）；现全档与 BAR 同源用 surface。
+        //   fill.copy(alpha=1f) 还原底色可精确断言。
         val lightSurface = Color(0xFFF7F8FA)
         val light = glassMaterialFor(
             GlassRole.PILL, GlassSettings(0.55f, GlassMode.LIQUID_GLASS), lightSurface, dark = false, backdropActive = true
@@ -149,13 +150,13 @@ class GlassMaterialTest {
         val dark = glassMaterialFor(
             GlassRole.PILL, GlassSettings(0.55f, GlassMode.LIQUID_GLASS), surface, dark = true, backdropActive = true
         )
-        assertEquals(Color.Black, dark.fill.copy(alpha = 1f))
+        assertEquals(surface, dark.fill.copy(alpha = 1f))
     }
 
     @Test
-    fun `PILL半透明档主题感知 浅色不再写死黑罩`() {
+    fun `PILL半透明档同样与底栏同源 不再写死黑罩`() {
         // 浅色主题下回顶按钮此前是一颗黑圆（半透明档写死 Color.Black）——
-        //   已改为与液态玻璃档同口径：浅色 = surface 亮雾面，深色 = 黑雾面。
+        //   已改为与液态玻璃档同口径：深浅色都用主题 surface，只靠 alpha 区分档位。
         val lightSurface = Color(0xFFF7F8FA)
         val light = glassMaterialFor(
             GlassRole.PILL, GlassSettings(0.55f, GlassMode.TRANSLUCENT), lightSurface, dark = false, backdropActive = false
@@ -164,6 +165,6 @@ class GlassMaterialTest {
         val dark = glassMaterialFor(
             GlassRole.PILL, GlassSettings(0.55f, GlassMode.TRANSLUCENT), surface, dark = true, backdropActive = false
         )
-        assertEquals(Color.Black, dark.fill.copy(alpha = 1f))
+        assertEquals(surface, dark.fill.copy(alpha = 1f))
     }
 }
