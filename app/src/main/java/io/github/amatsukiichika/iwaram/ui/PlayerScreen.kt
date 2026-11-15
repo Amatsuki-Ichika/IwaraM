@@ -32,6 +32,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalConfiguration
@@ -866,6 +867,62 @@ fun PlayerScreen(
         tr("正在加载…", "Loading…")
     }
 
+    // 顶栏返回：全屏时先退全屏，否则暂停并退出。轻壳阶段也必须有同一语义的返回键，
+    // 所以抽出来给 [PlayerEntryShell] 与 [PlayerContent] 共用。
+    val topBarBack: () -> Unit = {
+        if (isFullscreen) {
+            isFullscreen = false
+        } else {
+            currentPlayer.pause()
+            onBack()
+        }
+    }
+
+    // ---- 入场过渡门：滑动期间只组合轻壳，重内容留到落位后的下一帧 ----
+    // 用户反馈"点进播放页的滑入动画本身掉帧"：整页树（PlayerView inflate/attach、详情/
+    //   评论/相关列表）与播放器首装挤在动画第一帧里组合，主线程排不过队 —— 掉帧发生在
+    //   动画而不是内容上。这里只推迟 UI 树；ExoPlayer 实例与装片逻辑照旧立刻执行，
+    //   不改变开播时机、恢复逻辑与返回栈。轻壳见 [PlayerEntryShell]。
+    // 判据：先观测到 pageAnimating = true（滑动开始）、再观测到 false（落位）。宿主先置
+    //   showingPlayer（本页开始组合）、之后才置 playerSliding 的时序见 [entryTransitionSettled]。
+    // 放行后 entryContentReady 永久为 true：退场动画会让 pageAnimating 再次变 true，若在这里
+    //   退回轻壳，播放实例与详情/滚动状态会被销毁（重置播放位置 = 回归）。
+    // 过渡期玻璃录制一并跳过：播放页唯一的玻璃背景源在 DetailsSection 内部（随重内容一起
+    //   推迟组合），控制条本身是黑渐变、不录制背景。
+    var entryAnimationSeen by remember { mutableStateOf(false) }
+    var entryContentReady by remember { mutableStateOf(false) }
+    LaunchedEffect(pageAnimating) {
+        if (pageAnimating) {
+            entryAnimationSeen = true
+            return@LaunchedEffect
+        }
+        if (entryContentReady || !entryTransitionSettled(pageAnimating, entryAnimationSeen)) {
+            return@LaunchedEffect
+        }
+        // 再等一帧：让"落位"那一帧先画出来，重内容从下一帧开始组合，不挤压动画最后一帧。
+        withFrameNanos { }
+        entryContentReady = true
+    }
+    // 兜底：宿主将来若不再播入场动画（pageAnimating 恒 false），最多等
+    //   PLAYER_ENTRY_GATE_FALLBACK_MS 也放行，不能把整页永久停在轻壳。
+    val latestPageAnimating by rememberUpdatedState(pageAnimating)
+    LaunchedEffect(Unit) {
+        delay(PLAYER_ENTRY_GATE_FALLBACK_MS)
+        if (!entryContentReady && !latestPageAnimating) {
+            withFrameNanos { }
+            entryContentReady = true
+        }
+    }
+
+    if (!entryContentReady) {
+        PlayerEntryShell(
+            video = video,
+            onBack = topBarBack,
+            screenHeightDp = screenHeightDp
+        )
+        return
+    }
+
     PlayerContent(
         player = player,
         currentPlayer = { currentPlayer },
@@ -920,13 +977,7 @@ fun PlayerScreen(
         },
         onVideoDrag = { ms -> dispatchScrub(ms) },
         onVideoDragEnd = { isSeeking = false },
-        onTopBarBack = {
-            if (isFullscreen) isFullscreen = false
-            else {
-                currentPlayer.pause()
-                onBack()
-            }
-        },
+        onTopBarBack = topBarBack,
         onBack = onBack,
         onRetryResolve = onRetryResolve,
         onOpenDiagnostics = { showDiagnostics = true },
