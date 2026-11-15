@@ -28,8 +28,10 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
@@ -146,13 +148,15 @@ fun <T> InfiniteGrid(
     // 用滚动期可冻结的内容级源：拖动时停录（每帧全屏离屏 pass 是长列表掉帧的大头），
     //   按钮继续采样上一帧；停止滚动立刻恢复实时录制。
     val viewBackdrop = rememberGlassScrollBackdrop()
+    // 拖滚动条走 dispatchRawDelta，**不会**置 isScrollInProgress ⇒ 单独记「scrub 中」并入冻结判据。
+    var scrollbarDragging by remember { mutableStateOf(false) }
     Box(Modifier.fillMaxSize()) {
         LazyVerticalGrid(
             columns = columns,
             state = gridState,
             modifier = modifier
                 .fillMaxSize()
-                .glassScrollBackdropSource(viewBackdrop) { gridState.isScrollInProgress },
+                .glassScrollBackdropSource(viewBackdrop) { gridState.isScrollInProgress || scrollbarDragging },
             // 卡片间距收一点（10 → [GRID_CARD_GAP]），外侧对称留白不动。
             horizontalArrangement = Arrangement.spacedBy(GRID_CARD_GAP),
             verticalArrangement = Arrangement.spacedBy(GRID_CARD_GAP),
@@ -264,7 +268,8 @@ fun <T> InfiniteGrid(
             modifier = Modifier
                 .align(Alignment.CenterEnd)
                 .fillMaxHeight()
-                .padding(top = topPadding, end = 2.dp)
+                .padding(top = topPadding, end = 2.dp),
+            onDraggingChange = { scrollbarDragging = it }
         )
         val showTop by remember {
             derivedStateOf { gridState.firstVisibleItemIndex > 0 || gridState.firstVisibleItemScrollOffset > 0 }

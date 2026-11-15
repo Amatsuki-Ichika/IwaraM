@@ -76,7 +76,9 @@ fun FastScrollbar(
     markers: List<SectionMarker>,
     currentIndex: () -> Int,
     onScrollToIndex: (Int) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    /** 拖动开始/结束回调：供页面把「正在拖滚动条」并入玻璃背景冻结判据。null = 不关心。 */
+    onDraggingChange: ((Boolean) -> Unit)? = null
 ) {
     if (markers.size < 2) return
 
@@ -133,6 +135,7 @@ fun FastScrollbar(
                     detectVerticalDragGestures(
                         onDragStart = { pos ->
                             dragging = true
+                            onDraggingChange?.invoke(true)
                             appliedIndex[0] = -1
                             val idx = idxFromY(pos.y)
                             selectedIndex = idx
@@ -148,11 +151,13 @@ fun FastScrollbar(
                         onDragEnd = {
                             applyIndex(selectedIndex)
                             dragging = false
+                            onDraggingChange?.invoke(false)
                             selectedIndex = -1
                             appliedIndex[0] = -1
                         },
                         onDragCancel = {
                             dragging = false
+                            onDraggingChange?.invoke(false)
                             selectedIndex = -1
                             appliedIndex[0] = -1
                         }
@@ -621,7 +626,9 @@ fun FastScrollbarBasic(
     modifier: Modifier = Modifier,
     headerItemCount: Int = 0,
     headerHeightPx: () -> Int = { 0 },
-    onDragProgress: ((Float?) -> Unit)? = null
+    onDragProgress: ((Float?) -> Unit)? = null,
+    /** 拖动开始/结束回调：供页面把「正在拖滚动条」并入玻璃背景冻结判据。null = 不关心。 */
+    onDraggingChange: ((Boolean) -> Unit)? = null
 ) {
     // 组合相位只留一个**布尔**（只在"能不能滚"翻转时才重组）。不要在这里 destructure
     //   layoutInfo：它每帧都变，会把整条滚动条连同动画每帧重组一遍。
@@ -671,6 +678,7 @@ fun FastScrollbarBasic(
         },
         onDragProgress = { f ->
             if (f == null) dragScale.reset()  // 松手/取消：下次按下重新采快照
+            onDraggingChange?.invoke(f != null)
             onDragProgress?.invoke(f)
         },
         modifier = modifier
@@ -684,7 +692,9 @@ fun FastScrollbarBasic(
     modifier: Modifier = Modifier,
     headerItemCount: Int = 0,
     headerHeightPx: () -> Int = { 0 },
-    onDragProgress: ((Float?) -> Unit)? = null
+    onDragProgress: ((Float?) -> Unit)? = null,
+    /** 拖动开始/结束回调：供页面把「正在拖滚动条」并入玻璃背景冻结判据。null = 不关心。 */
+    onDraggingChange: ((Boolean) -> Unit)? = null
 ) {
     val canScroll by remember(headerItemCount) {
         derivedStateOf {
@@ -725,6 +735,7 @@ fun FastScrollbarBasic(
         },
         onDragProgress = { f ->
             if (f == null) dragScale.reset()
+            onDraggingChange?.invoke(f != null)
             onDragProgress?.invoke(f)
         },
         modifier = modifier
@@ -745,7 +756,8 @@ fun FastScrollbarBasicWithBubble(
     modifier: Modifier = Modifier,
     headerItemCount: Int = 0,
     headerHeightPx: () -> Int = { 0 },
-    emptyLabel: String? = null
+    emptyLabel: String? = null,
+    onDraggingChange: ((Boolean) -> Unit)? = null
 ) {
     var bubbleLabel by remember { mutableStateOf<String?>(null) }
     Box(modifier) {
@@ -763,7 +775,8 @@ fun FastScrollbarBasicWithBubble(
                     markers.isNotEmpty() -> sectionLabelFor(fraction, state, markers, headerItemCount, headerHeightPx) ?: bubbleLabel
                     else -> emptyLabel
                 }
-            }
+            },
+            onDraggingChange = onDraggingChange
         )
         ScrollBubble(
             visible = bubbleLabel != null,
@@ -781,7 +794,8 @@ fun FastScrollbarBasicWithBubble(
     modifier: Modifier = Modifier,
     headerItemCount: Int = 0,
     headerHeightPx: () -> Int = { 0 },
-    emptyLabel: String? = null
+    emptyLabel: String? = null,
+    onDraggingChange: ((Boolean) -> Unit)? = null
 ) {
     var bubbleLabel by remember { mutableStateOf<String?>(null) }
     Box(modifier) {
@@ -799,7 +813,8 @@ fun FastScrollbarBasicWithBubble(
                     markers.isNotEmpty() -> sectionLabelFor(fraction, state, markers, headerItemCount, headerHeightPx) ?: bubbleLabel
                     else -> emptyLabel
                 }
-            }
+            },
+            onDraggingChange = onDraggingChange
         )
         ScrollBubble(
             visible = bubbleLabel != null,

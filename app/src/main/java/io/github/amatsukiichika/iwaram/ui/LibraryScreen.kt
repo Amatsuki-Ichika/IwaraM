@@ -192,12 +192,15 @@ fun LibraryScreen(
         val authorState = rememberLazyListState()
         val timeState = rememberLazyListState()
         val pageScope = rememberCoroutineScope()
+        // 拖滚动条走 dispatchRawDelta，**不会**置 isScrollInProgress ⇒ 单独记「scrub 中」，
+        //   并入下面的玻璃背景冻结判据：否则拖动期间每帧全屏重录背景，UI 线程掉帧。
+        var scrollbarDragging by remember { mutableStateOf(false) }
 
         Box(
             Modifier
                 .fillMaxSize()
                 .glassScrollBackdropSource(topBackdrop) {
-                    when (state.mode) {
+                    scrollbarDragging || when (state.mode) {
                         LibraryMode.ALL -> allState.isScrollInProgress
                         LibraryMode.FOLDER -> folderState.isScrollInProgress
                         LibraryMode.AUTHOR -> authorState.isScrollInProgress
@@ -247,7 +250,8 @@ fun LibraryScreen(
                             FastScrollbarBasicWithBubble(
                                 allState,
                                 markers,
-                                Modifier.fillMaxSize().padding(top = topPadding)
+                                Modifier.fillMaxSize().padding(top = topPadding),
+                                onDraggingChange = { scrollbarDragging = it }
                             )
                         }
                     }
@@ -264,7 +268,8 @@ fun LibraryScreen(
                                 currentIndex = { firstVisible },
                                 onScrollToIndex = { idx -> pageScope.launch { listState.scrollToItem(idx) } },
                                 // 顶部让出悬浮顶栏，右缘留 2dp（与连续滚动条对齐）。
-                                modifier = Modifier.fillMaxSize().padding(top = topPadding, end = 2.dp)
+                                modifier = Modifier.fillMaxSize().padding(top = topPadding, end = 2.dp),
+                                onDraggingChange = { scrollbarDragging = it }
                             )
                         }
                     }
@@ -281,7 +286,8 @@ fun LibraryScreen(
                                 currentIndex = { firstVisible },
                                 onScrollToIndex = { idx -> pageScope.launch { listState.scrollToItem(idx) } },
                                 // 顶部让出悬浮顶栏，右缘留 2dp（与连续滚动条对齐）。
-                                modifier = Modifier.fillMaxSize().padding(top = topPadding, end = 2.dp)
+                                modifier = Modifier.fillMaxSize().padding(top = topPadding, end = 2.dp),
+                                onDraggingChange = { scrollbarDragging = it }
                             )
                         }
                     }
@@ -296,7 +302,8 @@ fun LibraryScreen(
                             FastScrollbarBasicWithBubble(
                                 listState,
                                 markers,
-                                Modifier.fillMaxSize().padding(top = topPadding)
+                                Modifier.fillMaxSize().padding(top = topPadding),
+                                onDraggingChange = { scrollbarDragging = it }
                             )
                         }
                     }

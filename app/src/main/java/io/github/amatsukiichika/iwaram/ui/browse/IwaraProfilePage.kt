@@ -925,11 +925,13 @@ private fun AuthorVideosGrid(
 
     // 滚动期可冻结的内容级源：拖动时停录（长列表掉帧大头），回顶按钮采样上一帧。
     val scrollBackdrop = rememberGlassScrollBackdrop()
+    // 拖滚动条走 dispatchRawDelta，**不会**置 isScrollInProgress ⇒ 单独记「scrub 中」并入冻结判据。
+    var scrollbarDragging by remember { mutableStateOf(false) }
     Box(Modifier.fillMaxSize()) {
         LazyVerticalGrid(
             state = gridState,
             columns = GridCells.Fixed(2),
-            modifier = Modifier.fillMaxSize().glassScrollBackdropSource(scrollBackdrop) { gridState.isScrollInProgress },
+            modifier = Modifier.fillMaxSize().glassScrollBackdropSource(scrollBackdrop) { gridState.isScrollInProgress || scrollbarDragging },
             // 顶部不留 contentPadding —— 顶部 12dp 内缩由首项（作者信息）自带，
             //   "已滚出像素 → 吸顶块位移 = H − 已滚出"才是干净的线性关系。
             contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 12.dp),
@@ -1031,6 +1033,7 @@ private fun AuthorVideosGrid(
             topPaddingPx = scrollbarTopPaddingPx,
             headerHeightPx = scrollbarHeaderHeightPx,
             emptyLabel = scrollbarLabel,
+            onDraggingChange = { scrollbarDragging = it },
             modifier = Modifier.align(Alignment.CenterEnd)
         )
         // 统一落点：与主页底栏同高（底栏块高 + 手势条 + 13dp），不再贴屏幕底。

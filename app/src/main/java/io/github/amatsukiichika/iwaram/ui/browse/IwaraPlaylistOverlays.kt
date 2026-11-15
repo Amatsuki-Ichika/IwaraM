@@ -225,9 +225,11 @@ fun PlaylistDetailOverlay(
         val detailScope = rememberCoroutineScope()
         // 滚动期可冻结的内容级源：拖动时停录（长列表掉帧大头），回顶按钮采样上一帧。
         val scrollBackdrop = rememberGlassScrollBackdrop()
+        // 拖滚动条走 dispatchRawDelta，**不会**置 isScrollInProgress ⇒ 单独记「scrub 中」并入冻结判据。
+        var scrollbarDragging by remember { mutableStateOf(false) }
         LazyColumn(
             state = detailListState,
-            modifier = Modifier.fillMaxSize().glassScrollBackdropSource(scrollBackdrop) { detailListState.isScrollInProgress },
+            modifier = Modifier.fillMaxSize().glassScrollBackdropSource(scrollBackdrop) { detailListState.isScrollInProgress || scrollbarDragging },
             contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
@@ -252,7 +254,11 @@ fun PlaylistDetailOverlay(
                 )
             }
         }
-        FastScrollbarBasic(state = detailListState, modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight())
+        FastScrollbarBasic(
+            state = detailListState,
+            modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight(),
+            onDraggingChange = { scrollbarDragging = it }
+        )
         // 统一落点：与主页底栏同高（底栏块高 + 手势条 + 13dp），不再贴屏幕底。
         ScrollToTopButton(
             visible = detailListState.firstVisibleItemIndex > 2,

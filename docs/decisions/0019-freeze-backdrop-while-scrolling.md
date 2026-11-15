@@ -20,6 +20,7 @@ the drag, so it does not flash or fall back to a plain fill.
 
 Every list that shows the button (library, infinite grids, paged author grids, profile and playlist
 overlays) uses the same pair `rememberGlassScrollBackdrop()` + `glassScrollBackdropSource(source) { scrolling }`.
+The predicate also covers the scrollbar thumb: dragging it moves the list through `dispatchRawDelta`, which never sets `isScrollInProgress`, so each page feeds the scrollbar's `onDraggingChange` into the same scrolling predicate and the freeze applies while the thumb is held too.
 A list with no backdrop (blur disabled) gets `null` and behaves as before.
 
 ## Alternatives considered

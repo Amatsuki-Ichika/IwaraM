@@ -44,6 +44,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Local covers no longer disappear after the app cache is cleared. Generated covers moved into private storage, covers left in the old cache are carried over on the next launch, and rescanning a folder now regenerates any cover whose file is missing instead of leaving the card blank.
 - The back-to-top button on author, profile and playlist pages now sits at the same height as the library's bottom bar and uses the same frosted fill as the bar in both themes, instead of a lower position and a darker or plain translucent circle.
 
+- Dragging a scrollbar thumb now counts as scrolling for the frosted backdrop, so a long list no longer re-records the background on every frame while the thumb is held; a fast drag stays smooth instead of stuttering.
+
 ## [0.2.2] - 2026-11-03
 
 ### Added

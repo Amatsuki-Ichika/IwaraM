@@ -207,6 +207,8 @@ internal fun ProfileGridScrollbar(
     topPaddingPx: Int,
     headerHeightPx: () -> Int,
     emptyLabel: String?,
+    /** 拖动开始/结束回调：供页面把「正在拖滚动条」并入玻璃背景冻结判据。 */
+    onDraggingChange: ((Boolean) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     if (emptyLabel == null) return
@@ -217,7 +219,8 @@ internal fun ProfileGridScrollbar(
         modifier = modifier.fillMaxHeight().padding(top = top, end = 2.dp),
         headerItemCount = 1,
         headerHeightPx = headerHeightPx,
-        emptyLabel = emptyLabel
+        emptyLabel = emptyLabel,
+        onDraggingChange = onDraggingChange
     )
 }
 
@@ -244,6 +247,8 @@ internal fun <T> PagedGrid(
     val scope = rememberCoroutineScope()
     // 滚动期可冻结的内容级源：拖动时停录（长列表掉帧大头），回顶按钮采样上一帧。
     val scrollBackdrop = rememberGlassScrollBackdrop()
+    // 拖滚动条走 dispatchRawDelta，**不会**置 isScrollInProgress ⇒ 单独记「scrub 中」并入冻结判据。
+    var scrollbarDragging by remember { mutableStateOf(false) }
     val showTop by remember {
         derivedStateOf { gridState.firstVisibleItemIndex > 0 || gridState.firstVisibleItemScrollOffset > 0 }
     }
@@ -251,7 +256,7 @@ internal fun <T> PagedGrid(
         LazyVerticalGrid(
             state = gridState,
             columns = columns,
-            modifier = Modifier.fillMaxSize().glassScrollBackdropSource(scrollBackdrop) { gridState.isScrollInProgress },
+            modifier = Modifier.fillMaxSize().glassScrollBackdropSource(scrollBackdrop) { gridState.isScrollInProgress || scrollbarDragging },
             // 顶部 12dp 由首项（作者信息）自带 —— 与「视频」栏同样是吸顶位移的干净线性关系。
             contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 12.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -282,6 +287,7 @@ internal fun <T> PagedGrid(
             topPaddingPx = scrollbarTopPaddingPx,
             headerHeightPx = scrollbarHeaderHeightPx,
             emptyLabel = scrollbarEmptyLabel,
+            onDraggingChange = { scrollbarDragging = it },
             modifier = Modifier.align(Alignment.CenterEnd)
         )
         // 统一落点：与主页底栏同高（底栏块高 + 手势条 + 13dp），不再贴屏幕底。
