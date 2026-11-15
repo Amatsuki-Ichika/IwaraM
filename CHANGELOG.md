@@ -25,6 +25,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Download cards are more compact: the title shares a line with the status and progress, redundant labels are gone, and the action buttons are smaller, so more downloads fit on screen.
 
+- Library and feed cards keep their tag row to exactly one line: tags are measured to the card width, a tag that does not fit is ellipsized, and a trailing +N chip always reports how many tags are not shown (the ellipsized tag is not counted), so cards no longer differ in height because of their tags.
+
+- Scrolling a long list no longer re-records the frosted backdrop on every frame: recording pauses while the finger or fling is moving and resumes when the list stops, which removes a full-screen render pass per frame during the scroll.
+
+- Opening the player now shows a light shell (cover, title, back) during the slide-in animation and lays out the player and details after the slide settles, so the transition no longer drops frames.
+
+- Fullscreen player controls inset from the cutout, navigation bar and gesture area with 48 dp touch targets, so buttons are no longer close to the screen corners or covered by system bars.
+
 ### Fixed
 
 - Opening an author from Following no longer fails intermittently with a network error. Author targets are normalized before any request, so an entry without a username no longer sends a profile request with an empty handle; author requests are also limited, retried once on rate limiting and server errors, and the page shows its own error with a retry action.
@@ -34,6 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Settings > About now lists the update settings instead of a duplicate read-only version card; the version is shown by the update card.
 
 - Local covers no longer disappear after the app cache is cleared. Generated covers moved into private storage, covers left in the old cache are carried over on the next launch, and rescanning a folder now regenerates any cover whose file is missing instead of leaving the card blank.
+- The back-to-top button on author, profile and playlist pages now sits at the same height as the library's bottom bar and uses the same frosted fill as the bar in both themes, instead of a lower position and a darker or plain translucent circle.
 
 ## [0.2.2] - 2026-11-03
 
