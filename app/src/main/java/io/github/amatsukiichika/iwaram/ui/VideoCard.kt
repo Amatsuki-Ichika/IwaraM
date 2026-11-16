@@ -4,17 +4,16 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.LocalMinimumInteractiveComponentSize
@@ -24,11 +23,16 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.Placeable
+import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -49,9 +53,6 @@ import io.github.amatsukiichika.iwaram.ui.theme.LocalTagContainer
  * - 作者行统一为作者名字本身可点（不再是整行大色块）；文字自带 clickable 即可命中，无需撑大触摸区；
  * - 「本地」标志只有在线卡片会显示（本地页整页都是本地的，标了没意义）。
  */
-
-/** 卡片底部最多展示的 tag 数量，其余折叠成 +N。 */
-private const val MAX_VISIBLE_TAGS = 3
 
 /**
  * 卡片渲染规格：本地 / 在线**共用同一组常量**。
@@ -108,12 +109,25 @@ data class VideoCardModel(
 )
 
 /**
+ * 拖动滚动条期间的卡片降级开关。
+ *
+ * 拖动时列表每帧按目标位置落位，目标处那一屏卡片必须在**当前帧内**组合/测量完成；
+ * 封面图请求与解码、标签行 [TagRow] 的多次 subcompose 正是这一屏的主要成本，
+ * 上千条的大库快拖时叠加成能感觉到的微卡顿。拖动中只画底色骨架 + 标题（高度与真实
+ * 卡片逐像素一致，排布不跳），松手立刻切回真实卡片，把拖动帧留轻。
+ */
+internal val LocalScrubbingCards = staticCompositionLocalOf { false }
+
+/**
  * 视频卡片的**唯一渲染实现**（本地 / 在线共用）。
  *
  * 三行恒渲染（标题 / 作者 / 标签）—— 没有作者名、没有 tag 时也保留最小高度，
  * 保证同一排卡片严格等高（这是"整齐统一"的硬保证）。
+ *
+ * [LocalScrubbingCards] 为 true 时只画骨架：封面图、角标、作者名与标签行全部跳过，
+ * 但封面框、标题行、作者行与标签行的占位高度都保留 ⇒ 卡片高度、网格排布与真实卡片完全一致。
  */
-@OptIn(ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun VideoCardContent(
     model: VideoCardModel,
@@ -124,6 +138,7 @@ fun VideoCardContent(
     onAuthorClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
+    val scrubbing = LocalScrubbingCards.current
     Card(modifier = modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)) {
         Column {
             Box(
@@ -132,7 +147,8 @@ fun VideoCardContent(
                     .aspectRatio(16f / 9f)
                     .background(MaterialTheme.colorScheme.surfaceVariant)
             ) {
-                if (model.thumbnail != null) {
+                // 拖动滚动条期间只留底色：不建 AsyncImage（省掉封面请求/解码）、不画角标。
+                if (!scrubbing && model.thumbnail != null) {
                     AsyncImage(
                         // 网格卡片**显式关掉 crossfade** —— Coil 2 默认开 100ms 渐变，
                         //   双列网格快速滑动时几十个渐变同时在跑，是可见的掉帧来源；
@@ -147,7 +163,7 @@ fun VideoCardContent(
                     )
                 }
                 // 左上角：「本地」药丸（只有在线卡且本地库已有该 iwaraId 时为 true）。
-                if (model.showLocalBadge) {
+                if (!scrubbing && model.showLocalBadge) {
                     LocalPill(
                         Modifier
                             .align(Alignment.TopStart)
@@ -157,19 +173,21 @@ fun VideoCardContent(
                 // 右上角：R18 药丸。只认显式 ecchi —— 未匹配到 iwara（rating 为空）的本地视频
                 // 不打角标（未知 ≠ 确认 R18），但它们仍按 R18 参与「分级」筛选。
                 // 该药丸用红底实色，不消费卡片背景层。
-                R18Pill(
-                    model.rating,
-                    model.showR18,
-                    Modifier.align(Alignment.TopEnd).padding(VideoCardSpec.overlayPadding)
-                )
-                // 左下角发布日期：纯文字，只有一层很淡的黑色柔边保可读；更贴角、与下方文字左对齐
-                //   （start 用内容区的内边距，bottom 收到 4dp）。
-                CardDateLabel(
-                    createdAtMs = model.createdAtMs,
-                    modifier = Modifier
-                        .align(Alignment.BottomStart)
-                        .padding(start = VideoCardSpec.contentPadding, bottom = 4.dp)
-                )
+                if (!scrubbing) {
+                    R18Pill(
+                        model.rating,
+                        model.showR18,
+                        Modifier.align(Alignment.TopEnd).padding(VideoCardSpec.overlayPadding)
+                    )
+                    // 左下角发布日期：纯文字，只有一层很淡的黑色柔边保可读；更贴角、与下方文字左对齐
+                    //   （start 用内容区的内边距，bottom 收到 4dp）。
+                    CardDateLabel(
+                        createdAtMs = model.createdAtMs,
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(start = VideoCardSpec.contentPadding, bottom = 4.dp)
+                    )
+                }
             }
 
             Column(modifier = Modifier.padding(VideoCardSpec.contentPadding)) {
@@ -192,23 +210,28 @@ fun VideoCardContent(
                         .heightIn(min = VideoCardSpec.authorRowMinHeight),
                     contentAlignment = Alignment.CenterStart
                 ) {
-                    Text(
-                        text = model.author,
-                        style = MaterialTheme.typography.bodySmall,
-                        minLines = 1,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = if (onAuthorClick != null) {
-                            Modifier.clickable(onClick = onAuthorClick)
-                        } else {
-                            Modifier
-                        }
-                    )
+                    // 拖动滚动条期间跳过作者名（整行占位高度不变）。
+                    if (!scrubbing) {
+                        Text(
+                            text = model.author,
+                            style = MaterialTheme.typography.bodySmall,
+                            minLines = 1,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = if (onAuthorClick != null) {
+                                Modifier.clickable(onClick = onAuthorClick)
+                            } else {
+                                Modifier
+                            }
+                        )
+                    }
                 }
                 Spacer(Modifier.height(VideoCardSpec.gapAuthorTags))
 
-                // 第 3 行：标签。固定一行、最多 MAX_VISIBLE_TAGS 个，其余折叠成 +N；
+                // 第 3 行：标签。永远是**一行**：按卡片实际可用宽度量出每枚药丸的宽度，
+                //   放不下的收进 "+N"；最后一枚自己太长就用省略号截断（"…" 不算一个标签，
+                //   "+N" 只数它后面没显示出来的那些）。规则见 [layoutTagRow]（纯逻辑，带单测）。
                 //   无标签也保留同一最小高度，左右卡片等高对齐。
                 Box(
                     modifier = Modifier
@@ -216,22 +239,108 @@ fun VideoCardContent(
                         .heightIn(min = VideoCardSpec.tagRowMinHeight),
                     contentAlignment = Alignment.CenterStart
                 ) {
-                    if (model.tags.isNotEmpty()) {
-                        val shown = model.tags.take(MAX_VISIBLE_TAGS)
-                        val remaining = model.tags.size - shown.size
-                        FlowRow(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                            verticalArrangement = Arrangement.Center,
-                            maxLines = 1
-                        ) {
-                            shown.forEach { tag -> TagChip(text = tag, onClick = { onTagClick(tag) }) }
-                            if (remaining > 0) {
-                                TagChip(text = "+$remaining", onClick = {})
-                            }
-                        }
+                    // 拖动滚动条期间跳过标签行（SubcomposeLayout 的多次 subcompose 是拖动帧的主要成本之一）。
+                    if (!scrubbing && model.tags.isNotEmpty()) {
+                        TagRow(tags = model.tags, onTagClick = onTagClick)
                     }
                 }
+            }
+        }
+    }
+}
+
+/** 标签药丸之间的水平间距。 */
+private val TagGap = 4.dp
+
+/** 单张卡片最多真实组合并测量多少枚标签；再往后的标签一定放不下，直接计入 "+N"。 */
+private const val TAG_MEASURE_LIMIT = 12
+
+/** "+N" 药丸宽度预留的安全余量（px）：别把最后一点空间用到亚像素边界。 */
+private const val TAG_PLUS_SAFETY_PX = 1
+
+/**
+ * 标签行：组合出**真实药丸**逐个测量，再交给 [layoutTagRow] 决定"整枚显示哪几枚、
+ * 最后一枚是否截断、后面还有几枚收进 +N"，最后单行摆放。
+ *
+ * 为什么用 [SubcomposeLayout] 而不是 TextMeasurer 估算：估算的宽度与真实排版有 1-2px 偏差，
+ * 累积后最后几枚会被 Row 按剩余宽度裁掉，出现"只有省略号"的药丸（用户截图里的第三个 …）。
+ * 这里直接量真实药丸宽度，并且**复用**这些测量结果去摆放（不再二次排版），
+ * 既精确又不比原来多组合几次 —— 顺序摆放到"再放一枚必然放不下"就停止组合后面的标签。
+ */
+@Composable
+private fun TagRow(tags: List<String>, onTagClick: (String) -> Unit) {
+    SubcomposeLayout(modifier = Modifier.fillMaxWidth()) { constraints ->
+        val bounded = constraints.hasBoundedWidth
+        val availPx = if (bounded) constraints.maxWidth else Int.MAX_VALUE / 4
+        val gapPx = TagGap.roundToPx()
+        val maxHeight = Constraints.Infinity
+
+        // "+N" 药丸按隐藏数量分别组合测量（N 的位数影响宽度）；缓存避免重复组合。
+        val plusPlaceables = HashMap<Int, Placeable>()
+        fun plusPlaceable(hidden: Int): Placeable = plusPlaceables.getOrPut(hidden) {
+            subcompose("plus:$hidden") { TagChip(text = "+$hidden", onClick = {}) }
+                .map { it.measure(Constraints(maxWidth = availPx, maxHeight = maxHeight)) }
+                .first()
+        }
+
+        // 按显示顺序组合并测量真实药丸；一旦"再放一枚必然放不下"就停 —— 后面的标签不用组合。
+        val widths = ArrayList<Int>()
+        val shown = ArrayList<Placeable>()
+        val limit = minOf(tags.size, TAG_MEASURE_LIMIT)
+        for (index in 0 until limit) {
+            if (index > 0) {
+                val used = widths.sum() + gapPx * (index - 1)
+                // 已用宽度 + 一个间距 + 最窄的 "+1" + 余量都超了 ⇒ 后面的全都显示不了。
+                if (used + gapPx + plusPlaceable(1).width + TAG_PLUS_SAFETY_PX > availPx) break
+            }
+            val tag = tags[index]
+            val placeable = subcompose("tag:$index") { TagChip(text = tag, onClick = { onTagClick(tag) }) }
+                .map { it.measure(Constraints(maxWidth = availPx, maxHeight = maxHeight)) }
+                .first()
+            widths += placeable.width
+            shown += placeable
+        }
+
+        // 截断药丸至少要能显示"省略号 + 一个字"，否则宁可把这枚收进 +N ——
+        //   绝不允许出现"只有省略号"的药丸（用户截图里的第三枚 … 就是这么来的）。
+        val truncatedMinPx = subcompose("trunc-min") { TagChip(text = "…0", onClick = {}) }
+            .map { it.measure(Constraints(maxWidth = availPx, maxHeight = maxHeight)) }
+            .first().width
+
+        val layout = layoutTagRow(
+            chipWidthsPx = widths,
+            totalTagCount = tags.size,
+            gapPx = gapPx,
+            truncatedMinPx = truncatedMinPx,
+            plusWidthPx = { hidden -> plusPlaceable(hidden).width },
+            availablePx = availPx
+        )
+
+        // 要真正摆放的药丸：整枚的复用上面的测量结果；截断那枚按允许宽度重新组合；
+        //   "+N" 永远整枚显示（它是"还有多少"的唯一出口，不能被挤成省略号）。
+        val placed = ArrayList<Placeable>()
+        for (i in 0 until layout.visibleCount) {
+            if (layout.ellipsizeLast && i == layout.visibleCount - 1) {
+                val tag = tags[i]
+                val maxPx = layout.lastChipMaxPx
+                placed += subcompose("trunc") {
+                    TagChip(text = tag, onClick = { onTagClick(tag) }, maxWidth = maxPx.toDp())
+                }.map { it.measure(Constraints(maxWidth = maxPx, maxHeight = maxHeight)) }.first()
+            } else {
+                placed += shown[i]
+            }
+        }
+        if (layout.hiddenCount > 0) placed += plusPlaceable(layout.hiddenCount)
+
+        val rowHeight = placed.maxOfOrNull { it.height } ?: 0
+        val usedWidth = placed.sumOf { it.width } + gapPx * (placed.size - 1).coerceAtLeast(0)
+        val rowWidth = if (bounded) constraints.maxWidth else usedWidth
+        layout(rowWidth, rowHeight) {
+            var x = 0
+            for (placeable in placed) {
+                val y = (rowHeight - placeable.height) / 2
+                placeable.place(x, y)
+                x += placeable.width + gapPx
             }
         }
     }
@@ -289,8 +398,13 @@ fun String?.splitTags(): List<String> =
         ?.filter { it.isNotEmpty() }
         ?: emptyList()
 
+/**
+ * 标签药丸。
+ *
+ * @param maxWidth 非 null = 这枚药丸最多这么宽（标签行收尾被压缩时用，文字自动省略号）。
+ */
 @Composable
-fun TagChip(text: String, onClick: () -> Unit) {
+fun TagChip(text: String, onClick: () -> Unit, maxWidth: Dp? = null) {
     // 取消 Material3 默认的 48dp 最小点击区域，避免 tag 之间过空。
     CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
         Surface(
@@ -298,7 +412,8 @@ fun TagChip(text: String, onClick: () -> Unit) {
             shape = MaterialTheme.shapes.small,
             // "比卡片底色稍深一档"的派生色（本地卡 / 在线卡 / 播放页详情三处共用本实现）。
             color = LocalTagContainer.current,
-            contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = if (maxWidth != null) Modifier.widthIn(max = maxWidth) else Modifier
         ) {
             Text(
                 text = text,

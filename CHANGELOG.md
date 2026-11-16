@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Failed or interrupted downloads resume automatically the next time the app opens. Only downloads that were queued or running when the app was closed are resumed, each address is resolved again before it is used, and a download that fails is retried up to three times with a 3 s / 10 s / 30 s backoff before it is marked failed. Settings > Storage > Auto-resume downloads turns this off.
+
+- The app can check for updates in-app and install them without leaving it. Settings > About > Updates shows the current version, a stable/beta update channel, an automatic check switch, a check frequency (every start, daily, weekly, or never — "never" turns the automatic switch off while remembering the last interval), a manual check, and the option to ignore a version; releases are read from GitHub Releases, the APK is verified against the published SHA-256 checksum and then handed to the system installer. Automatic checks stay quiet when the app is up to date, and the ignored version is cleared when the update channel changes.
+
+### Changed
+
+- Author pages now have a continuous scrollbar with the author's name in the drag bubble, like the other feeds.
+
+- Every scrollbar now starts below the floating search bar instead of running under it. Dragging the thumb lands the list at the position under the finger instead of applying a pixel delta for every pointer event, so dragging through a large library no longer builds a screen of new cards inside the input callback and stays smooth; a drag still takes over from an in-flight fling or a track-tap jump, and releasing the thumb no longer makes it jump back before the list catches up.
+
+- While a scrollbar thumb is held, library cards draw as plain placeholders with their titles instead of loading covers, badges, authors and tags; releasing the thumb brings the full cards back. The placeholder keeps the exact card height and row alignment, so the grid does not shift, and dragging through a very large library no longer spends every frame composing covers and tag rows.
+
+- Scroll positions and already loaded pages survive switching between the library, Iwara and Me tabs, and between Iwara segments and searches. Returning to a tab no longer starts at the top or fetches the first page again.
+
+- Predictive back works again on overlay pages, action sheets and the player: the back gesture is claimed by the topmost page and, on Android 14 and later, follows the finger with the page sliding under it. Previously the system found no page claiming the gesture and always showed "back to the home screen", even with pages open.
+
+- Download cards are more compact: the title shares a line with the status and progress, redundant labels are gone, and the action buttons are smaller, so more downloads fit on screen.
+
+- Library and feed cards keep their tag row to exactly one line: tags are measured to the card width, a tag that does not fit is ellipsized, and a trailing +N chip always reports how many tags are not shown (the ellipsized tag is not counted), so cards no longer differ in height because of their tags.
+
+- Scrolling a long list no longer re-records the frosted backdrop on every frame: recording pauses while the finger or fling is moving and resumes when the list stops, which removes a full-screen render pass per frame during the scroll. The library, Iwara and Me pages also report their own scrolling to the window, so the floating bottom bar and the static top bar stop re-recording the whole content area while a page scrolls or its scrollbar is dragged.
+
+- Opening the player still slides the real page in over 320 ms, but the video area now shows the video's cover while the page slides in and until the first video frame is ready; the player is only created after the slide settles and the cover then fades out, so the transition has no placeholder, no black flash and no dropped frames.
+
+- Fullscreen player controls inset from the cutout, navigation bar and gesture area with 48 dp touch targets, so buttons are no longer close to the screen corners or covered by system bars.
+
+### Fixed
+
+- Opening an author from Following no longer fails intermittently with a network error. Author targets are normalized before any request, so an entry without a username no longer sends a profile request with an empty handle; author requests are also limited, retried once on rate limiting and server errors, and the page shows its own error with a retry action.
+
+- Downloads no longer fail permanently on a transient network error. A temporary failure is retried inside the same download with a visible countdown instead of stopping the task.
+
+- Settings > About now lists the update settings instead of a duplicate read-only version card; the version is shown by the update card.
+
+- Local covers no longer disappear after the app cache is cleared. Generated covers moved into private storage, covers left in the old cache are carried over on the next launch, and rescanning a folder now regenerates any cover whose file is missing instead of leaving the card blank.
+- The back-to-top button on author, profile and playlist pages now sits at the same height as the library's bottom bar and uses the same frosted fill as the bar in both themes, instead of a lower position and a darker or plain translucent circle.
+
+- Dragging a scrollbar thumb now counts as scrolling for the frosted backdrop, so a long list no longer re-records the background on every frame while the thumb is held; a fast drag stays smooth instead of stuttering.
+
 ## [0.2.2] - 2026-11-03
 
 ### Added

@@ -57,14 +57,14 @@ import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.ui.browse.CompactSearchSlot
 import io.github.amatsukiichika.iwaram.ui.browse.RATING_OPTIONS
 import io.github.amatsukiichika.iwaram.ui.browse.SEARCH_ROW_HEIGHT
-import io.github.amatsukiichika.iwaram.ui.browse.ScrollToTopButton
+import io.github.amatsukiichika.iwaram.ui.components.ScrollToTopButton
 import io.github.amatsukiichika.iwaram.ui.browse.SelectorChip
 import io.github.amatsukiichika.iwaram.ui.browse.TagFilterRow
 import io.github.amatsukiichika.iwaram.ui.components.TagSuggestionRow
 import io.github.amatsukiichika.iwaram.ui.browse.accentChipColors
 import io.github.amatsukiichika.iwaram.ui.browse.accentInputChipColors
 import io.github.amatsukiichika.iwaram.ui.browse.GRID_CARD_GAP
-import io.github.amatsukiichika.iwaram.ui.browse.animateScrollToTop
+import io.github.amatsukiichika.iwaram.ui.components.animateScrollToTop
 import io.github.amatsukiichika.iwaram.ui.components.PillSegment
 import io.github.amatsukiichika.iwaram.ui.components.horizontalSlideSpec
 import io.github.amatsukiichika.iwaram.ui.components.PillSelector

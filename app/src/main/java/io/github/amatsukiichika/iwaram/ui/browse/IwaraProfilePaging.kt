@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -84,7 +85,14 @@ import io.github.amatsukiichika.iwaram.data.localVideoKeys
 import io.github.amatsukiichika.iwaram.data.videoKeys
 import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.ui.DiagLog
+import io.github.amatsukiichika.iwaram.ui.FastScrollbarBasicWithBubble
+import io.github.amatsukiichika.iwaram.ui.components.ScrollToTopButton
+import io.github.amatsukiichika.iwaram.ui.components.animateScrollToTop
+import io.github.amatsukiichika.iwaram.ui.components.scrollToTopBottomPadding
+import io.github.amatsukiichika.iwaram.ui.components.scrollToTopBottomPaddingOverlaid
 import io.github.amatsukiichika.iwaram.ui.components.debugAwareErrorText
+import io.github.amatsukiichika.iwaram.ui.components.glassScrollBackdropSource
+import io.github.amatsukiichika.iwaram.ui.components.rememberGlassScrollBackdrop
 import kotlin.math.roundToInt
 import io.github.amatsukiichika.iwaram.ui.VideoCard
 import io.github.amatsukiichika.iwaram.ui.VideoViewModel
@@ -136,6 +144,40 @@ internal fun OfflineHint(unmatchedLocal: Boolean, offlineText: String) {
     }
 }
 
+/**
+ * 归一 target 不可用（既没有 handle 也没有 UUID）时的占位。
+ *
+ * 这种作者构造不出任何在线请求（重试也没用），页内直接说明「信息不完整」；
+ * 从本地库「未指定」桶进来的再加一句为什么没有在线内容。
+ */
+@Composable
+internal fun TargetUnavailableHint(showUnmatchedNote: Boolean) {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                tr("该用户信息不完整", "User information is incomplete"),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodyMedium,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(horizontal = 32.dp)
+            )
+            if (showUnmatchedNote) {
+                Spacer(Modifier.size(8.dp))
+                Text(
+                    tr(
+                        "这些本地视频未匹配到 iwara，没有在线内容",
+                        "These local videos did not match iwara, so there is no online content"
+                    ),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(horizontal = 32.dp)
+                )
+            }
+        }
+    }
+}
+
 /** 「在线可用性还没确定」时的占位（正在解析资料）—— 不能误显示成"需要联网"。 */
 @Composable
 internal fun SegmentLoading() {
@@ -149,6 +191,39 @@ internal fun SegmentLoading() {
  * 复用 `PagedAccountList` 与 `loadFollowing` / `loadUserFollowers`。
  */
 
+/**
+ * 作者页网格的连续滚动条（视频 / 图片 / 帖子三段共用）。
+ *
+ * 轨道顶部从吸顶药丸栏（悬浮搜索栏）下沿开始，不穿过顶栏；头部是网格的通栏首项，
+ * 按 [headerHeightPx] 的实测总高把"头折算行"计入进度，头滚出前后比例连续。
+ *
+ * @param topPaddingPx  轨道顶部下沿（吸顶块实测高，px）
+ * @param headerHeightPx 通栏首项总高（作者信息 + 吸顶占位，px）
+ * @param emptyLabel    拖动气泡文案（作者名）；null = 不画（非作者页调用点保持原样）
+ */
+@Composable
+internal fun ProfileGridScrollbar(
+    state: LazyGridState,
+    topPaddingPx: Int,
+    headerHeightPx: () -> Int,
+    emptyLabel: String?,
+    /** 拖动开始/结束回调：供页面把「正在拖滚动条」并入玻璃背景冻结判据。 */
+    onDraggingChange: ((Boolean) -> Unit)? = null,
+    modifier: Modifier = Modifier
+) {
+    if (emptyLabel == null) return
+    val top = with(LocalDensity.current) { topPaddingPx.toDp() }
+    FastScrollbarBasicWithBubble(
+        state = state,
+        markers = emptyList(),
+        modifier = modifier.fillMaxHeight().padding(top = top, end = 2.dp),
+        headerItemCount = 1,
+        headerHeightPx = headerHeightPx,
+        emptyLabel = emptyLabel,
+        onDraggingChange = onDraggingChange
+    )
+}
+
 /* ---------- 内容容器 ---------- */
 
 @Composable
@@ -161,9 +236,19 @@ internal fun <T> PagedGrid(
     onLoadMore: () -> Unit,
     onRetry: () -> Unit,
     key: (T) -> Any,
+    /** 连续滚动条：拖动气泡文案；null = 不画（非作者页调用点保持原样）。 */
+    scrollbarEmptyLabel: String? = null,
+    /** 滚动条轨道顶部下沿（吸顶药丸栏实测高，px）。 */
+    scrollbarTopPaddingPx: Int = 0,
+    /** 通栏首项（作者信息 + 吸顶占位）总高（px）。 */
+    scrollbarHeaderHeightPx: () -> Int = { 0 },
     itemContent: @Composable (T) -> Unit
 ) {
     val scope = rememberCoroutineScope()
+    // 滚动期可冻结的内容级源：拖动时停录（长列表掉帧大头），回顶按钮采样上一帧。
+    val scrollBackdrop = rememberGlassScrollBackdrop()
+    // 拖滚动条不走手势滚动（走 requestScrollToItem），**不会**置 isScrollInProgress ⇒ 单独记「scrub 中」并入冻结判据。
+    var scrollbarDragging by remember { mutableStateOf(false) }
     val showTop by remember {
         derivedStateOf { gridState.firstVisibleItemIndex > 0 || gridState.firstVisibleItemScrollOffset > 0 }
     }
@@ -171,7 +256,7 @@ internal fun <T> PagedGrid(
         LazyVerticalGrid(
             state = gridState,
             columns = columns,
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize().glassScrollBackdropSource(scrollBackdrop) { gridState.isScrollInProgress || scrollbarDragging },
             // 顶部 12dp 由首项（作者信息）自带 —— 与「视频」栏同样是吸顶位移的干净线性关系。
             contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 12.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -196,13 +281,22 @@ internal fun <T> PagedGrid(
                 }
             }
         }
+        // 连续滚动条（轨道顶部从吸顶药丸栏下沿开始，头按通栏首项折算）。
+        ProfileGridScrollbar(
+            state = gridState,
+            topPaddingPx = scrollbarTopPaddingPx,
+            headerHeightPx = scrollbarHeaderHeightPx,
+            emptyLabel = scrollbarEmptyLabel,
+            onDraggingChange = { scrollbarDragging = it },
+            modifier = Modifier.align(Alignment.CenterEnd)
+        )
+        // 统一落点：与主页底栏同高（底栏块高 + 手势条 + 13dp），不再贴屏幕底。
         ScrollToTopButton(
             visible = showTop,
             onClick = { scope.launch { gridState.animateScrollToTop() } },
-            modifier = Modifier
-            .align(Alignment.BottomEnd)
-            // 统一落点（这些二级页盖住底栏，传 0 ⇒ 仍是贴屏幕底 + 13dp）。
-            .padding(end = 24.dp, bottom = scrollToTopBottomPadding(0.dp))
+            bottomPadding = scrollToTopBottomPaddingOverlaid(),
+            endPadding = 24.dp,
+            backdrop = scrollBackdrop
         )
     }
 }

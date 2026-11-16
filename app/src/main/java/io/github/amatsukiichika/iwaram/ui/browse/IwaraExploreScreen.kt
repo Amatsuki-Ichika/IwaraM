@@ -25,6 +25,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -34,14 +35,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import io.github.amatsukiichika.iwaram.ui.components.GlassTopBar
 import io.github.amatsukiichika.iwaram.ui.components.TOP_BAR_CONTENT_HEIGHT
-import io.github.amatsukiichika.iwaram.ui.components.glassViewBackdrop
-import io.github.amatsukiichika.iwaram.ui.components.rememberGlassViewBackdrop
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.amatsukiichika.iwaram.data.imageKeys
 import io.github.amatsukiichika.iwaram.data.postKeys
 import io.github.amatsukiichika.iwaram.data.videoKeys
 import io.github.amatsukiichika.iwaram.ui.components.PillSegment
-import com.kyant.backdrop.backdrops.LayerBackdrop
 import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.ui.components.horizontalSlideSpec
 import io.github.amatsukiichika.iwaram.ui.components.PillSelector
@@ -83,12 +81,10 @@ fun IwaraExploreScreen(
     // 内容区铺满整页，网格顶部 contentPadding 预留顶栏高度，卡片因此从顶栏底下穿过。
     // 见 GlassBackdrop.kt 里 GlassTopBar 的结构约束。
     Box(Modifier.fillMaxSize()) {
-        val topBackdrop = rememberGlassViewBackdrop()
         // 页面条的实测高度不再由本页测量：悬浮顶栏已移入 MainActivity 那条静态材质条
         //   （见 [IwaraExploreScreen] 的 topPadding 参数说明），高度由它实测后下发。
 
-        // 这里不能再包一层 `glassViewBackdrop(topBackdrop)`：嵌套录制 + 模糊会把整层丢成透明。
-        // 改为把同一个源下沉给网格去挂载，网格与回顶按钮是它的兄弟节点，全屏只录一次。
+        // 背景源由各网格自建（滚动期可冻结的内容级源），回顶按钮消费网格那一份。
         Box(Modifier.fillMaxSize()) {
 
         // 内容区：按方向左右滑动切换（与本地页 modeContent 同规格：300ms 滑动 + 220ms 淡入淡出）。
@@ -97,6 +93,10 @@ fun IwaraExploreScreen(
         val showSearchResults = activeTags.isNotEmpty() ||
             (searchMode && searchQuery.isNotBlank())
         val tab = if (showSearchResults) ExploreTab(-1, searchQuery) else ExploreTab(segment.ordinal, null)
+        // 内层分段（关注/视频/图片/帖子/搜索）各自保存状态：切走再切回时恢复滚动位置，
+        //   而不是回到顶部重来。key 取分段身份；搜索档额外带上 query（换词转场时新旧两档会
+        //   同时组合，同 key 会互相覆盖保存状态）。
+        val saveableStateHolder = rememberSaveableStateHolder()
         AnimatedContent(
             targetState = tab,
             modifier = Modifier
@@ -105,15 +105,22 @@ fun IwaraExploreScreen(
             transitionSpec = horizontalSlideSpec { target, initial -> if (target.index >= initial.index) 1 else -1 },
             label = "exploreContent"
         ) { t ->
-            when (t.index) {
-                -1 -> SearchResultsGrid(cvm, t.query.orEmpty(), actions, bottomPadding, topPadding = topPadding, backdrop = topBackdrop)
-                Segment.SUBSCRIBED.ordinal -> VideosGrid(cvm, actions, subscribedOnly = true, bottomPadding, topPadding = topPadding, backdrop = topBackdrop)
-                Segment.VIDEOS.ordinal -> VideosGrid(cvm, actions, subscribedOnly = false, bottomPadding, topPadding = topPadding, backdrop = topBackdrop)
-                Segment.IMAGES.ordinal -> ImagesGrid(cvm, actions, bottomPadding, topPadding = topPadding, backdrop = topBackdrop)
-                else -> PostsList(cvm, actions, bottomPadding, topPadding = topPadding, backdrop = topBackdrop)
+            // 分段内容各自进 SaveableStateProvider：切走的那个分段保留滚动位置/列表状态，
+            //   切回来时恢复（而不是从顶部重来）。搜索档的 key 带上 query —— 两次搜索同时在
+            //   转场里组合（新旧各一份）时，key 不能相同，否则旧的那份会在退场时覆盖新档状态。
+            saveableStateHolder.SaveableStateProvider(
+                key = if (t.index == -1) "search:" + t.query.orEmpty() else "segment:" + t.index
+            ) {
+                when (t.index) {
+                    -1 -> SearchResultsGrid(cvm, t.query.orEmpty(), actions, bottomPadding, topPadding = topPadding)
+                    Segment.SUBSCRIBED.ordinal -> VideosGrid(cvm, actions, subscribedOnly = true, bottomPadding, topPadding = topPadding)
+                    Segment.VIDEOS.ordinal -> VideosGrid(cvm, actions, subscribedOnly = false, bottomPadding, topPadding = topPadding)
+                    Segment.IMAGES.ordinal -> ImagesGrid(cvm, actions, bottomPadding, topPadding = topPadding)
+                    else -> PostsList(cvm, actions, bottomPadding, topPadding = topPadding)
+                }
             }
         }
-        }   // Box(内容区 + 背景源)
+        }   // Box(内容区)
 
         // 本页不再自己绘制顶栏：材质与内容都由 MainActivity 那条静态材质条绘制
         //   （内容体见本文件底部的 [IwaraTopBar]），本页只留内容区（网格），
@@ -261,8 +268,6 @@ fun VideosGrid(
     bottomPadding: Dp = 0.dp,
     /** 悬浮顶栏高度 → 网格顶部 contentPadding（内容从条底下穿过）。 */
     topPadding: Dp = 0.dp,
-    /** 悬浮顶栏共用的背景源（网格负责挂载，全屏只录一次）。 */
-    backdrop: LayerBackdrop? = null
 ) {
     val state by (if (subscribedOnly) cvm.subscribed else cvm.videos).collectAsStateWithLifecycle()
     val session by cvm.session.collectAsStateWithLifecycle()
@@ -272,10 +277,16 @@ fun VideosGrid(
     }
     // key 里带上 `session.checking` —— 冷启动时"已登录但凭证还没换新"窗口里拉到的订阅数据
     // 不可信（见 IwaraClientViewModel.loadMoreSubscribed 的说明）；会话就绪（checking 翻 false）
-    // 时这里会重跑一次，配合 VM 里的 `subscribedTrusted` 自动从第 0 页重拉，无需手动刷新。
+    // 时这里会重跑，但列表已有内容就直接跳过（见下）。不可信数据由 VM 的 `subscribedTrusted`
+    // 在用户下一次翻页/重试时自愈：那时 load 会强制从第 0 页重拉。
     LaunchedEffect(subscribedOnly, session.loggedIn, session.checking) {
-        val empty = state.items.isEmpty()
-        if (subscribedOnly) cvm.loadMoreSubscribed(force = empty) else cvm.loadMoreVideos(force = empty)
+        // 内层分段用 SaveableStateProvider 保留滚动位置：切回来时列表非空，这里不能再补拉一页。
+        //   FeedPager.load(force = false) 只挡 loading/endReached，分页器被重置后挡不住，
+        //   白拉一页还会把恢复的滚动位置顶掉。只有空列表才首拉。
+        if (state.items.isNotEmpty()) return@LaunchedEffect
+        // 冷启动"已登录但凭证还没换新"窗口里拉到的订阅数据不可信；此时列表为空，
+        //   force = true 让 VM 从第 0 页重拉（见 IwaraClientViewModel.loadMoreSubscribed 的说明）。
+        if (subscribedOnly) cvm.loadMoreSubscribed(force = true) else cvm.loadMoreVideos(force = true)
     }
     // 全局筛选器在渲染前过最后一道 —— 过滤实现收在 InfiniteGrid 内部
     // （所有在线列表共用一处，调用处只声明"怎么取键"）。
@@ -293,7 +304,6 @@ fun VideosGrid(
         entranceKey = if (subscribedOnly) "subscribed" else "videos",
         bottomPadding = bottomPadding,
         topPadding = topPadding,
-        backdrop = backdrop,
         itemKey = { it.id.orEmpty().ifEmpty { it.hashCode().toString() } },
     ) { video ->
         OnlineVideoCard(video, actions)
@@ -308,8 +318,6 @@ private fun SearchResultsGrid(
     bottomPadding: Dp = 0.dp,
     /** 悬浮顶栏高度 → 网格顶部 contentPadding。 */
     topPadding: Dp = 0.dp,
-    /** 悬浮顶栏共用的背景源（网格负责挂载，全屏只录一次）。 */
-    backdrop: LayerBackdrop? = null
 ) {
     val state by cvm.searchResults.collectAsStateWithLifecycle()
     // 搜索结果为空时要说清"当前有几条看不见的规则在起作用"。
@@ -364,7 +372,6 @@ private fun SearchResultsGrid(
         emptyExtra = ratingHint,
         bottomPadding = bottomPadding,
         topPadding = topPadding,
-        backdrop = backdrop,
         itemKey = { it.id.orEmpty().ifEmpty { it.hashCode().toString() } },
     ) { video ->
         OnlineVideoCard(video, actions)
@@ -372,7 +379,7 @@ private fun SearchResultsGrid(
 }
 
 @Composable
-fun ImagesGrid(cvm: IwaraClientViewModel, actions: IwaraNavActions, bottomPadding: Dp = 0.dp, topPadding: Dp = 0.dp, backdrop: LayerBackdrop? = null) {
+fun ImagesGrid(cvm: IwaraClientViewModel, actions: IwaraNavActions, bottomPadding: Dp = 0.dp, topPadding: Dp = 0.dp) {
     val state by cvm.images.collectAsStateWithLifecycle()
     // 登录感知 key：LaunchedEffect(Unit) 只在首次组合跑一次，登录后进入页面不加载、
     // 首拉失败也不重试。守卫防循环：items 非空不 force（FeedPager 的 force=true 会
@@ -397,7 +404,6 @@ fun ImagesGrid(cvm: IwaraClientViewModel, actions: IwaraNavActions, bottomPaddin
         entranceKey = "images",
         bottomPadding = bottomPadding,
         topPadding = topPadding,
-        backdrop = backdrop,
         itemKey = { it.id.orEmpty().ifEmpty { it.hashCode().toString() } },
     ) { image ->
         ImageCardOnline(
@@ -410,7 +416,7 @@ fun ImagesGrid(cvm: IwaraClientViewModel, actions: IwaraNavActions, bottomPaddin
 }
 
 @Composable
-fun PostsList(cvm: IwaraClientViewModel, actions: IwaraNavActions, bottomPadding: Dp = 0.dp, topPadding: Dp = 0.dp, backdrop: LayerBackdrop? = null) {
+fun PostsList(cvm: IwaraClientViewModel, actions: IwaraNavActions, bottomPadding: Dp = 0.dp, topPadding: Dp = 0.dp) {
     val state by cvm.posts.collectAsStateWithLifecycle()
     // 同 ImagesGrid，登录感知 key + 防循环守卫。
     val session by cvm.session.collectAsStateWithLifecycle()
@@ -433,7 +439,6 @@ fun PostsList(cvm: IwaraClientViewModel, actions: IwaraNavActions, bottomPadding
         entranceKey = "posts",
         bottomPadding = bottomPadding,
         topPadding = topPadding,
-        backdrop = backdrop,
         itemKey = { it.id.orEmpty().ifEmpty { it.hashCode().toString() } },
     ) { post ->
         PostCard(

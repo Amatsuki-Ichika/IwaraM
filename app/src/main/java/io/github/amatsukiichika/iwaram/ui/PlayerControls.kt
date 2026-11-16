@@ -1,5 +1,6 @@
 package io.github.amatsukiichika.iwaram.ui
 
+import android.os.Build
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -12,8 +13,15 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.mandatorySystemGestures
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -48,6 +56,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.dp
@@ -104,6 +113,8 @@ internal fun PlayerBottomBar(
         animationSpec = tween(160),
         label = "playerBottomBarAlpha"
     )
+    // 全屏时控制条内容的安全内缩（刘海/导航栏/系统手势区取较大者，见 fullscreenControlBarInsets）。
+    val fullscreenInsets = rememberFullscreenControlBarInsets()
     if (barAlpha > 0.01f) {
         Row(
             modifier = modifier
@@ -112,16 +123,19 @@ internal fun PlayerBottomBar(
                     if (barAlpha < 0.999f) Modifier.graphicsLayer { alpha = barAlpha } else Modifier
                 )
                 .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.7f))))
-                // 渐变背景铺满整条（被屏幕圆角/手势条遮挡是正常观感），只把可交互内容内缩出安全边距
+                // 渐变背景铺满整条（被屏幕圆角/手势条遮挡是正常观感），只把可交互内容内缩出安全边距。
+                // 全屏时按"刘海/导航栏/手势条取较大者 + 固定下限"内缩（见 fullscreenControlBarInsets）；
+                // 非全屏保持原来的极小内边距。视频画面本身不消费这些 insets，画面不缩。
                 .padding(
-                    start = if (isFullscreen) 10.dp else 2.dp,
-                    end = if (isFullscreen) 10.dp else 2.dp,
+                    start = if (isFullscreen) fullscreenInsets.start.dp else 2.dp,
+                    end = if (isFullscreen) fullscreenInsets.end.dp else 2.dp,
                     top = 2.dp,
-                    bottom = if (isFullscreen) 12.dp else 2.dp
+                    bottom = if (isFullscreen) fullscreenInsets.bottom.dp else 2.dp
                 ),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = onTogglePlay, modifier = Modifier.size(34.dp)) {
+            // 触控目标 48dp（M3 图标本身仍是 24dp，视觉不大变），防误触。
+            IconButton(onClick = onTogglePlay, modifier = Modifier.size(48.dp)) {
                 Icon(
                     if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
                     contentDescription = tr("暂停/播放", "Pause/Play"),
@@ -234,7 +248,7 @@ internal fun PlayerBottomBar(
                     )
                 }
             }
-            IconButton(onClick = onToggleFullscreen, modifier = Modifier.size(34.dp)) {
+            IconButton(onClick = onToggleFullscreen, modifier = Modifier.size(48.dp)) {
                 Icon(
                     if (isFullscreen) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen,
                     contentDescription = tr("全屏", "Fullscreen"),
@@ -377,6 +391,8 @@ internal fun PlayerTopBar(
         animationSpec = tween(160),
         label = "playerTopBarAlpha"
     )
+    // 全屏时控制条内容的安全内缩（刘海/导航栏/系统手势区取较大者，见 fullscreenControlBarInsets）。
+    val fullscreenInsets = rememberFullscreenControlBarInsets()
     if (barAlpha > 0.01f) {
         Row(
             modifier = modifier
@@ -385,16 +401,19 @@ internal fun PlayerTopBar(
                     if (barAlpha < 0.999f) Modifier.graphicsLayer { alpha = barAlpha } else Modifier
                 )
                 .background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.5f), Color.Transparent)))
-                // 渐变背景铺满整条（被屏幕圆角遮挡是正常观感），只把可交互内容内缩出安全边距
+                // 渐变背景铺满整条（被屏幕圆角遮挡是正常观感），只把可交互内容内缩出安全边距。
+                // 全屏时按"刘海/导航栏/手势条取较大者 + 固定下限"内缩（见 fullscreenControlBarInsets）；
+                // 非全屏保持原来的极小内边距。视频画面本身不消费这些 insets，画面不缩。
                 .padding(
-                    start = if (isFullscreen) 10.dp else 4.dp,
-                    end = if (isFullscreen) 10.dp else 4.dp,
-                    top = if (isFullscreen) 8.dp else 2.dp,
+                    start = if (isFullscreen) fullscreenInsets.start.dp else 4.dp,
+                    end = if (isFullscreen) fullscreenInsets.end.dp else 4.dp,
+                    top = if (isFullscreen) fullscreenInsets.top.dp else 2.dp,
                     bottom = 2.dp
                 ),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = onBack, modifier = Modifier.size(36.dp)) {
+            // 触控目标 48dp（M3 图标本身仍是 24dp，视觉不大变），防误触。
+            IconButton(onClick = onBack, modifier = Modifier.size(48.dp)) {
                 Icon(
                     Icons.AutoMirrored.Filled.ArrowBack,
                     contentDescription = tr("返回", "Back"),
@@ -412,7 +431,7 @@ internal fun PlayerTopBar(
             // 右上角三个点 → 播放诊断面板（状态 / 日志 + 一键复制），排障不再依赖 logcat。
             // 诊断入口只在 Debug 开关打开时可见，日常界面不出现。
             if (LocalDebugDetails.current) {
-                IconButton(onClick = onOpenDiagnostics, modifier = Modifier.size(36.dp)) {
+                IconButton(onClick = onOpenDiagnostics, modifier = Modifier.size(48.dp)) {
                     Icon(
                         Icons.Filled.MoreVert,
                         contentDescription = tr("播放诊断", "Playback diagnostics"),
@@ -499,3 +518,33 @@ private fun MenuChip(
         }
     }
 }
+
+/**
+ * 读取全屏控制条需要的系统遮挡量（dp），交给 [fullscreenControlBarInsets] 取"较大者 + 固定下限"。
+ *
+ * - displayCutout 从 API 28 才有：低版本构造全 0 的 WindowInsets 直接按 0 处理，
+ *   不走到低版本没有的实现；
+ * - 导航栏与系统手势区各取 bottom —— 三键导航时 navigationBars 有值、手势导航时
+ *   mandatorySystemGestures 有值；沉浸全屏隐藏系统栏后两者可能归零，由固定下限兜底；
+ * - start/end 走 PaddingValues 的起止语义（RTL 下自动镜像），不拿物理左右硬算。
+ */
+@Composable
+private fun rememberFullscreenControlBarInsets(): PlayerControlBarInsets {
+    val layoutDirection = LocalLayoutDirection.current
+    val cutout = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+        WindowInsets.displayCutout
+    } else {
+        WindowInsets(0, 0, 0, 0)
+    }
+    val cutoutPadding = cutout.asPaddingValues()
+    val navigationPadding = WindowInsets.navigationBars.asPaddingValues()
+    val gesturePadding = WindowInsets.mandatorySystemGestures.asPaddingValues()
+    return fullscreenControlBarInsets(
+        cutoutStartDp = cutoutPadding.calculateStartPadding(layoutDirection).value,
+        cutoutTopDp = cutoutPadding.calculateTopPadding().value,
+        cutoutEndDp = cutoutPadding.calculateEndPadding(layoutDirection).value,
+        navigationBarBottomDp = navigationPadding.calculateBottomPadding().value,
+        systemGestureBottomDp = gesturePadding.calculateBottomPadding().value
+    )
+}
+

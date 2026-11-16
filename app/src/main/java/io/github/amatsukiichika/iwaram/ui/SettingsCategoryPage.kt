@@ -34,6 +34,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.amatsukiichika.iwaram.i18n.AppLanguage
 import io.github.amatsukiichika.iwaram.i18n.LanguageMode
 import io.github.amatsukiichika.iwaram.i18n.tr
+import io.github.amatsukiichika.iwaram.ui.settings.UpdateContent
+import io.github.amatsukiichika.iwaram.ui.settings.UpdateViewModel
 import io.github.amatsukiichika.iwaram.ui.components.AppDialog
 import kotlinx.coroutines.CancellationException
 
@@ -52,6 +54,8 @@ private data class InfoData(val title: String, val text: String)
 internal fun CategoryPage(
     category: SettingsCategory,
     vm: VideoViewModel,
+    /** 应用内更新状态机（「关于」分类的更新卡片用）。 */
+    updateVm: UpdateViewModel,
     onBack: () -> Unit,
     onPickFolder: () -> Unit,
     onPickDownloadFolder: () -> Unit,
@@ -196,7 +200,11 @@ internal fun CategoryPage(
                                     debugDetails = debugDetails,
                                     onOpenDiagnostics = { showDiagnostics = true }
                                 )
-                                SettingsCategory.ABOUT -> AboutContent(onShowOnboarding = onShowOnboarding)
+                                // 关于 = 应用内更新（当前版本/通道/频率/忽略版本）+ 重看首次引导。
+                                SettingsCategory.ABOUT -> {
+                                    AboutContent(onShowOnboarding = onShowOnboarding)
+                                    UpdateContent(updateVm = updateVm)
+                                }
                             }
                         }
                     }

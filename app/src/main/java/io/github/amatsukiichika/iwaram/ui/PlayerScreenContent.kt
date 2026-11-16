@@ -34,12 +34,14 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.zIndex
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.PlayerView
+import coil.compose.AsyncImage
 import io.github.amatsukiichika.iwaram.data.VideoEntity
 
 /**
@@ -76,6 +78,12 @@ internal fun PlayerContent(
     /** 黑场垫底开关：仅换片空窗压黑画面；播放中网络卡顿只转圈。 */
     switchBlackout: Boolean,
     switchLoadingText: String,
+    /** 视频画面是否挂载：入场滑入落位前为 false —— 先只画封面遮罩，不建 PlayerView。 */
+    videoSurfaceEnabled: Boolean,
+    /** 入场封面遮罩是否可见（入场滑动中 / 落位后视频首帧还没出）。 */
+    entryPosterVisible: Boolean,
+    /** 遮罩上是否显示小转圈：已落位但视频首帧还没出（本地极短、在线可能几百毫秒）。 */
+    entryPosterLoading: Boolean,
     durationMs: Long,
     positionMs: () -> Long,
     scrubTargetMs: () -> Long?,
@@ -198,6 +206,7 @@ internal fun PlayerContent(
             VideoSurfaceBox(
                 player = player,
                 currentPlayer = currentPlayer,
+                playerEnabled = videoSurfaceEnabled,
                 isFullscreen = isFullscreen,
                 screenHeightDp = screenHeightDp,
                 durationMs = durationMs,
@@ -230,6 +239,14 @@ internal fun PlayerContent(
                         )
                     }
                 }
+                // 入场封面遮罩：滑入期间与视频首帧出来之前，用视频封面盖住视频区。
+                //   画在加载块之上（滑入时"正在加载…"的转圈被封面盖住，不会先闪一下），
+                //   错误面板画在它之后（遮罩不挡错误说明）。首帧就绪后遮罩 220ms 淡出。
+                PlayerEntryPoster(
+                    visible = entryPosterVisible,
+                    model = video.localThumbnailPath ?: video.thumbnailUrl,
+                    loadingText = if (entryPosterLoading) switchLoadingText else null
+                )
                 // 在线地址解析失败（断连 / 私密 403 / 外嵌）→ 在页内给出说明 + 「重试 / 退出」，
                 // 绝不自动关页。私密与外嵌这两类大概率打不开，文案里直接点明，
                 // 详情页仍提供「打开原视频」。
@@ -376,6 +393,8 @@ internal fun PlayerContent(
 private fun VideoSurfaceBox(
     player: Player,
     currentPlayer: () -> Player,
+    /** false 时先不挂 PlayerView：入场滑入阶段只有封面遮罩，省掉 SurfaceView 首次 attach 与首帧。 */
+    playerEnabled: Boolean,
     isFullscreen: Boolean,
     screenHeightDp: Dp,
     durationMs: Long,
@@ -436,14 +455,66 @@ private fun VideoSurfaceBox(
                 )
             }
     ) {
-        AndroidView(
-            // 走复用池（省一次整棵 PlayerView inflate）；边界见 [PlayerViewPool]。
-            factory = { ctx -> PlayerViewPool.acquire(ctx) },
-            update = { it.player = player },
-            onRelease = { PlayerViewPool.release(it) },
-            modifier = Modifier.fillMaxSize()
-        )
+        // 入场滑入期间不挂画面：320ms 里每帧只做整页位移，不让 SurfaceView 的
+        //   首次 attach / 首帧合成挤进同一段动画（落位后由 entryPosterVisible 接棒）。
+        if (playerEnabled) {
+            AndroidView(
+                // 走复用池（省一次整棵 PlayerView inflate）；边界见 [PlayerViewPool]。
+                factory = { ctx -> PlayerViewPool.acquire(ctx) },
+                update = { it.player = player },
+                onRelease = { PlayerViewPool.release(it) },
+                modifier = Modifier.fillMaxSize()
+            )
+        }
         overlay()
+    }
+}
+
+/** 入场封面遮罩淡出的时长：够短（不拖住入场），够长（不出现"封面啪地消失"）。 */
+private const val ENTRY_POSTER_FADE_MS = 220
+
+/**
+ * 入场封面遮罩：入场滑入期间 + 落位后视频首帧出来之前，用视频封面盖住视频区。
+ *
+ * 目的：① 滑入动画里不建 PlayerView（SurfaceView 首次 attach + 首帧绘制最贵）；
+ * ② 落位后视频还没出画面的那几百毫秒（在线要解析地址）有封面可看，而不是黑屏+转圈。
+ * [visible] 变 false 后整块淡出，露出真实画面；淡完立即撤掉，不留全屏图片层。
+ * 没有封面地址时只有黑底与（必要时的）加载提示 —— 仍比"黑屏闪一下"稳。
+ *
+ * 加载提示复用 [CenterLoadingOverlay]（与换片空窗那层同一组件、同一文案、同一位置），
+ * 遮罩淡出时它与底下的加载层严丝合缝，不会出现"小转圈换成大转圈"的跳变。
+ */
+@Composable
+private fun PlayerEntryPoster(
+    visible: Boolean,
+    model: String?,
+    loadingText: String?
+) {
+    val alpha by animateFloatAsState(
+        targetValue = if (visible) 1f else 0f,
+        animationSpec = tween(ENTRY_POSTER_FADE_MS),
+        label = "entryPosterAlpha"
+    )
+    if (!visible && alpha <= 0.01f) return
+    Box(
+        Modifier
+            .fillMaxSize()
+            .graphicsLayer { this.alpha = alpha }
+            .background(Color.Black)
+    ) {
+        if (model != null) {
+            AsyncImage(
+                model = model,
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
+            )
+            // 封面可能很亮：轻压一层，保证滑入时顶栏白字/返回键仍看得清。
+            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.12f)))
+        }
+        if (loadingText != null) {
+            CenterLoadingOverlay(text = loadingText, modifier = Modifier.align(Alignment.Center))
+        }
     }
 }
 

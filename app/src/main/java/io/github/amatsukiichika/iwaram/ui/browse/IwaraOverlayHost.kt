@@ -3,12 +3,11 @@ package io.github.amatsukiichika.iwaram.ui.browse
 import androidx.activity.BackEventCompat
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.MutableTransitionState
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
@@ -20,7 +19,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
-import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -29,7 +27,10 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Color
@@ -47,6 +48,7 @@ import io.github.amatsukiichika.iwaram.ui.exitDurationMs
 import io.github.amatsukiichika.iwaram.ui.rememberAdaptivePageShape
 import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.collectLatest
 
 /**
  * 进入/退场参数，与 MainActivity 的设置页/播放页覆盖层一致。
@@ -110,6 +112,9 @@ fun IwaraOverlayHost(
 
     // ---- 跟手位移（预测式返回）：0f..1f；与设置页/播放页同款，只 snapTo、不做任何补间 ----
     // 手势绑定的层用**序号**表示（null = 没在拖）。
+    // 这两个状态**只在绘制相位 / 协程里读**（见下面的 translationFraction / gestureCover 与
+    //   OverlayPage 的 graphicsLayer）：组合相位一旦读它们，拖动时每来一个 progress 事件就会
+    //   重组整页（作者页头部+吸顶栏、播放页顶底栏全部重跑）；只在绘制相位读，拖动就只剩重绘。
     var gestureSeq by remember { mutableStateOf<Long?>(null) }
     var gestureProgress by remember { mutableFloatStateOf(0f) }
     // 已松手弹栈、但退场动画还在播的页 → 松手瞬间冻结的位移比例。退场期间必须继续按这个位移绘制，
@@ -140,10 +145,6 @@ fun IwaraOverlayHost(
         val live = livePageStack(overlays)
         val leaving = leavingPages.filter { e -> overlays.none { it.seq == e.seq } && !e.isActionSheet }
         val renderList = live + leaving
-        // 手势正在拖动的那一层在"活跃栈"里的位置（-1 = 没在拖 / 拖的是退场页）
-        val gestureIndex =
-            gestureSeq?.let { s -> live.indexOfFirst { it.seq == s } } ?: -1
-
         renderList.forEachIndexed { renderIdx, entry ->
             // 退场页不在活跃栈里 → indexOf 返回 -1，顺带就是 isLeaving 判定。
             val liveIndex = live.indexOfFirst { it.seq == entry.seq }
@@ -154,20 +155,32 @@ fun IwaraOverlayHost(
             //   补间给出，与栈内被覆盖是同一套。
             val covered = isCoveredAt(live, liveIndex) ||
                 (coveredByOther && liveIndex == live.lastIndex)
-            // 跟手位移：正在拖动的那层用实时值，已松手正在退场的那层用冻结值。
-            val translationFraction = if (entry.seq == gestureSeq) {
-                gestureProgress
+            // 跟手位移比例：**只在绘制相位读**（OverlayPage 的 graphicsLayer / 绘制 lambda 里调用）。
+            //   返回 lambda 而不是 Float：组合相位不读 gestureProgress，拖动时本页零重组、只重绘。
+            //   正在拖动的那层读实时进度；已松手正在退场的那层读冻结值（常量）。
+            val translationFraction: () -> Float = if (isLeaving) {
+                val frozen = frozenGesture[entry.seq] ?: 0f
+                { frozen }
             } else {
-                frozenGesture[entry.seq] ?: 0f
+                { if (gestureSeq == entry.seq) gestureProgress else 0f }
             }
-            // 手势拖动中，被它盖住的页实时让位：c = 1 - p（p 越大越接近原位/原亮度）
-            val gestureCover = if (!isLeaving && gestureIndex > liveIndex && gestureIndex >= 0) {
-                1f - gestureProgress
-            } else {
-                null
+            // 手势拖动中，被它盖住的页实时让位：c = 1 - p（p 越大越接近原位/原亮度）。
+            //   同为 lambda：拖动时只有绘制/动画相位读实时进度。
+            val gestureCover: () -> Float? = {
+                val gesture = gestureSeq
+                if (!isLeaving && gesture != null) {
+                    val index = live.indexOfFirst { it.seq == gesture }
+                    if (index > liveIndex && index >= 0) 1f - gestureProgress else null
+                } else {
+                    null
+                }
             }
-            // 动画目标把**跟手值**也算进去 —— 见 [coverTargetFor] 与 OverlayPage 的说明。
-            //   （否则松手瞬间跟手位移一撤、声明式动画还停在 1，底页会先跳回"盖住"的位置再滑出。）
+            // 退场规格用的**数值**：冻结位移与松手速度只在开始退场的那一次组合里读一次
+            //   （退场动画把冻结位移当起点、按"剩余距离 / 松手速度"换算时长）。
+            val exitTranslationFraction = if (isLeaving) frozenGesture[entry.seq] ?: 0f else 0f
+            // 手势弹出的页带着松手速度退场（px/s）；按钮关闭 = 0 → 走默认规格。
+            val exitVelocityPxPerS =
+                if (isLeaving) (frozenVelocity[entry.seq] ?: 0f) * screenWidthPx else 0f
 
             key(entry.seq) {
                 OverlayPage(
@@ -176,9 +189,9 @@ fun IwaraOverlayHost(
                     animateEnter = enteredNow.any { it.seq == entry.seq },
                     // 退场一律播标准动画（含手势层）：松手后从冻结位移继续滑出，与设置页/播放页一致。
                     animateExit = isLeaving,
-                    gestureTranslationPx = translationFraction * screenWidthPx,
-                    // 手势弹出的页带着松手速度退场（px/s）；按钮关闭 = 0 → 走默认规格。
-                    exitVelocityPxPerS = (frozenVelocity[entry.seq] ?: 0f) * screenWidthPx,
+                    gestureTranslationFraction = translationFraction,
+                    exitTranslationFraction = exitTranslationFraction,
+                    exitVelocityPxPerS = exitVelocityPxPerS,
                     covered = covered,
                     gestureCover = gestureCover,
                     coverShiftPx = coverShiftPx,
@@ -197,31 +210,35 @@ fun IwaraOverlayHost(
         }
     }
 
-    // 动作面板是独立窗口（ModalBottomSheet），接管整层显示。放在所有 remember 之后，
-    // 保证覆盖层栈的动画状态在面板开关时不丢失。
+    // 动作面板是独立窗口（ModalBottomSheet），自己接管整层显示与返回：
+    //   面板打开时主窗口**不注册**返回（见下面的 enabled），让面板窗口的 OnBackInvokedDispatcher
+    //   接管预测返回跟手；这里只负责把面板挂出来，覆盖层栈照常渲染（面板开关不丢栈的动画状态）。
     when (val sheet = overlays.lastOrNull()?.overlay) {
-        is IwaraOverlay.VideoActions -> {
+        is IwaraOverlay.VideoActions ->
             VideoActionsSheet(sheet.video, cvm, actions, { onPop() }, sheet.pickPlaylistDirectly)
-            return
-        }
-        is IwaraOverlay.ImageActions -> {
+        is IwaraOverlay.ImageActions ->
             ImageActionsSheet(sheet.image, cvm, actions) { onPop() }
-            return
-        }
         else -> Unit
     }
 
     // 预测式返回（设置页/播放页同款）：跟手右滑；越过阈值松手**立刻**弹栈、不加任何补间，
-    // 取消则同步复位。两条路径都不含挂起点，避免协程被打断导致状态卡住。
-    PredictiveBackHandler(enabled = overlays.isNotEmpty() && backEnabled) { flow: Flow<BackEventCompat> ->
+    // 取消则同步复位。取消路径不含挂起点，避免协程被打断导致状态卡住。
+    //   enabled 只认**栈顶是覆盖层页**：动作面板是独立 Dialog 窗口、自己注册窗口级预测返回，
+    //   主窗口再注册就会"以为有主、实际无回调"（或同一手势在两个窗口各拖一遍）；面板打开时
+    //   主窗口不注册；被更上层（播放页/设置页）或外部盖住时同样让出。
+    val actionSheetOnTop = overlays.lastOrNull()?.isActionSheet == true
+    val topPage = overlays.lastOrNull { !it.isActionSheet }
+    PredictiveBackHandler(
+        enabled = backEnabled && topPage != null && !actionSheetOnTop && !coveredByOther
+    ) { flow: Flow<BackEventCompat> ->
         var completed = false
         // 每次手势一个新实例：对 progress 事件做时间差分，估算松手瞬间的跟手速度。
         val velocity = BackVelocityTracker()
         try {
             flow.collect { event ->
-                // 若上一页还在退场（已不在栈里），本次手势重新绑定到当前栈顶。
+                // 若上一页还在退场（已不在栈里），本次手势重新绑定到当前栈顶（动作面板不参与）。
                 gestureSeq = gestureSeq?.takeIf { s -> overlays.any { it.seq == s } }
-                    ?: overlays.lastOrNull()?.seq
+                    ?: overlays.lastOrNull { !it.isActionSheet }?.seq
                 gestureProgress = event.progress.coerceIn(0f, 1f)
                 velocity.onEvent(gestureProgress, System.nanoTime())
                 onBackProgress(gestureProgress)
@@ -246,11 +263,20 @@ fun IwaraOverlayHost(
                 //   这样被拖的那层 translation 立即回 0、被它盖住的那层 cover 立即回 1（snap 目标）；
                 //   gestureSeq 留着，下一次手势的 collect 会重新绑定到当前栈顶（上面那行 takeIf 已兼容）。
                 gestureProgress = 0f
+                onBackProgress(null)
             }
-            onBackProgress(null)
         }
         // 手势完成才弹栈；取消（异常/中断）不弹。
-        if (completed) onPop()
+        if (completed) {
+            // 先弹栈（退场页已拿到冻结位移，这一帧就能从手指位置继续滑出），**下一帧**再清主内容的
+            //   让位进度：同一帧里既退场又让底页回弹会闪一下（"先退场后清"）。
+            onPop()
+            try {
+                withFrameNanos { }
+            } finally {
+                onBackProgress(null)
+            }
+        }
     }
 }
 
@@ -259,11 +285,11 @@ fun IwaraOverlayHost(
  * - 静止：`animateEnter=false, animateExit=false` → 可见且不播任何动画（含"被弹出的页露出来"）；
  * - 进入：`animateEnter=true` → 右滑入 + 淡入；
  * - 退场：`animateExit=true` → 右滑出 + 淡出，播完回调 [onExited]；
- * - 跟手拖动中：二者皆 false，但 [gestureTranslationPx] > 0 → 只按手指位移绘制，不播动画。
+ * - 跟手拖动中：二者皆 false，但 [gestureTranslationFraction]() > 0 → 只按手指位移绘制，不播动画。
  *
  * 卡片化：Surface 裁 [shape] 圆角；被上层盖住（[covered]）时左移 [coverShiftPx] 并压暗
- * [COVER_DIM_ALPHA]；手势拖动期间用 [gestureCover] 实时值，松手后从手指位置接着动画归零
- * （见 [coverTargetFor]）。组合 key 由宿主设为 `entry.seq`，状态机天然按"栈层"隔离 ——
+ * [COVER_DIM_ALPHA]；手势拖动期间用 [gestureCover] 实时值，松手后从手指位置接着动画归零。
+ * 组合 key 由宿主设为 `entry.seq`，状态机天然按"栈层"隔离 ——
  * 同一页被 pop 后快速重新 push 会拿到全新的 `MutableTransitionState`（不残留"已隐藏"状态）。
  */
 @Composable
@@ -271,11 +297,15 @@ private fun OverlayPage(
     entry: OverlayEntry,
     animateEnter: Boolean,
     animateExit: Boolean,
-    gestureTranslationPx: Float,
+    /** 跟手位移比例（0f..1f）。**lambda**：只在绘制相位读，拖动时不重组宿主、也不重组本页。 */
+    gestureTranslationFraction: () -> Float,
+    /** 退场起点的冻结位移比例（退场开始的那一次组合读一次的数值，退场规格用）。 */
+    exitTranslationFraction: Float,
     /** 松手速度（px/s，仅手势弹出的页 > 0）：退场按"剩余距离 / 该速度"换算时长、带动量滑出。 */
     exitVelocityPxPerS: Float = 0f,
     covered: Boolean,
-    gestureCover: Float?,
+    /** 当前手势给本页的让位比例（null = 没有被手势盖住）。lambda，同 [gestureTranslationFraction]。 */
+    gestureCover: () -> Float?,
     coverShiftPx: Float,
     cvm: IwaraClientViewModel,
     vm: VideoViewModel,
@@ -301,11 +331,13 @@ private fun OverlayPage(
     // （钳制 150..320ms），缓动用快出慢停的 LinearOutSlowIn —— FastOutSlowIn 起始斜率为 0，
     //   松手瞬间页面急减速再缓滑，就是"顿一下"的来源。非手势退出（按钮关闭）没有动量，
     //   保持原 320ms FastOutSlowIn。spec 只在退场开始的那个组合算一次（之后入参不再变化）。
+    // 退场起点位移（px）：冻结比例 × 屏宽。只在退场开始的那个组合算一次。
+    val exitTranslationPx = exitTranslationFraction * screenWidthPx
     val exitSpec: FiniteAnimationSpec<IntOffset> =
-        remember(animateExit, gestureTranslationPx, exitVelocityPxPerS) {
-            if (animateExit && exitVelocityPxPerS > 0f && gestureTranslationPx < screenWidthPx) {
+        remember(animateExit, exitTranslationPx, exitVelocityPxPerS) {
+            if (animateExit && exitVelocityPxPerS > 0f && exitTranslationPx < screenWidthPx) {
                 tween(
-                    exitDurationMs(screenWidthPx - gestureTranslationPx, exitVelocityPxPerS, EXIT_SLIDE_MS),
+                    exitDurationMs(screenWidthPx - exitTranslationPx, exitVelocityPxPerS, EXIT_SLIDE_MS),
                     easing = LinearOutSlowInEasing
                 )
             } else {
@@ -314,32 +346,39 @@ private fun OverlayPage(
         }
 
     // 让位进度：0 = 完全露出（原位/原亮度），1 = 被上层完全盖住。
-    // 用**声明式补间** —— 目标值唯一决定终态，animateFloatAsState 内部是一条长驻协程
-    //   收 snapshotFlow 的目标变化（不随重组被取消），所以**不可能停在半路**。
-    // 动画目标要把**跟手值**也算进去（[coverTargetFor]）—— 跟手时目标 = 手指位置、用 snap 立即贴上；
-    //   松手那一帧 `gestureCover` 变 null 与"下层页变成顶层"发生在同一次重组 ⇒ 目标变成 0、规格变 tween，
-    //   而当前值正是最后贴上的手指位置 ⇒ **从手指位置接着滑出**。
-    // 拿 **State**（而不是 `by` 委托出来的值）—— 让位动画的读值必须留在
-    //   绘制相位（graphicsLayer / drawWithContent）里，见下面两处注释。
-    val coverAnim: State<Float> = animateFloatAsState(
-        targetValue = coverTargetFor(gestureCover, covered),
-        animationSpec = if (gestureCover != null) {
-            snap()
-        } else {
-            tween(COVER_MOTION_MS, easing = FastOutSlowInEasing)
-        },
-        label = "pageCover"
-    )
+    // 用 Animatable + snapshotFlow —— 目标值唯一决定终态、协程常驻（不随重组被取消），不可能停在半路；
+    //   跟手时 snapTo 手指位置（切帧级贴合），松手那一帧 gestureCover 变 null 与"下层页变成顶层"
+    //   发生在同一次组合 ⇒ 目标变成 0、规格变 tween，而当前值正是最后贴上的手指位置 ⇒
+    //   **从手指位置接着滑出**。组合相位不读动画值，跟手/覆盖目标都经 rememberUpdatedState 取最新。
+    val coverAnim = remember { Animatable(if (covered) 1f else 0f) }
+    val gestureCoverNow = rememberUpdatedState(gestureCover)
+    val coveredNow = rememberUpdatedState(covered)
+    LaunchedEffect(Unit) {
+        snapshotFlow { gestureCoverNow.value() to coveredNow.value }
+            .collectLatest { (following, isCovered) ->
+                if (following != null) {
+                    // 跟手：目标 = 手指位置，直接贴上（无补间）。
+                    coverAnim.snapTo(following)
+                } else {
+                    coverAnim.animateTo(
+                        targetValue = if (isCovered) 1f else 0f,
+                        animationSpec = tween(COVER_MOTION_MS, easing = FastOutSlowInEasing)
+                    )
+                }
+            }
+    }
 
     // 二级页圆角只在看得见的时候存在：进出场动画中 / 跟手拖动中 / 被盖让位中（含静止被盖——
     //   它右侧那条边一直露着）。静止铺满时是实心直角矩形。
-    // `exposed` 用 derivedStateOf —— 只在布尔真的翻转时才让本层重组；
-    //   若直接在组合相位读动画值（`val coverFraction = animatedCover`）当布尔用，
-    //   等于让 320ms 让位动画的**每一帧**都重组整页（作者页头部+吸顶栏、播放页顶底栏全部重跑）。
-    //   注意 `gestureTranslationPx` 是普通参数（不是 State），必须当 remember 的 key，否则捕获旧值。
-    val exposedShape by remember(gestureTranslationPx) {
+    // 依次读跟手位移 lambda 与让位动画值，但都包在 derivedStateOf 里 —— 只在布尔真的翻转时
+    //   才让本层重组；直接把动画值当布尔用等于让让位动画的**每一帧**都重组整页
+    //   （作者页头部+吸顶栏、播放页顶底栏全部重跑）。
+    val translationFractionNow = rememberUpdatedState(gestureTranslationFraction)
+    val exposedShape by remember {
         derivedStateOf {
-            !visibleState.isIdle || gestureTranslationPx != 0f || coverAnim.value > 0f
+            !visibleState.isIdle ||
+                translationFractionNow.value() != 0f ||
+                (gestureCoverNow.value() ?: coverAnim.value) > 0f
         }
     }
     val shape = rememberAdaptivePageShape(exposed = exposedShape)
@@ -351,14 +390,15 @@ private fun OverlayPage(
         //   透出底下被让位左移的底页（右边那条边）与黑垫。
         enter = slideInHorizontally(tween(ENTER_SLIDE_MS)) { it },
         // 退场目标 = 剩余距离（fullWidth − 冻结位移）：非手势退出位移为 0，目标 = 全宽，与旧行为一致。
-        exit = slideOutHorizontally(exitSpec) { it - gestureTranslationPx.roundToInt() }
+        exit = slideOutHorizontally(exitSpec) { it - exitTranslationPx.roundToInt() }
     ) {
         Surface(
             Modifier
                 .fillMaxSize()
                 .graphicsLayer {
-                    // 让位位移在**绘制相位**读动画值：不触发重组/重排，只重绘。
-                    translationX = gestureTranslationPx - coverAnim.value * coverShiftPx
+                    // 跟手位移与让位位移都在**绘制相位**读（lambda / Animatable）：不触发重组/重排，只重绘。
+                    translationX = translationFractionNow.value() * screenWidthPx -
+                        (gestureCoverNow.value() ?: coverAnim.value) * coverShiftPx
                 },
             shape = shape,
             color = MaterialTheme.colorScheme.background
@@ -371,7 +411,8 @@ private fun OverlayPage(
                     //   重组 0 次、只重绘，语义一致（让位期间逐帧渐变、结束即不画）。
                     .drawWithContent {
                         drawContent()
-                        val cover = coverAnim.value
+                        // 跟手期间读实时值，其余读让位动画值 —— 都在绘制相位。
+                        val cover = gestureCoverNow.value() ?: coverAnim.value
                         if (cover > 0.01f) {
                             drawRect(color = Color.Black, alpha = COVER_DIM_ALPHA * cover)
                         }

@@ -6,8 +6,9 @@ import android.os.Build
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
+import androidx.activity.BackEventCompat
 import androidx.activity.ComponentDialog
-import androidx.activity.addCallback
+import androidx.activity.OnBackPressedCallback
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
@@ -129,10 +130,35 @@ private class SheetDialogWrapper(
 
     private val layout = SheetDialogLayout(context)
 
+    /** 预测返回跟手中：progress 0f（抽屉完全就位）..1f（整块到屏幕下方）。由 AppBottomSheet 逐帧注入。 */
+    var onBackProgress: (Float) -> Unit = {}
+
+    /** 预测返回取消（没越过阈值就松手 / 系统中断）：回弹到就位。由 AppBottomSheet 注入。 */
+    var onBackCancelled: () -> Unit = {}
+
     init {
         setupWindow()
-        // 返回键 → 关闭请求（原 Dialog dismissOnBackPress=true 的语义）。
-        onBackPressedDispatcher.addCallback(this) { onDismissRequest() }
+        // 返回 → 关闭请求（原 Dialog dismissOnBackPress=true 的语义），并接**窗口级预测返回**：
+        //   ComponentDialog 在 API 33+ 会把窗口的 OnBackInvokedDispatcher 桥接进本 dialog 的
+        //   OnBackPressedDispatcher（activity 1.13.0 核验过），所以在这里注册的回调能拿到
+        //   BackEventCompat —— API 34+ 带 progress，可驱动抽屉跟手；33 及以下只有"按下"，
+        //   直接退场（无跟手）。不要再只挂 view 的 onBackPressedDispatcher：那样没有 progress。
+        onBackPressedDispatcher.addCallback(
+            this,
+            object : OnBackPressedCallback(true) {
+                override fun handleOnBackProgressed(backEvent: BackEventCompat) {
+                    onBackProgress(backEvent.progress.coerceIn(0f, 1f))
+                }
+
+                override fun handleOnBackCancelled() {
+                    onBackCancelled()
+                }
+
+                override fun handleOnBackPressed() {
+                    onDismissRequest()
+                }
+            }
+        )
         setContentView(layout)
     }
 
@@ -195,6 +221,8 @@ private class SheetDialogWrapper(
  *   内容区被压缩、可滚动（聚焦的输入框会被 Compose 自动滚进可视区）；
  * - 背景遮罩：画在 Activity（全屏单层黑，alpha 由 [SheetScrimState] 逐帧镜像）；
  * - 关闭：点背景 / 按返回 / 向下拖过 1/4 三种都能关；只有开、关两态，不中间停。
+ *   返回手势走**窗口级预测返回**：API 34+ 跟手（progress 驱动位移/遮罩，松手回弹或关闭），
+ *   更低版本按下即关。
  */
 @Composable
 fun AppBottomSheet(
@@ -251,6 +279,26 @@ fun AppBottomSheet(
         // 每次重组重申窗口全屏（M3 同款）+ 下发系统栏透明/图标外观。
         dialog.updateWindowSize()
         dialog.syncSystemBars(lightStatusBars)
+        // 预测返回跟手：面板是独立窗口，手势由**窗口自己**接（见 SheetDialogWrapper），
+        //   这里把 progress 接到抽屉位移/遮罩上 —— 拖动逐帧跟手；越过阈值松手 = 直接关闭；
+        //   没越过阈值（handleOnBackCancelled）→ 回弹到就位。
+        //   API 33 及以下没有 progress，只有"按下"，走 handleOnBackPressed 直接退场。
+        dialog.onBackProgress = { progress ->
+            if (!closing) {
+                scope.launch {
+                    offsetY.snapTo(progress)
+                    scrim.snapTo(1f - progress)
+                }
+            }
+        }
+        dialog.onBackCancelled = {
+            if (!closing) {
+                scope.launch {
+                    launch { scrim.animateTo(1f, tween(200)) }
+                    offsetY.animateTo(0f, tween(320, easing = FastOutSlowInEasing))
+                }
+            }
+        }
     }
 
     DisposableEffect(dialog) {

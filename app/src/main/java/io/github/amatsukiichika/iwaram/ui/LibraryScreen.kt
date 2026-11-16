@@ -53,18 +53,19 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.ui.browse.CompactSearchSlot
 import io.github.amatsukiichika.iwaram.ui.browse.RATING_OPTIONS
 import io.github.amatsukiichika.iwaram.ui.browse.SEARCH_ROW_HEIGHT
-import io.github.amatsukiichika.iwaram.ui.browse.ScrollToTopButton
+import io.github.amatsukiichika.iwaram.ui.components.ScrollToTopButton
 import io.github.amatsukiichika.iwaram.ui.browse.SelectorChip
 import io.github.amatsukiichika.iwaram.ui.browse.TagFilterRow
 import io.github.amatsukiichika.iwaram.ui.components.TagSuggestionRow
 import io.github.amatsukiichika.iwaram.ui.browse.accentChipColors
 import io.github.amatsukiichika.iwaram.ui.browse.accentInputChipColors
 import io.github.amatsukiichika.iwaram.ui.browse.GRID_CARD_GAP
-import io.github.amatsukiichika.iwaram.ui.browse.animateScrollToTop
+import io.github.amatsukiichika.iwaram.ui.components.animateScrollToTop
 import io.github.amatsukiichika.iwaram.ui.components.PillSegment
 import io.github.amatsukiichika.iwaram.ui.components.horizontalSlideSpec
 import io.github.amatsukiichika.iwaram.ui.components.PillSelector
@@ -73,8 +74,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import io.github.amatsukiichika.iwaram.ui.components.TOP_BAR_CONTENT_HEIGHT
-import io.github.amatsukiichika.iwaram.ui.components.glassViewBackdrop
-import io.github.amatsukiichika.iwaram.ui.components.rememberGlassViewBackdrop
+import io.github.amatsukiichika.iwaram.ui.components.ReportMainContentScrollActivity
+import io.github.amatsukiichika.iwaram.ui.components.glassScrollBackdropSource
+import io.github.amatsukiichika.iwaram.ui.components.rememberGlassScrollBackdrop
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -178,12 +180,13 @@ fun LibraryScreen(
     // ① 背景源挂在内容那一层上，回顶按钮是它的兄弟节点（消费点不在录制子树内，防自采样 SIGSEGV）；
     // ② 顶栏是覆盖层，其高度必须喂回内容的 contentPadding(top)，否则首行被压在条底下。
     Box(modifier = Modifier.fillMaxSize()) {
-        val topBackdrop = rememberGlassViewBackdrop()
+        // 滚动期可冻结的内容级背景源：拖动时停录，回顶按钮采样上一帧。
+        val topBackdrop = rememberGlassScrollBackdrop()
         // 页面条的实测高度不再由本页测量：悬浮顶栏已移入 MainActivity 那条静态材质条
         //   （见 [LibraryScreen] 的 topPadding 参数说明），高度由它实测后下发。
 
         // 四个视图的滚动状态**提升到页面级** —— 因为"回顶按钮"必须待在**录制子树之外**。
-        //   录制层包住整个内容区（`glassViewBackdrop` 在下面那层 Box 上），按钮若留在各模式内部
+        //   录制层包住整个内容区（`glassScrollBackdropSource` 在下面那层 Box 上），按钮若留在各模式内部
         //   就落在录制子树里了 ⇒ 违反库的"消费点不得位于源的录制子树内"（自采样 SIGSEGV）。
         //   副作用（正向）：切模式时滚动位置不再重建。
         val allState = rememberLazyGridState()
@@ -191,8 +194,26 @@ fun LibraryScreen(
         val authorState = rememberLazyListState()
         val timeState = rememberLazyListState()
         val pageScope = rememberCoroutineScope()
+        // 拖滚动条不走手势滚动（走 requestScrollToItem），**不会**置 isScrollInProgress ⇒ 单独记「scrub 中」，
+        //   并入下面的玻璃背景冻结判据：否则拖动期间每帧全屏重录背景，UI 线程掉帧。
+        var scrollbarDragging by remember { mutableStateOf(false) }
+        // 同一个判据喂两处：本页顶栏那条冻结门 + 宿主的整屏录制门（MainActivity）。
+        val scrolling: () -> Boolean = {
+            scrollbarDragging || when (state.mode) {
+                LibraryMode.ALL -> allState.isScrollInProgress
+                LibraryMode.FOLDER -> folderState.isScrollInProgress
+                LibraryMode.AUTHOR -> authorState.isScrollInProgress
+                LibraryMode.TIME -> timeState.isScrollInProgress
+                LibraryMode.TAG -> false
+            }
+        }
+        ReportMainContentScrollActivity(scrolling)
 
-        Box(Modifier.fillMaxSize().glassViewBackdrop(topBackdrop)) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .glassScrollBackdropSource(topBackdrop, scrolling)
+        ) {
             // 内容区：按方向左右滑动切换（右往左进时向左推，左往右进时向右推）
             AnimatedContent(
                 targetState = state.mode,
@@ -210,27 +231,38 @@ fun LibraryScreen(
                             // 背景源已提升到页面级（`topBackdrop`，与回顶按钮共用），
                             //   这里不再各自 `rememberGlassViewBackdrop()`，避免两层嵌套录制白付成本。
                             //   网格自己铺满整个区域（顶部 contentPadding = 悬浮条高度）⇒ 卡片会**从顶栏底下穿过**。
-                            VideoGrid(
-                                videos = state.videos,
-                                showTags = state.showTags,
-                                showR18Tag = state.showR18Tag,
-                                onOpenVideo = onOpenVideo,
-                                onTagClick = vm::selectTag,
-                                onLongClick = { linkTarget = it },
-                                onImport = onImport,
-                                onAuthorClick = { v ->
-                                    onOpenAuthor(v.authorId ?: VideoViewModel.UNKNOWN_AUTHOR_KEY, v.author)
-                                },
-                                // 全局筛选器：筛空时换一条空态文案（不然会显示"还没有视频，导入…"）
-                                hiddenByFilter = state.hiddenByFilter,
-                                state = allState,
-                                bottomPadding = bottomPadding,
-                                // 顶栏是覆盖层，首行需为其让出高度。
-                                topPadding = topPadding
-                            )
+                            // 拖动滚动条期间把卡片降级为骨架（见 [LocalScrubbingCards]）：
+                            //   拖动每帧落位一屏新卡片，封面加载 + 标签行 subcompose 是那一帧的主要成本；
+                            //   骨架高度与真实卡片逐像素一致，松手立刻恢复，排布不跳。
+                            CompositionLocalProvider(LocalScrubbingCards provides scrollbarDragging) {
+                                VideoGrid(
+                                    videos = state.videos,
+                                    showTags = state.showTags,
+                                    showR18Tag = state.showR18Tag,
+                                    onOpenVideo = onOpenVideo,
+                                    onTagClick = vm::selectTag,
+                                    onLongClick = { linkTarget = it },
+                                    onImport = onImport,
+                                    onAuthorClick = { v ->
+                                        onOpenAuthor(v.authorId ?: VideoViewModel.UNKNOWN_AUTHOR_KEY, v.author)
+                                    },
+                                    // 全局筛选器：筛空时换一条空态文案（不然会显示"还没有视频，导入…"）
+                                    hiddenByFilter = state.hiddenByFilter,
+                                    state = allState,
+                                    bottomPadding = bottomPadding,
+                                    // 顶栏是覆盖层，首行需为其让出高度。
+                                    topPadding = topPadding
+                                )
+                            }
                             // 换在线同款连续滚动条（拖动实时滚）+ 居中分节气泡；
                             //   左右 12dp 对称后滚动条悬浮右缘，不再占位。
-                            FastScrollbarBasicWithBubble(allState, markers, Modifier.fillMaxSize())
+                            //   轨道顶部让出悬浮顶栏：节点仍铺满，可见/可拖区域从顶栏下沿开始。
+                            FastScrollbarBasicWithBubble(
+                                allState,
+                                markers,
+                                Modifier.fillMaxSize().padding(top = topPadding),
+                                onDraggingChange = { scrollbarDragging = it }
+                            )
                         }
                     }
                     LibraryMode.FOLDER -> {
@@ -245,7 +277,9 @@ fun LibraryScreen(
                                 markers = markers,
                                 currentIndex = { firstVisible },
                                 onScrollToIndex = { idx -> pageScope.launch { listState.scrollToItem(idx) } },
-                                modifier = Modifier.fillMaxSize()
+                                // 顶部让出悬浮顶栏，右缘留 2dp（与连续滚动条对齐）。
+                                modifier = Modifier.fillMaxSize().padding(top = topPadding, end = 2.dp),
+                                onDraggingChange = { scrollbarDragging = it }
                             )
                         }
                     }
@@ -261,7 +295,9 @@ fun LibraryScreen(
                                 markers = markers,
                                 currentIndex = { firstVisible },
                                 onScrollToIndex = { idx -> pageScope.launch { listState.scrollToItem(idx) } },
-                                modifier = Modifier.fillMaxSize()
+                                // 顶部让出悬浮顶栏，右缘留 2dp（与连续滚动条对齐）。
+                                modifier = Modifier.fillMaxSize().padding(top = topPadding, end = 2.dp),
+                                onDraggingChange = { scrollbarDragging = it }
                             )
                         }
                     }
@@ -272,8 +308,13 @@ fun LibraryScreen(
                         Box(Modifier.fillMaxSize()) {
                             // 背景源已提升到页面级（见「全部」视图的说明）。
                             TimeList(state.timeBuckets, vm::selectTime, listState, bottomPadding, topPadding)
-                            // 连续滚动条 + 居中分节气泡（月份），同「全部」视图。
-                            FastScrollbarBasicWithBubble(listState, markers, Modifier.fillMaxSize())
+                            // 连续滚动条 + 居中分节气泡（月份），同「全部」视图；轨道顶部让出悬浮顶栏。
+                            FastScrollbarBasicWithBubble(
+                                listState,
+                                markers,
+                                Modifier.fillMaxSize().padding(top = topPadding),
+                                onDraggingChange = { scrollbarDragging = it }
+                            )
                         }
                     }
                     LibraryMode.TAG -> TagCloud(state.tags, state.selectedTags, vm::selectTag, bottomPadding, topPadding)

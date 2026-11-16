@@ -44,6 +44,9 @@ suspend fun IwaraRepository.importFolder(treeUri: Uri, onProgress: (done: Int, t
             //   查一次库是 N 次查询。这里一次性取 URI + iwaraId + fileName（最小投影），
             //   既做判重，也供下面「老条目补 ID」用。
             val existing = dao.getAllRefs().associateBy { it.localUri }
+            // 封面路径单读一份：已入库行不重建封面，但路径可能已经失效 —— 只有拿到路径
+            //   才能判断"要不要补"（详见下面已存在行分支的封面自愈）。
+            val thumbRefs = dao.getAllThumbRefs().associateBy { it.localUri }
             // 同一批里重复出现时只处理一次（防御性：与原实现的 set.add 语义一致）。
             val handled = HashSet<String>(files.size)
 
@@ -65,6 +68,9 @@ suspend fun IwaraRepository.importFolder(treeUri: Uri, onProgress: (done: Int, t
             // 旧数据回填「文件修改日期」的待写列表（fileModifiedAt == 0 的已入库行）。
             //   攒批最后用一个事务提交 —— 逐行 UPDATE 会让 observeAll 重发射上千次。
             val mtimeBackfill = ArrayList<Pair<String, Long>>()
+            // 封面自愈的待写列表：清缓存后老行的封面路径指向已删文件，重扫要按"缺即补"重建。
+            //   与其他回填一样攒批，末尾一个事务提交。
+            val thumbBackfill = ArrayList<Pair<String, String?>>()
             for ((f, rel) in files) {
                 val name = f.name ?: continue
                 val uri = f.uri.toString()
@@ -108,6 +114,11 @@ suspend fun IwaraRepository.importFolder(treeUri: Uri, onProgress: (done: Int, t
                         val mtime = f.lastModified()
                         if (mtime > 0) mtimeBackfill.add(uri to mtime)
                     }
+                    // 封面自愈：库里记的本地封面为空、或文件已不存在（清缓存/系统回收缓存/
+                    //   换机恢复）就重新抽帧。只对缺失行解码，稳态重扫零额外成本。
+                    if (needsThumbnailRepair(thumbRefs[uri]?.localThumbnailPath) { File(it).isFile }) {
+                        generateLocalThumbnail(f.uri)?.let { thumbBackfill.add(uri to it) }
+                    }
                     if (row.iwaraId.isNullOrBlank()) {
                         // 老条目补救：更早的解析器要求 ID 必须含数字，纯字母 ID 全被拒 ⇒ 这些文件早已入库、
                         //   iwaraId 为 null、metaFetched=false。而导入判重是按 URI 命中的，
@@ -126,6 +137,7 @@ suspend fun IwaraRepository.importFolder(treeUri: Uri, onProgress: (done: Int, t
             }
             flushBatch()
             if (mtimeBackfill.isNotEmpty()) dao.setFileModifiedAtBatch(mtimeBackfill)
+            if (thumbBackfill.isNotEmpty()) dao.setLocalThumbnailBatch(thumbBackfill)
 
             // 收尾：清掉「文件确实已经不在了」的库行。
             // 只检查这次扫描没见到的行 —— 稳态重扫时这个集合是空的，零开销。
@@ -167,7 +179,11 @@ private suspend fun IwaraRepository.pruneMissingRows(
 ): List<VideoRefRow> {
     val doomed = rowsToPrune(unseen, fileExists)
     for (ref in doomed) {
-        dao.byUri(ref.localUri)?.let { dao.deleteVideoWithTags(it) }
+        dao.byUri(ref.localUri)?.let { row ->
+            // 行都没了，封面文件也别留着占空间（只删持久封面目录里的）。
+            deleteLocalThumbnailFile(row.localThumbnailPath)
+            dao.deleteVideoWithTags(row)
+        }
     }
     return doomed
 }

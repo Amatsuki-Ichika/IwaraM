@@ -4,11 +4,13 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -220,7 +222,7 @@ fun DownloadsOverlay(cvm: IwaraClientViewModel, onClose: () -> Unit) {
 private fun ActiveDownloadsList(cvm: IwaraClientViewModel, modifier: Modifier = Modifier) {
     val tasks by DownloadState.tasks.collectAsStateWithLifecycle()
     // 注意：`filter { !it.finished }` 会把**失败任务**也整条过滤掉（finished = DONE **或 FAILED**），
-    //   「重新下载 / 移除」那两个按钮（when 的 STATE_FAILED 分支）就成了到不了的死代码：
+    //   「重试 / 移除」那两个按钮（when 的 STATE_FAILED 分支）就成了到不了的死代码：
     //   下载一失败就从列表里消失、既看不到也续不了（"断点续传无法使用"）。
     //   故统一走 activeDownloadTasks()（只排除已完成，有单测盯住）。
     val active = activeDownloadTasks(tasks)
@@ -244,51 +246,96 @@ private fun ActiveDownloadsList(cvm: IwaraClientViewModel, modifier: Modifier = 
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            // 卡片外边距/间距与卡内边距整体收紧（原 12dp 外边距 + 10dp 间距 + 14/12 卡内边距），
+            // 一屏能多放一两条；状态文案合并进标题行，不再各占一行。
+            contentPadding = PaddingValues(8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             items(active, key = { it.videoId }) { task ->
                 Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
-                        Text(task.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Spacer(Modifier.size(8.dp))
-                        if (task.total > 0) {
-                            val fraction = (task.received.toFloat() / task.total).coerceIn(0f, 1f)
-                            LinearProgressIndicator(
-                                progress = { fraction },
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                            Spacer(Modifier.size(6.dp))
+                    Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
+                        // 首行：标题 + 右侧状态（下载中＝百分比·已接收/总大小，其余＝状态小标签）。
+                        // 原来单独的百分比行与「已接收」行都并进来，不再让 message 复述状态。
+                        val statusText = when (task.state) {
+                            DownloadState.STATE_RUNNING -> if (task.total > 0) {
+                                val fraction = (task.received.toFloat() / task.total).coerceIn(0f, 1f)
+                                (fraction * 100).toInt().toString() + "% · " +
+                                    formatBytes(task.received) + " / " + formatBytes(task.total)
+                            } else {
+                                // 总大小未知时只报已接收字节，不写「已接收」三字。
+                                formatBytes(task.received)
+                            }
+                            DownloadState.STATE_PAUSED -> tr("暂停", "Paused")
+                            DownloadState.STATE_QUEUED -> tr("排队", "Queued")
+                            DownloadState.STATE_FAILED -> tr("失败", "Failed")
+                            else -> ""
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                (fraction * 100).toInt().toString() + "%  " +
-                                    formatBytes(task.received) + " / " + formatBytes(task.total),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                task.title,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
                             )
-                        } else {
-                            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                            Spacer(Modifier.size(6.dp))
+                            Spacer(Modifier.size(8.dp))
                             Text(
-                                tr("已接收 ", "Received ") + formatBytes(task.received),
+                                statusText,
                                 style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                color = if (task.state == DownloadState.STATE_FAILED) {
+                                    MaterialTheme.colorScheme.error
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                                maxLines = 1
                             )
                         }
-                        task.message?.let { msg ->
-                            Spacer(Modifier.size(4.dp))
-                            Text(msg, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        // 进度条只在有实际进度时出现：下载中始终显示（有 total 用确定进度、无 total
+                        // 用无限进度）；暂停且有 total 时保留冻结进度；失败/排队不画进度条。
+                        if (task.state == DownloadState.STATE_RUNNING ||
+                            (task.state == DownloadState.STATE_PAUSED && task.total > 0)
+                        ) {
+                            Spacer(Modifier.size(6.dp))
+                            if (task.total > 0) {
+                                val fraction = (task.received.toFloat() / task.total).coerceIn(0f, 1f)
+                                LinearProgressIndicator(
+                                    progress = { fraction },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            } else {
+                                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                            }
                         }
-                        Spacer(Modifier.size(6.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        // message 只在带来新信息时占一行：失败原因 / 自动重试倒计时；
+                        // 暂停、排队时 message 只是右侧状态标签的复述，跳过。
+                        val msg = task.message
+                        if (!msg.isNullOrBlank() &&
+                            (task.state == DownloadState.STATE_FAILED || task.state == DownloadState.STATE_RUNNING)
+                        ) {
+                            Spacer(Modifier.size(2.dp))
+                            Text(
+                                msg,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (task.state == DownloadState.STATE_FAILED) {
+                                    MaterialTheme.colorScheme.error
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        // 操作按钮统一小号（32dp 高、左右 10dp 内边距），按钮行不再把卡片撑高。
+                        Spacer(Modifier.size(2.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                             when (task.state) {
-                                DownloadState.STATE_RUNNING -> TextButton(onClick = { DownloadService.pause(task.videoId) }) {
-                                    Text(tr("暂停", "Pause"), style = MaterialTheme.typography.bodySmall)
+                                DownloadState.STATE_RUNNING -> DownloadCardButton(tr("暂停", "Pause")) {
+                                    DownloadService.pause(task.videoId)
                                 }
                                 DownloadState.STATE_PAUSED, DownloadState.STATE_QUEUED -> {
-                                    TextButton(onClick = {
+                                    DownloadCardButton(tr("继续", "Resume")) {
                                         cvm.startDownloadById(task.videoId, scope = scope) { showDownloadToast(ctx, it) }
-                                    }) { Text(tr("继续", "Resume"), style = MaterialTheme.typography.bodySmall) }
-                                    TextButton(onClick = {
+                                    }
+                                    DownloadCardButton(tr("取消", "Cancel"), isDestructive = true) {
                                         // 弃掉整个未完成任务：先让服务放下这个任务（排队中的会在出队时
                                         // 被丢弃，正好在跑的由读循环收尾），再删记录 + 删半成品文件。
                                         // 顺序不能反：先删记录的话，worker 出队会重新登记一条 running。
@@ -298,21 +345,17 @@ private fun ActiveDownloadsList(cvm: IwaraClientViewModel, modifier: Modifier = 
                                             removePendingCompletely(ctx, task.videoId, task.docUri)
                                                 ?.let { showDownloadToast(ctx, it) }
                                         }
-                                    }) {
-                                        Text(tr("取消", "Cancel"), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                                     }
                                 }
                                 DownloadState.STATE_FAILED -> {
-                                    TextButton(onClick = {
+                                    DownloadCardButton(tr("重试", "Retry")) {
                                         cvm.startDownloadById(task.videoId, scope = scope) { showDownloadToast(ctx, it) }
-                                    }) { Text(tr("重新下载", "Retry download"), style = MaterialTheme.typography.bodySmall) }
-                                    TextButton(onClick = {
+                                    }
+                                    DownloadCardButton(tr("移除", "Remove"), isDestructive = true) {
                                         scope.launch {
                                             removePendingCompletely(ctx, task.videoId, task.docUri)
                                                 ?.let { showDownloadToast(ctx, it) }
                                         }
-                                    }) {
-                                        Text(tr("移除", "Remove"), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                                     }
                                 }
                             }
@@ -324,6 +367,34 @@ private fun ActiveDownloadsList(cvm: IwaraClientViewModel, modifier: Modifier = 
         FastScrollbarBasic(
             state = listState,
             modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
+        )
+    }
+}
+
+/**
+ * 下载卡上的小号文字按钮：统一 32dp 高、左右 10dp 内边距。
+ * TextButton 默认 40dp 最小高度会把紧凑卡片撑回去；按钮文案保持两三个字。
+ * isDestructive 用于「取消 / 移除」这类丢弃操作（错误色）。
+ */
+@Composable
+private fun DownloadCardButton(
+    text: String,
+    isDestructive: Boolean = false,
+    onClick: () -> Unit
+) {
+    TextButton(
+        onClick = onClick,
+        modifier = Modifier.height(32.dp),
+        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp)
+    ) {
+        Text(
+            text,
+            style = MaterialTheme.typography.bodySmall,
+            color = if (isDestructive) {
+                MaterialTheme.colorScheme.error
+            } else {
+                MaterialTheme.colorScheme.primary
+            }
         )
     }
 }

@@ -1,6 +1,7 @@
 package io.github.amatsukiichika.iwaram.ui
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -210,5 +211,184 @@ class ScrollGeometryTest {
         assertEquals(10, info.firstUnit)
         assertEquals(1, info.itemsPerUnit)
         assertEquals(20f, info.unitOffsetPx, 1e-4f)
+    }
+
+    /* ---------- 连续滚动：spanPx / scrollDeltaPx ---------- */
+
+    @Test
+    fun `spanPx is scrollable units times unit height`() {
+        // 100 项、可见 10 项 ⇒ 还能滚 90 个单位，单位高 50px。
+        val geometry = list(firstItem = 10, itemOffsetPx = 0f)
+        assertEquals(90f * 50f, geometry.spanPx, 1e-4f)
+        assertEquals(geometry.scrollSpanUnits * geometry.unitSizePx, geometry.spanPx, 1e-6f)
+    }
+
+    @Test
+    fun `spanPx is zero when the content fits the viewport`() {
+        assertEquals(0f, ScrollGeometry(5, 5f, 0, 0f, 50f, 1).spanPx, 1e-6f)
+        // 单位高未知时也不该算出负数或 NaN —— 只当"不可滚"。
+        assertEquals(0f, ScrollGeometry(5, 2f, 0, 0f, 0f, 1).spanPx, 1e-6f)
+    }
+
+    @Test
+    fun `scrollDeltaPx is zero when the fraction does not change`() {
+        assertEquals(0f, scrollDeltaPx(0.37f, 0.37f, 1000f), 1e-6f)
+    }
+
+    @Test
+    fun `scrollDeltaPx is proportional and signed`() {
+        assertEquals(400f, scrollDeltaPx(0.2f, 0.6f, 1000f), 1e-4f)
+        assertEquals(-400f, scrollDeltaPx(0.6f, 0.2f, 1000f), 1e-4f)
+        // 单调：起点固定时，目标比例越大位移越大（拖动方向不会反）。
+        var previous = Float.NEGATIVE_INFINITY
+        for (target in listOf(0.1f, 0.4f, 0.8f, 1f)) {
+            val delta = scrollDeltaPx(0.2f, target, 900f)
+            assertTrue("目标 $target 的位移应递增：$delta", delta > previous)
+            previous = delta
+        }
+    }
+
+    @Test
+    fun `scrollDeltaPx clamps fractions at both ends`() {
+        assertEquals(1200f, scrollDeltaPx(0f, 1f, 1200f), 1e-4f)
+        // 目标越过末端：只滚到末端。
+        assertEquals(100f, scrollDeltaPx(0.9f, 1.5f, 1000f), 1e-4f)
+        // 起点在顶端之外：从顶端算起。
+        assertEquals(0f, scrollDeltaPx(-0.5f, 0f, 1000f), 1e-6f)
+    }
+
+    @Test
+    fun `scrollDeltaPx is zero when the span cannot scroll`() {
+        assertEquals(0f, scrollDeltaPx(0.2f, 0.9f, 0f), 1e-6f)
+        assertEquals(0f, scrollDeltaPx(0.2f, 0.9f, -100f), 1e-6f)
+        assertEquals(0f, scrollDeltaPx(0.2f, 0.9f, Float.NaN), 1e-6f)
+    }
+
+    /* ---------- 通栏头几何（headerScrollGeometry 纯函数直测） ---------- */
+
+    /** 头 600px、内容行 200px、视口 1400px（7 行）、共 30 项（头 1 项 + 29 条内容）。 */
+    private fun header(
+        firstVisibleItemIndex: Int,
+        firstVisibleItemScrollOffset: Int,
+        visibleItemSizesPx: List<Int>,
+        headerHeightPx: Int = 600,
+        headerItemCount: Int = 1,
+        totalItemCount: Int = 30,
+        viewportHeightPx: Int = 1400,
+        withHeader: Boolean = true
+    ) = headerScrollGeometry(
+        firstVisibleItemIndex = firstVisibleItemIndex,
+        firstVisibleItemScrollOffset = firstVisibleItemScrollOffset,
+        headerHeightPx = if (withHeader) headerHeightPx else 0,
+        headerItemCount = if (withHeader) headerItemCount else 0,
+        visibleItemSizesPx = visibleItemSizesPx,
+        totalItemCount = totalItemCount,
+        viewportHeightPx = viewportHeightPx
+    )
+
+    @Test
+    fun `header geometry starts at the top with the header fully visible`() {
+        val geometry = header(0, 0, listOf(600, 200, 200, 200, 200))!!
+        assertEquals(32, geometry.totalUnits)
+        assertEquals(7f, geometry.visibleUnits, 1e-4f)
+        assertEquals(0f, geometry.scrollFraction(), 1e-6f)
+        assertEquals(200f, geometry.unitSizePx, 1e-4f)
+        // 可滚像素 = 29 条内容 × 200 + 头 600 − 视口 1400 = 5000。
+        assertEquals(5000f, geometry.spanPx, 1e-4f)
+    }
+
+    @Test
+    fun `header geometry progress is continuous when the header leaves the viewport`() {
+        // 临界前：首项还是头、偏移正好等于头高；临界后：首项换成首条内容、偏移归零。
+        val headerFrame = header(0, 600, listOf(600) + List(7) { 200 })!!
+        val contentFrame = header(1, 0, List(7) { 200 })!!
+        assertEquals(headerFrame.scrollFraction(), contentFrame.scrollFraction(), 0.001f)
+        // 滚过 3 行高的头 = 3 个单位，可滚 25 个单位 ⇒ 0.12。
+        assertEquals(3f / 25f, contentFrame.scrollFraction(), 1e-4f)
+    }
+
+    @Test
+    fun `header geometry progress advances through the header before the content rows`() {
+        val positions = listOf(
+            header(0, 0, listOf(600, 200, 200, 200, 200))!!,
+            header(0, 300, listOf(600, 200, 200, 200, 200))!!,
+            header(0, 600, listOf(600) + List(7) { 200 })!!,
+            header(1, 100, List(7) { 200 })!!
+        )
+        positions.zipWithNext { before, after ->
+            assertTrue("进度应单调递增：${before.scrollFraction()} → ${after.scrollFraction()}", after.scrollFraction() > before.scrollFraction())
+        }
+        assertEquals(1.5f / 25f, positions[1].scrollFraction(), 1e-4f)
+        assertEquals(3.5f / 25f, positions[3].scrollFraction(), 1e-4f)
+    }
+
+    @Test
+    fun `header geometry progress reaches one at the last content row`() {
+        // 29 条内容、可见 7 行 ⇒ 末屏首条内容行是第 22 条（下标 = 头 1 + 22）。
+        val geometry = header(23, 0, List(7) { 200 })!!
+        assertEquals(1f, geometry.scrollFraction(), 1e-6f)
+        assertEquals(geometry.spanPx, scrollDeltaPx(0f, 1f, geometry.spanPx), 1e-4f)
+    }
+
+    @Test
+    fun `header geometry keeps a non-integer header height continuous at the boundary`() {
+        // 头 500px、行高 200px ⇒ 头折算 2.5 行；头刚滚出时进度必须正好接上。
+        val before = header(0, 500, listOf(500) + List(7) { 200 }, headerHeightPx = 500)!!
+        val after = header(1, 0, List(7) { 200 }, headerHeightPx = 500)!!
+        assertEquals(before.scrollFraction(), after.scrollFraction(), 0.001f)
+        assertEquals(2.5f / 25f, after.scrollFraction(), 1e-4f)
+    }
+
+    @Test
+    fun `header geometry treats a multi-item header as one continuous block`() {
+        // 头由 2 个 item 拼成（300 + 300）：滚过第一块、进入第二块时进度必须接上。
+        val firstBlockOut = header(0, 300, listOf(300, 300, 200, 200, 200), headerItemCount = 2)!!
+        val secondBlockTop = header(1, 0, listOf(300, 200, 200, 200, 200, 200), headerItemCount = 2)!!
+        assertEquals(firstBlockOut.scrollFraction(), secondBlockTop.scrollFraction(), 0.001f)
+        // 300px = 1.5 行，可滚 24 个单位（31 − 7）。
+        assertEquals(1.5f / 24f, secondBlockTop.scrollFraction(), 1e-4f)
+    }
+
+    @Test
+    fun `header geometry without a header equals the plain list geometry`() {
+        val expected = listScrollGeometry(
+            totalItems = 30,
+            firstItemIndex = 3,
+            firstItemTopPx = -40,
+            firstItemHeightPx = 200,
+            visibleCount = 5
+        )
+        val actual = header(3, 40, listOf(200, 200, 200, 200, 200), withHeader = false)
+        assertEquals(expected, actual)
+    }
+
+    @Test
+    fun `header geometry returns null when the header is taller than the viewport`() {
+        // 视口 800、头 1200：头独占一屏，给不出以内容行折算的连续进度。
+        assertNull(header(0, 0, listOf(1200, 200), headerHeightPx = 1200, viewportHeightPx = 800))
+    }
+
+    @Test
+    fun `header geometry returns null when no content row height can be measured`() {
+        // 只剩通栏头（头高 ≥ 视口）或内容项高度全是 0：不除零，直接判不可用。
+        assertNull(header(0, 0, listOf(600)))
+        assertNull(header(0, 0, listOf(600, 0, 0)))
+        assertNull(header(0, 0, emptyList()))
+    }
+
+    @Test
+    fun `header geometry works from the five required arguments alone`() {
+        // 没给总条目数/视口高：只能按可见窗口估下界，但仍要给安全（有界）的几何，绝不除零。
+        val geometry = headerScrollGeometry(
+            firstVisibleItemIndex = 0,
+            firstVisibleItemScrollOffset = 0,
+            headerHeightPx = 600,
+            headerItemCount = 1,
+            visibleItemSizesPx = listOf(600, 200, 200, 200, 200)
+        )!!
+        assertEquals(0f, geometry.scrollFraction(), 1e-6f)
+        assertEquals(200f, geometry.unitSizePx, 1e-4f)
+        assertEquals(7f, geometry.visibleUnits, 1e-4f)
+        assertTrue(geometry.spanPx >= 0f)
     }
 }

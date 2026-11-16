@@ -7,7 +7,6 @@ import android.content.pm.ActivityInfo
 import android.net.Uri
 import android.util.Log
 import androidx.activity.BackEventCompat
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -113,6 +112,14 @@ fun PlayerScreen(
      * 左缘就露出底页的一条缝。令牌一变即复位。
      */
     entryToken: Long = 0L,
+    /**
+     * 入场滑动是否已落位（宿主在 320ms 滑入补间结束后置 true）。
+     *
+     * false 时本页**不挂视频画面**：滑入期间只画视频封面遮罩，每帧只做位移；
+     * 落位后才建 PlayerView，视频首帧出来前遮罩继续盖着，画面就绪后淡出。
+     * 每次 [entryToken] 变化时"首帧已出"的判定随之复位（见 [entryFrameReady]）。
+     */
+    entrySettled: Boolean = true,
     onBack: () -> Unit,
     /** 预测式返回手势进度：拖动中回调 0f..1f，松手/取消回调 null（主界面据此实时让位）。 */
     onBackProgress: (Float?) -> Unit = {},
@@ -333,6 +340,15 @@ fun PlayerScreen(
     //   换片加载提示要靠它区分"新片还没出首帧"与"播放中网络卡顿"；在线互切时
     //   localUri 不变，旧 key 清不掉，新片缓冲期会没有转圈。
     var firstFrameSeen by remember(playerEpoch) { mutableStateOf(false) }
+
+    // ---- 入场遮罩：视频画面是否已画出首帧 ----
+    //   entrySettled = 宿主告诉"滑入已落位"；落位后才挂 PlayerView，首帧才可能出来。
+    //   按 entryToken 复位：退场被打断后重进时本页不会被销毁，上一轮的 true 会残留。
+    //   两者都满足才允许遮罩淡出（见 PlayerContent 的 PlayerEntryPoster）。
+    var entryFrameReady by remember(entryToken) { mutableStateOf(false) }
+    LaunchedEffect(entryToken, entrySettled, firstFrameSeen) {
+        if (entrySettled && firstFrameSeen) entryFrameReady = true
+    }
     // 播放源统一入口：本地取 localUri，在线取后台解析出的 mediaUrl；
     // 键变化（含重试时先清空再赋值）即重新装片，本地/在线只有这一条装片路径。
     val mediaUrl = video.localUri.ifBlank { online?.mediaUrl.orEmpty() }
@@ -816,8 +832,10 @@ fun PlayerScreen(
         }
     }
 
-    // 全屏时：返回仅退出全屏。
-    BackHandler(enabled = isFullscreen) {
+    // 全屏时：返回仅退出全屏（不跟手，手势完成才退出）。改走预测返回通道，
+    //   与页面级返回共用一套回调，避免淡出全屏那一刻两套返回机制抢同一个手势。
+    PredictiveBackHandler(enabled = isFullscreen) { flow: Flow<BackEventCompat> ->
+        flow.collect { }
         isFullscreen = false
     }
 
@@ -865,6 +883,23 @@ fun PlayerScreen(
         tr("正在加载…", "Loading…")
     }
 
+    // 顶栏返回：全屏时先退全屏，否则暂停并退出。轻壳/真页面共用同一条顶栏，抽出来给两侧。
+    val topBarBack: () -> Unit = {
+        if (isFullscreen) {
+            isFullscreen = false
+        } else {
+            currentPlayer.pause()
+            onBack()
+        }
+    }
+
+    // 入场封面遮罩的开关：滑入未落位 / 落位后视频首帧还没出时盖住视频区；
+    //   播放或解析错误在屏时立刻撤掉，让错误面板直接可见（遮罩不挡错误）。
+    //   封面图在 PlayerContent 里取 localThumbnailPath ?: thumbnailUrl。
+    val entryPosterVisible = (!entrySettled || !entryFrameReady) &&
+        playError == null && resolveError == null
+    val entryPosterLoading = entrySettled && !entryFrameReady
+
     PlayerContent(
         player = player,
         currentPlayer = { currentPlayer },
@@ -885,6 +920,9 @@ fun PlayerScreen(
         showSwitchLoading = showSwitchLoading,
         switchBlackout = switchBlackout,
         switchLoadingText = switchLoadingText,
+        videoSurfaceEnabled = entrySettled,
+        entryPosterVisible = entryPosterVisible,
+        entryPosterLoading = entryPosterLoading,
         durationMs = durationMs,
         positionMs = { positionMs },
         scrubTargetMs = { scrubTargetMs },
@@ -919,13 +957,7 @@ fun PlayerScreen(
         },
         onVideoDrag = { ms -> dispatchScrub(ms) },
         onVideoDragEnd = { isSeeking = false },
-        onTopBarBack = {
-            if (isFullscreen) isFullscreen = false
-            else {
-                currentPlayer.pause()
-                onBack()
-            }
-        },
+        onTopBarBack = topBarBack,
         onBack = onBack,
         onRetryResolve = onRetryResolve,
         onOpenDiagnostics = { showDiagnostics = true },

@@ -65,6 +65,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -99,6 +100,8 @@ import io.github.amatsukiichika.iwaram.data.IwaraFileRef
 import io.github.amatsukiichika.iwaram.data.WatchHistoryEntity
 import io.github.amatsukiichika.iwaram.data.GlobalFilterHolder
 import io.github.amatsukiichika.iwaram.data.resumeStartMs
+import io.github.amatsukiichika.iwaram.data.loadPendingDownloads
+import io.github.amatsukiichika.iwaram.data.resumePlan
 import io.github.amatsukiichika.iwaram.data.thumbnailFileIdFromUrl
 import io.github.amatsukiichika.iwaram.i18n.AppLanguage
 import io.github.amatsukiichika.iwaram.i18n.LanguageMode
@@ -118,6 +121,8 @@ import io.github.amatsukiichika.iwaram.ui.PlayerScreen
 import io.github.amatsukiichika.iwaram.ui.QualityOption
 import io.github.amatsukiichika.iwaram.ui.RelatedVideo
 import io.github.amatsukiichika.iwaram.ui.SettingsScreen
+import io.github.amatsukiichika.iwaram.ui.settings.UpdateDialogs
+import io.github.amatsukiichika.iwaram.ui.settings.UpdateViewModel
 import io.github.amatsukiichika.iwaram.ui.VideoViewModel
 import io.github.amatsukiichika.iwaram.ui.exitDurationMs
 import io.github.amatsukiichika.iwaram.ui.rememberAdaptivePageShape
@@ -131,6 +136,9 @@ import io.github.amatsukiichika.iwaram.ui.browse.IwaraTopBar
 import io.github.amatsukiichika.iwaram.ui.browse.IwaraOverlayHost
 import io.github.amatsukiichika.iwaram.ui.browse.CommentsPanel
 import io.github.amatsukiichika.iwaram.ui.browse.isIwaraUserUuid
+import io.github.amatsukiichika.iwaram.ui.browse.iwaraProfileTargetOf
+import io.github.amatsukiichika.iwaram.ui.browse.BackOwner
+import io.github.amatsukiichika.iwaram.ui.browse.backOwner
 import io.github.amatsukiichika.iwaram.ui.browse.LocalDownloadedIwaraIds
 import io.github.amatsukiichika.iwaram.ui.browse.LocalShowR18Tag
 // Debug 模式开关：LocalDebugDetails 分发 + 错误文案两轨（人话/技术细节）
@@ -141,6 +149,8 @@ import io.github.amatsukiichika.iwaram.ui.components.GlassMode
 import io.github.amatsukiichika.iwaram.ui.components.GlassSettings
 import io.github.amatsukiichika.iwaram.ui.components.GlassTopBar
 import io.github.amatsukiichika.iwaram.ui.components.LocalGlassSettings
+import io.github.amatsukiichika.iwaram.ui.components.LocalMainContentScrollActivity
+import io.github.amatsukiichika.iwaram.ui.components.MainContentScrollActivity
 import io.github.amatsukiichika.iwaram.ui.components.glassContentBackdropSource
 import io.github.amatsukiichika.iwaram.ui.components.rememberGlassContentBackdrop
 import io.github.amatsukiichika.iwaram.ui.components.LocalDebugDetails
@@ -160,6 +170,7 @@ import io.github.amatsukiichika.iwaram.ui.browse.zIndexOf
 import io.github.amatsukiichika.iwaram.ui.browse.layerStillOnScreen
 import io.github.amatsukiichika.iwaram.ui.browse.buildEntity
 import io.github.amatsukiichika.iwaram.ui.browse.downloadVideo
+import io.github.amatsukiichika.iwaram.ui.browse.startDownloadById
 import io.github.amatsukiichika.iwaram.ui.browse.loadPlaylists
 import io.github.amatsukiichika.iwaram.ui.browse.loadRelatedVideos
 import io.github.amatsukiichika.iwaram.ui.browse.loadVideoOnlineState
@@ -357,6 +368,12 @@ class MainActivity : ComponentActivity() {
                     initializer { IwaraClientViewModel(app) }
                 }
             )
+            // 应用内更新：状态机随 Activity 存活；弹窗挂在 MainContent 根部，手动/自动检查共用。
+            val updateVm: UpdateViewModel = viewModel(
+                factory = viewModelFactory {
+                    initializer { UpdateViewModel(app) }
+                }
+            )
 
             LaunchedEffect(Unit) { vm.onStart() }
 
@@ -408,6 +425,9 @@ class MainActivity : ComponentActivity() {
                 // 底栏与所有角标胶囊都从这里取。
                 val glassOpacity by vm.glassOpacityFlow.collectAsStateWithLifecycle()
                 val glassMode by vm.glassModeFlow.collectAsStateWithLifecycle()
+                // 主内容滚动活动：主 tab 页往里登记「正在滚 / 正在拖滚动条」，主内容背景源的
+                // 录制门据此停录（见 GlassBackdrop 模块第三之二节与决策 0019）。
+                val mainScrollActivity = remember { MainContentScrollActivity() }
                 CompositionLocalProvider(
                     // 仓库正门：UI 各处经 LocalAppRepository.current 取数据/设置，
                     // 不再各自强转 application（见 IwaraApp.kt 的定义）。
@@ -415,9 +435,10 @@ class MainActivity : ComponentActivity() {
                     LocalDownloadedIwaraIds provides downloadedIds,
                     LocalShowR18Tag provides showR18Tag,
                     LocalDebugDetails provides debugDetails,
-                    LocalGlassSettings provides GlassSettings(glassOpacity, GlassMode.of(glassMode))
+                    LocalGlassSettings provides GlassSettings(glassOpacity, GlassMode.of(glassMode)),
+                    LocalMainContentScrollActivity provides mainScrollActivity
                 ) {
-                    MainContent(vm, cvm, app)
+                    MainContent(vm, cvm, app, updateVm)
                 }
             }
         }
@@ -514,7 +535,7 @@ class MainActivity : ComponentActivity() {
 
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
-    private fun MainContent(vm: VideoViewModel, cvm: IwaraClientViewModel, app: IwaraApp) {
+    private fun MainContent(vm: VideoViewModel, cvm: IwaraClientViewModel, app: IwaraApp, updateVm: UpdateViewModel) {
         val context = this@MainActivity
         val folderPicker = rememberLauncherForActivityResult(
             ActivityResultContracts.OpenDocumentTree()
@@ -582,6 +603,30 @@ class MainActivity : ComponentActivity() {
             )
             return
         }
+
+        // 应用启动自动继续下载：上次进程被打断的 queued/running 任务，重新解析新鲜地址后入队。
+        // 只恢复"本来在跑"的任务；暂停/失败是用户显式动作，不自动开始（判据见 resumePlan）。
+        LaunchedEffect(Unit) {
+            val pending = withContext(Dispatchers.IO) { repository.loadPendingDownloads() }
+            if (pending.isEmpty()) return@LaunchedEffect
+            // 先恢复列表条目（与下载页的 restoreIfAbsent 幂等），再决定自动继续谁。
+            DownloadState.restoreIfAbsent(pending.map { pendingToTask(it) })
+            if (!repository.getAutoResumeDownloads()) return@LaunchedEffect
+            val plan = resumePlan(
+                pending = pending,
+                liveIds = DownloadState.tasks.value.map { it.videoId }.toSet(),
+                enabled = true
+            )
+            plan.forEach { p ->
+                cvm.startDownloadById(
+                    id = p.videoId,
+                    onError = { err -> DiagLog.log("download", "自动继续失败 id=" + p.videoId + ": " + err) }
+                )
+            }
+        }
+
+        // 应用内更新：启动时按「检查频率」判断是否该静默检查一次（手动检查在设置页「关于」）。
+        LaunchedEffect(Unit) { updateVm.autoCheckIfDue() }
 
         // 底栏当前 tab；默认管理器（保持既有主界面）。
         var currentTab by remember { mutableStateOf(HomeTab.MANAGER) }
@@ -679,6 +724,15 @@ class MainActivity : ComponentActivity() {
          */
         var playerExitPending by remember { mutableStateOf(false) }
         var playerSliding by remember { mutableStateOf(false) }
+        /**
+         * 入场滑动是否已落位（补间到 0 之后置 true；下一次全新打开时复位）。
+         *
+         * 播放页据此**延迟渲染视频画面**：滑入期间只画视频封面遮罩，不建 PlayerView；
+         * 落位后才挂载播放器画面，首帧出来前遮罩继续盖着，画面就绪后淡出。
+         * 这样 320ms 位移里既不含整页首组合、也不含 SurfaceView 首次 attach，
+         * 而用户看到的是"点一下 → 立刻滑入"，进入时是封面而不是黑屏或骨架壳。
+         */
+        var playerEntrySettled by remember { mutableStateOf(false) }
         val playerMounted = showingPlayer || playerExitPending
         // 播放页退场动画（下面的 LaunchedEffect）也要用屏宽换算"剩余距离"，声明提到它前面。
         val screenWidthPx = with(LocalDensity.current) { LocalConfiguration.current.screenWidthDp.dp.toPx() }
@@ -694,6 +748,8 @@ class MainActivity : ComponentActivity() {
                 } finally {
                     playerSliding = false
                 }
+                // 落位后才允许播放页挂 PlayerView：滑入动画里每帧只剩位移。
+                playerEntrySettled = true
             } else if (playerExitPending) {
                 playerSliding = true
                 try {
@@ -739,7 +795,11 @@ class MainActivity : ComponentActivity() {
             // **全新打开**（播放页当前没挂着）不沿用上一次会话的相关推荐；
             // 换片（showingPlayer 已 true）绝不在这里清 —— 旧推荐要保留到新推荐到达，
             // 否则详情列表瞬间变矮，"滚回顶部"动画会被 LazyColumn 的位置钳制吃掉（见相关推荐预取处的注释）。
-            if (!showingPlayer) prs.relatedVideos = emptyList()
+            if (!showingPlayer) {
+                prs.relatedVideos = emptyList()
+                // 全新挂载 ⇒ 入场滑动期间先不挂视频画面（封面遮罩），落位后再渲染。
+                playerEntrySettled = false
+            }
             showingPlayer = true
         }
         prs.onOpenPlayer = { openPlayer(it) }
@@ -793,8 +853,10 @@ class MainActivity : ComponentActivity() {
         //  ① 真模糊是可选档（默认 = 透明，零成本，见 repo 的 glassMode 默认值）；
         //  ② 录制门 = 主页面是否被完全遮挡：过渡动画期间与部分遮挡期间照常录制，只有 `cover` 到 1
         //     （覆盖动画收尾、主页面整块看不见）才停，切页过渡时材质不会中途消失；
-        //     若"首次进播放页"再次卡顿，可把门收紧成 `backdropEnabled && !mainFullyCovered && mainPageIdle`；
-        //  ③ 挂载标记同步派生（见 playerMounted），慢一帧也不会"打不开"。
+        //  ③ 主 tab 页滚动 / 拖滚动条期间也停录（`mainScrollActivity`，各页自行上报）：
+        //     长列表滚动时每帧重录整屏是一次额外的全屏离屏 pass，是掉帧的主要来源（决策 0019）；
+        //     此时底栏与静态顶栏采样上一帧，停下立刻恢复实时。
+        //  ④ 挂载标记同步派生（见 playerMounted），慢一帧也不会"打不开"。
         // 设置改为全局一份（[LocalGlassSettings]），这里只读。
         val glassSettings = LocalGlassSettings.current
         // 库的 LayerBackdrop 录制管线：blur 需 API 31+（lens 部分 33+，之下退化成纯模糊/无效果）。
@@ -809,6 +871,9 @@ class MainActivity : ComponentActivity() {
         // 在组合期直接读会逐帧重组整个 MainContent；derivedStateOf 只在结果翻转时通知。
         val mainFullyCovered by remember { derivedStateOf { cover >= 1f } }
         val backdropEnabled = barGlassConfigured && !mainFullyCovered
+        // 主内容滚动活动（onCreate 下发）：任一主 tab 页在滚 / 拖滚动条时停录主内容背景源，
+        // 见上面录制门取舍③。
+        val mainScrollActivity = LocalMainContentScrollActivity.current
 
         // ---- 拉伸过滚动期间冻结磨砂 ----
         // Compose 1.7.3 的拉伸过滚动（API 31+）在拉伸期间把列表内容重录进一个平台 RenderNode
@@ -883,7 +948,7 @@ class MainActivity : ComponentActivity() {
         // 按返回的瞬间 `showingPlayer` 变 false，`.zIndex(layerZ(playerSeq.takeIf { showingPlayer }))`
         // 的实参变成 null，`layerZ(null) = 0f`，播放页的 zIndex 从 1+n 当帧塌到 0（比覆盖层栈还低），
         // 正在向右滑出的播放页会被下面的页面盖住。
-        // 因此：让位/返回键仍只认"打开着的层"（visibleSeqs 不动），只把绘制顺序换成 drawSeqs ——
+        // 因此：让位仍只认"打开着的层"（visibleSeqs 不动），只把绘制顺序换成 drawSeqs ——
         // 退场动画没播完（currentState 或 targetState 还有一帧为真）的层继续参与排序。
         // 用 `targetState` 一起判定是必要的：`SideEffect` 在组合之后才下发目标值，
         // 只写 `currentState` 会让"刚变 false 的那一帧"漏判，又闪一下层序。
@@ -908,19 +973,23 @@ class MainActivity : ComponentActivity() {
         /** 该层该拿到的 zIndex：比自己序号小的**在屏上**层数 + 1（0 留给底色/压暗层/主内容）。 */
         fun layerZ(seq: Long?): Float = zIndexOf(seq, drawSeqs)
 
-        /** 覆盖层栈是不是当前最上层（不是就不该抢返回键）。 */
-        val overlayOnTop = overlayTopSeq != null && visibleSeqs.none { it > overlayTopSeq }
-
         /**
-         * 设置页 / 播放页是否"当前该接返回键的那一层"。
-         * - 打开着：只要没有序号更大的可见层，就该它接；
-         * - 正在退场（shown=false，但 AnimatedVisibility 还在播 320ms 滑出、组合仍在）：
-         *   场上再无别人时仍然让它接着接管，否则这 320ms 里按返回会直接把 App 退出；
-         *   场上有别人（比如刚压上来的作者页）时立刻让位：`PredictiveBackHandler` 后注册者优先，
-         *   播放页永远后注册，不让就会把上面的页关掉。
+         * 返回键归属：四层里只有一个能接手势（纯函数 backOwner，见 IwaraOverlayStack.kt）。
+         * 规则与绘制顺序同源：引导 > 打开的面板 > 序号最大的在屏页面层 > 根部。
+         * 正在退场（shown=false 但 AnimatedVisibility 仍组合）的层仍算在屏，与旧的
+         * ownsBack 一致，避免 320ms 滑出窗口里按返回直接把 App 退出。
+         * 引导页在主界面早退，不会与本层共存，所以 onboardingVisible 恒 false。
          */
-        fun ownsBack(shown: Boolean, seq: Long): Boolean =
-            if (shown) visibleSeqs.none { it > seq } else visibleSeqs.isEmpty()
+        val backTarget = backOwner(
+            onboardingVisible = false,
+            sheetOpen = showingFilter || overlays.lastOrNull()?.isActionSheet == true,
+            overlaySeq = overlayTopSeq,
+            overlayOnScreen = overlayTopSeq != null,
+            settingsSeq = settingsSeq,
+            settingsOnScreen = settingsOnScreen,
+            playerSeq = playerSeq,
+            playerOnScreen = playerOnScreen
+        )
 
         /** 被更新的一层盖住 → 与栈内被盖页一样让位（左移 15% + 压暗 + 收圆角）。
          *  让位进度由**各页自己**用 animateFloatAsState 补间（声明式：目标值唯一决定终态，
@@ -948,10 +1017,13 @@ class MainActivity : ComponentActivity() {
             // 唯一入口：一律把账号对象里已有的 UUID 带进作者页。
             // 若只带 handle，作者页要多打一次 `GET /profile/{username}` 才能开始拉内容。
             openAccountProfile = { account ->
+                // 账号对象偶尔 username 为空（关注边/缓存账号）：归一成「只有 UUID」，
+                // 作者页因此不做无效的 /profile/ 请求，也不会把空 handle 拼进地址。
+                val target = iwaraProfileTargetOf(account.username, account.id)
                 pushOverlay(
                     IwaraOverlay.Profile(
-                        username = account.username.orEmpty(),
-                        userId = account.id,
+                        username = target.handle.orEmpty(),
+                        userId = target.uid,
                         displayName = account.name,
                         // 在线作者也带上本地分组键：作者页「视频」栏把已下载的该作者视频
                         // 排在最前面（离线时更是唯一来源）。
@@ -1081,7 +1153,9 @@ class MainActivity : ComponentActivity() {
                 Modifier
                     .fillMaxSize()
                     .nestedScroll(overscrollGate)
-                    .glassContentBackdropSource(mainBackdrop) { backdropEnabled && !overscrollHold }
+                    .glassContentBackdropSource(mainBackdrop) {
+                        backdropEnabled && !overscrollHold && mainScrollActivity?.isScrolling != true
+                    }
                     .padding(top = topBarHeight)
             ) {
                 if (topBarHeight > 0.dp) {
@@ -1100,11 +1174,16 @@ class MainActivity : ComponentActivity() {
                             .background(MaterialTheme.colorScheme.surface)
                     )
                 }
+                // 主 tab 切换时 AnimatedContent 会把上一页从组合里摘掉；没有 SaveableStateProvider
+                //   页内 remember 的滚动位置随之销毁，切回即回顶。这里按 tab 名保存可保存状态
+                //   （LazyGridState 等 rememberSaveable 状态），切回时恢复原阅读位置。
+                val tabStateHolder = rememberSaveableStateHolder()
                 AnimatedContent(
                     targetState = currentTab,
                     transitionSpec = horizontalSlideSpec { target, initial -> if (target.ordinal >= initial.ordinal) 1 else -1 },
                     label = "tabContent"
                 ) { tab ->
+                    tabStateHolder.SaveableStateProvider(tab.name) {
                     when (tab) {
                         HomeTab.MANAGER -> LibraryScreen(
                             vm = vm,
@@ -1116,8 +1195,7 @@ class MainActivity : ComponentActivity() {
                             // 只有"主页面在最上层"时，返回键才去逐层清筛选；
                             //   上层压着二级页/播放页/设置页/抽屉时，返回属于那一层
                             //   （否则从作者页返回的那一按会把本地页的筛选药丸顺手清掉）。
-                            backEnabled = overlays.isEmpty() && !playerOnScreen &&
-                                !settingsOnScreen && !showingFilter,
+                            backEnabled = backTarget == BackOwner.ROOT,
                             onOpenVideo = { video ->
                                 prs.currentVideo = video
                                 prs.currentOnline = null
@@ -1133,10 +1211,11 @@ class MainActivity : ComponentActivity() {
                                 // 视频栏空白。因此把 handle 走 username，让作者页用 /profile/{handle}
                                 // 解析出 UUID 再拉内容；本地栏仍靠 localAuthorKey（handle）照常渲染。
                                 val unknown = authorKey == VideoViewModel.UNKNOWN_AUTHOR_KEY
+                                val target = iwaraProfileTargetOf(authorKey.takeIf { !unknown }, null)
                                 pushOverlay(
                                     IwaraOverlay.Profile(
-                                        username = authorKey.takeIf { !unknown }.orEmpty(),
-                                        userId = null,
+                                        username = target.handle.orEmpty(),
+                                        userId = target.uid,
                                         displayName = authorName,
                                         localAuthorKey = authorKey,
                                         localAuthorName = authorName
@@ -1150,6 +1229,7 @@ class MainActivity : ComponentActivity() {
                             topPadding = topBarPadDp
                         )
                         HomeTab.ME -> IwaraMeScreen(cvm, navActions, bottomPadding = bottomBarHeight)
+                    }
                     }
                 }
             }
@@ -1287,7 +1367,7 @@ class MainActivity : ComponentActivity() {
             onBackProgress = { overlayGesture = it },
             modifier = Modifier.zIndex(layerZ(overlayTopSeq)),
             coveredByOther = overlayCovered,
-            backEnabled = overlayOnTop
+            backEnabled = backTarget == BackOwner.OVERLAY
         )
 
         // ---- 设置覆盖层：与播放页同层级（全屏盖住顶栏与底栏），自带「设置」顶栏 ----
@@ -1326,6 +1406,7 @@ class MainActivity : ComponentActivity() {
         ) {
             SettingsScreen(
                 vm = vm,
+                updateVm = updateVm,
                 onBack = { showingSettings = false },
                 onPickFolder = { folderPicker.launch(null) },
                 onPickDownloadFolder = { downloadFolderPicker.launch(null) },
@@ -1337,7 +1418,7 @@ class MainActivity : ComponentActivity() {
                 pageAnimating = !settingsVisible.isIdle,
                 // 被更新的层盖住 → 让位（左移 + 压暗 + 收圆角）；此时让出返回键。
                 covered = settingsCovered,
-                backEnabled = ownsBack(showingSettings, settingsSeq),
+                backEnabled = backTarget == BackOwner.SETTINGS,
                 language = LanguageMode.fromPref(languagePref),
                 // 语言切换立即生效（AppLanguage 驱动重组）再落盘；仓库只负责持久化。
                 onLanguageChange = { mode ->
@@ -1598,6 +1679,8 @@ class MainActivity : ComponentActivity() {
                     // 每次打开都会变的层序号 → 播放页据此把预测返回的跟手位移（backProgress）清零，
                     // 避免退场被打断重进时残留位移留在屏上。
                     entryToken = playerSeq,
+                    // 入场滑动是否已落位：false 时本页只画封面遮罩、不挂 PlayerView。
+                    entrySettled = playerEntrySettled,
                     onBack = { closePlayer() },
                     // 手势进度回传：拖动中让主内容实时回位（与覆盖层/设置页同一套让位动效）
                     onBackProgress = { playerGesture = it },
@@ -1614,11 +1697,16 @@ class MainActivity : ComponentActivity() {
                         // 那时用 userId 兜底，作者页照样能拉内容。
                         val u = prs.currentOnline?.user
                         val uuid = isIwaraUserUuid(id)
+                        // 与另外两个入口同一套归一：handle 缺失时只带 UUID，避免空 handle 拉页。
+                        val target = iwaraProfileTargetOf(
+                            u?.username ?: id.takeIf { !uuid },
+                            u?.id ?: id.takeIf { uuid }
+                        )
                         closePlayer()
                         pushOverlay(
                             IwaraOverlay.Profile(
-                                username = u?.username ?: if (uuid) "" else id,
-                                userId = u?.id ?: id.takeIf { uuid },
+                                username = target.handle.orEmpty(),
+                                userId = target.uid,
                                 displayName = u?.name
                             )
                         )
@@ -1655,7 +1743,7 @@ class MainActivity : ComponentActivity() {
                     startPositionMs = prs.playerStartMs,
                     // 被更新的层（后开的二级页）盖住 → 让位（左移 + 压暗 + 收圆角），并让出返回键。
                     covered = playerCovered,
-                    backEnabled = ownsBack(showingPlayer, playerSeq),
+                    backEnabled = backTarget == BackOwner.PLAYER,
                     // 地址解析失败 → 页内提示（不关页）；重试走"留在页面"的分支。
                     resolveError = prs.resolveError,
                     onRetryResolve = { prs.currentOnline?.let { prs.startResolve(it, closeOnFailure = false) } },
@@ -1677,6 +1765,10 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
+
+        // 应用内更新弹窗：挂在主界面根部（弹窗自带独立 Dialog 窗口，与层序无关）；
+        // 显示与否完全由 UpdateViewModel.state 驱动，手动/自动检查共用同一状态机。
+        UpdateDialogs(updateVm = updateVm, onDismiss = {})
 
         // 抽屉背景遮罩：全 app 唯一一层，Activity 全屏单层黑。抽屉浮窗全透明、只托面板；
         // alpha 由 SheetScrimState 逐帧镜像（AppBottomSheet 的 scrim Animatable 驱动）。

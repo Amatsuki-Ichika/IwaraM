@@ -6,6 +6,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
+    <!-- 应用内更新：下载 APK 后交给系统包安装器安装（Android 8.0+ 需声明）。 -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
     <!-- 关闭云备份：会话 token 已用 AndroidKeyStore 的 AES-256-GCM 密钥加密后存入 SharedPreferences，
          仅当 KeyStore 不可用时降级为明文；而 SAF 目录授权本来也无法跨设备还原，备份只会扩大凭据的暴露面。 -->
     <!-- 启动图标使用普通方形 drawable 而非自适应图标：原图的最大半径超出自适应图标的遮罩范围，
@@ -40,5 +43,17 @@
             android:name=".DownloadService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!-- 应用内更新：把 cacheDir/updates 下的 APK 以 content:// 交给系统安装器。
+             authorities 与 UpdateInstaller 中的 packageName + ".updates" 对应。 -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.updates"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 </manifest>

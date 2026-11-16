@@ -45,7 +45,13 @@ import io.github.amatsukiichika.iwaram.data.videoKeys
 import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.i18n.trCount
 import io.github.amatsukiichika.iwaram.ui.FastScrollbarBasic
+import io.github.amatsukiichika.iwaram.ui.components.ScrollToTopButton
+import io.github.amatsukiichika.iwaram.ui.components.animateScrollToTop
+import io.github.amatsukiichika.iwaram.ui.components.scrollToTopBottomPadding
+import io.github.amatsukiichika.iwaram.ui.components.scrollToTopBottomPaddingOverlaid
 import io.github.amatsukiichika.iwaram.ui.components.debugAwareErrorText
+import io.github.amatsukiichika.iwaram.ui.components.glassScrollBackdropSource
+import io.github.amatsukiichika.iwaram.ui.components.rememberGlassScrollBackdrop
 import kotlinx.coroutines.launch
 
 /* ---------- 播放列表覆盖层与详情（原 IwaraOverlays.kt 播放列表区块） ---------- */
@@ -217,9 +223,13 @@ fun PlaylistDetailOverlay(
         Box(Modifier.weight(1f).fillMaxWidth()) {
         val detailListState = rememberLazyListState()
         val detailScope = rememberCoroutineScope()
+        // 滚动期可冻结的内容级源：拖动时停录（长列表掉帧大头），回顶按钮采样上一帧。
+        val scrollBackdrop = rememberGlassScrollBackdrop()
+        // 拖滚动条不走手势滚动（走 requestScrollToItem），**不会**置 isScrollInProgress ⇒ 单独记「scrub 中」并入冻结判据。
+        var scrollbarDragging by remember { mutableStateOf(false) }
         LazyColumn(
             state = detailListState,
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize().glassScrollBackdropSource(scrollBackdrop) { detailListState.isScrollInProgress || scrollbarDragging },
             contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
@@ -244,14 +254,18 @@ fun PlaylistDetailOverlay(
                 )
             }
         }
-        FastScrollbarBasic(state = detailListState, modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight())
+        FastScrollbarBasic(
+            state = detailListState,
+            modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight(),
+            onDraggingChange = { scrollbarDragging = it }
+        )
+        // 统一落点：与主页底栏同高（底栏块高 + 手势条 + 13dp），不再贴屏幕底。
         ScrollToTopButton(
             visible = detailListState.firstVisibleItemIndex > 2,
             onClick = { detailScope.launch { detailListState.animateScrollToTop() } },
-            modifier = Modifier
-            .align(Alignment.BottomEnd)
-            // 统一落点（这些二级页盖住底栏，传 0 ⇒ 仍是贴屏幕底 + 13dp）。
-            .padding(end = 24.dp, bottom = scrollToTopBottomPadding(0.dp))
+            bottomPadding = scrollToTopBottomPaddingOverlaid(),
+            endPadding = 24.dp,
+            backdrop = scrollBackdrop
         )
         }
     }

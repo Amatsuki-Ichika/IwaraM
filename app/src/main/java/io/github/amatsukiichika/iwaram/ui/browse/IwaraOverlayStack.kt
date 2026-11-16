@@ -174,3 +174,81 @@ fun shouldReplayPlayerEntry(
     // 已经就在台前 → 不补。
     return false
 }
+
+/* ---------- 返回键归属（纯逻辑，供 MainActivity 的 BackHandler 使用） ---------- */
+
+/**
+ * 返回键这一下应该交给**哪一层**。
+ *
+ * 每个取值对应一类"可返回目标"；[ROOT] 表示没有可关闭的层，返回键该交给系统
+ * （退出应用 / 交还 Activity 的默认行为）。
+ */
+enum class BackOwner {
+    /** 没有任何可关闭的层。 */
+    ROOT,
+
+    /** 引导页：盖在所有内容之上，最先关。 */
+    ONBOARDING,
+
+    /** 动作面板（ModalBottomSheet，独立窗口）。 */
+    SHEET,
+
+    /** 覆盖层栈里最上面的页面（作者页、收藏页……）。 */
+    OVERLAY,
+
+    /** 设置页。 */
+    SETTINGS,
+
+    /** 全屏播放页。 */
+    PLAYER
+}
+
+/**
+ * 计算返回键归属 —— **视觉最上层的那一层**先关。
+ *
+ * 优先级（从高到低）：
+ * 1. 引导页 [onboardingVisible]；
+ * 2. 动作面板 [sheetOpen]（独立窗口，永远压在页面栈上面）；
+ * 3. 页面层（overlay / settings / player）里 **`onScreen = true` 且序号非 null** 且序号最大的一层；
+ * 4. 都不满足 ⇒ [BackOwner.ROOT]。
+ *
+ * 存在性只判 **null**：序号可以是 0 或任意正数，不能拿 0 当"没打开"。
+ * 老代码里 `settingsSeq: Long` / `playerSeq: Long` 的 0 默认值正是这个坑 ——
+ * 打开序号为 0 的层会被返回键直接跳过。
+ *
+ * 序号相等只出现在构造/测试的极端情况（真实序号由单个计数器自增，不会重复），
+ * 此时按 overlay → settings → player 的检查顺序先到先得。
+ */
+fun backOwner(
+    onboardingVisible: Boolean,
+    sheetOpen: Boolean,
+    overlaySeq: Long?,
+    overlayOnScreen: Boolean,
+    settingsSeq: Long?,
+    settingsOnScreen: Boolean,
+    playerSeq: Long?,
+    playerOnScreen: Boolean
+): BackOwner {
+    // 引导页是盖在最上面的一整页，返回键必须先关它。
+    if (onboardingVisible) return BackOwner.ONBOARDING
+    // 动作面板是独立窗口（ModalBottomSheet），比任何页面都靠上。
+    if (sheetOpen) return BackOwner.SHEET
+
+    // 页面层：只考虑"真的在屏上"（含退场动画未播完，见 layerStillOnScreen）且序号存在的层，取序号最大者。
+    var topSeq: Long? = null
+    var owner = BackOwner.ROOT
+
+    fun consider(seq: Long?, onScreen: Boolean, candidate: BackOwner) {
+        if (!onScreen || seq == null) return
+        val top = topSeq
+        if (top == null || seq > top) {
+            topSeq = seq
+            owner = candidate
+        }
+    }
+
+    consider(overlaySeq, overlayOnScreen, BackOwner.OVERLAY)
+    consider(settingsSeq, settingsOnScreen, BackOwner.SETTINGS)
+    consider(playerSeq, playerOnScreen, BackOwner.PLAYER)
+    return owner
+}

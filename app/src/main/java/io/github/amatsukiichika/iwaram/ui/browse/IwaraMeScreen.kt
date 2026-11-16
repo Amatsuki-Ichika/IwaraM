@@ -53,6 +53,7 @@ import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.ui.FastScrollbarBasic
 import io.github.amatsukiichika.iwaram.ui.components.AppEntryCard
 import io.github.amatsukiichika.iwaram.ui.components.AvatarImage
+import io.github.amatsukiichika.iwaram.ui.components.ReportMainContentScrollActivity
 import io.github.amatsukiichika.iwaram.ui.components.debugAwareErrorText
 
 /** 底栏「我的」tab：登录 / 个人信息 / 播放列表 / 关注列表。 */
@@ -83,11 +84,14 @@ private fun LoginForm(cvm: IwaraClientViewModel, actions: IwaraNavActions) {
     val session by cvm.session.collectAsStateWithLifecycle()
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
+    val scrollState = rememberScrollState()
+    // 滚动期间停录宿主的整屏背景（我的页在主内容录制子树里）。
+    ReportMainContentScrollActivity { scrollState.isScrollInProgress }
 
     // imePadding：adjustNothing 下窗口不再随键盘压缩，靠 inset 让输入框浮在键盘上方。
     Column(
         Modifier.fillMaxSize()
-            .verticalScroll(rememberScrollState())
+            .verticalScroll(scrollState)
             .imePadding()
             .padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -199,6 +203,8 @@ private fun LoggedInPanel(
 
     Box(Modifier.fillMaxSize()) {
     val meListState = rememberLazyListState()
+    // 滚动期间停录宿主的整屏背景（我的页在主内容录制子树里）。
+    ReportMainContentScrollActivity { meListState.isScrollInProgress }
     LazyColumn(
         state = meListState,
         modifier = Modifier.fillMaxSize(),
