@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Author pages now have a continuous scrollbar with the author's name in the drag bubble, like the other feeds.
 
-- Every scrollbar now starts below the floating search bar instead of running under it, and dragging moves the list continuously by pixels rather than jumping between items. A drag takes over from an in-flight fling or a track-tap jump instead of fighting it, and pointer events that arrive within one frame are merged into a single scroll step, so a fast drag on a large library neither stutters nor drops movement. Releasing the thumb no longer makes it jump back before the list catches up.
+- Every scrollbar now starts below the floating search bar instead of running under it. Dragging the thumb lands the list at the position under the finger instead of applying a pixel delta for every pointer event, so dragging through a large library no longer builds a screen of new cards inside the input callback and stays smooth; a drag still takes over from an in-flight fling or a track-tap jump, and releasing the thumb no longer makes it jump back before the list catches up.
 
 - Scroll positions and already loaded pages survive switching between the library, Iwara and Me tabs, and between Iwara segments and searches. Returning to a tab no longer starts at the top or fetches the first page again.
 

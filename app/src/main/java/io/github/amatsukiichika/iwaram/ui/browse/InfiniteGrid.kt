@@ -149,7 +149,7 @@ fun <T> InfiniteGrid(
     // 用滚动期可冻结的内容级源：拖动时停录（每帧全屏离屏 pass 是长列表掉帧的大头），
     //   按钮继续采样上一帧；停止滚动立刻恢复实时录制。
     val viewBackdrop = rememberGlassScrollBackdrop()
-    // 拖滚动条走 dispatchRawDelta，**不会**置 isScrollInProgress ⇒ 单独记「scrub 中」并入冻结判据。
+    // 拖滚动条不走手势滚动（走 requestScrollToItem），**不会**置 isScrollInProgress ⇒ 单独记「scrub 中」并入冻结判据。
     var scrollbarDragging by remember { mutableStateOf(false) }
     // 同一个判据喂两处：本页顶栏那条冻结门 + 宿主的整屏录制门（MainActivity）。
     val scrolling: () -> Boolean = { gridState.isScrollInProgress || scrollbarDragging }

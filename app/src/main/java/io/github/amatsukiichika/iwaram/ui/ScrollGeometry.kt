@@ -208,8 +208,8 @@ internal fun scrollDeltaPx(currentFraction: Float, targetFraction: Float, spanPx
  * 没有通栏头（[headerItemCount] ≤ 0，或头高为 0）时退化为 [listScrollGeometry] 的等价结果，
  * 调用方不需要自己分支。
  *
- * 注意：本几何的单位是折叠后的内容行，[seekTarget] 返回的"行号"**含头折算行**；需要跳到
- * 具体条目时，优先用 [spanPx] / [scrollDeltaPx] 按像素滚动（[seekTarget] 语义未改）。
+ * 注意：本几何的单位是折叠后的内容行，[seekTarget] 返回的"行号"**含头折算行**；调用方要用
+ * [scrollSpanUnits] / [unitSizePx] 自己折算（拖动与点击轨道都走 [seekTarget] 再按列展开）。
  */
 internal fun headerScrollGeometry(
     firstVisibleItemIndex: Int,

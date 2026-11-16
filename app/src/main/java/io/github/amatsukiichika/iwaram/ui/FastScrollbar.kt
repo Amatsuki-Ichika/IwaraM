@@ -12,7 +12,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
-import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -38,7 +37,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -267,8 +265,8 @@ private fun ScrollBubble(visible: Boolean, label: () -> String, modifier: Modifi
  * 只失效这一小块绘制。
  *
  * 拖动行为分两档：
- * - 给了 [onDragFractionDelta]（列表/网格状态版）：拖动把"这一帧手指比例的增量"交给它，
- *   由它换算成像素后**同步**派发给列表（不经过协程、不取消上一帧增量），所以跟手且连续；
+ * - 给了 [onDragToFraction]（列表/网格状态版）：每帧把手指**目标比例**交给它，由它换算成
+ *   目标条目位置，走 `requestScrollToItem` 在下一帧的测量相位落位；
  * - 没给时沿用旧语义：每帧把目标比例交给 [onScrollToFraction] 跳转。
  *
  * 点击轨道始终走 [onScrollToFraction]（一次性跳转）。
@@ -282,7 +280,7 @@ private fun ScrollBubble(visible: Boolean, label: () -> String, modifier: Modifi
  * @param onScrollToFraction 点击轨道时回调目标比例（0f..1f）
  * @param onDragProgress     拖动进度回调 —— 拖动中每帧给 0f..1f、结束/取消给
  *                           null，供拖动居中气泡（[FastScrollbarBasicWithBubble]）显示当前分节。
- * @param onDragFractionDelta 拖动中每帧"手指比例增量"（fraction 差值，可正可负）；
+ * @param onDragToFraction   拖动中每帧的"手指目标比例"（0f..1f，按下第一帧也会给）；
  *                           null = 旧跳转语义（每帧按目标比例跳）。
  */
 @Composable
@@ -293,7 +291,7 @@ fun FastScrollbarBasic(
     onScrollToFraction: (Float) -> Unit,
     canScroll: Boolean = true,
     onDragProgress: ((Float?) -> Unit)? = null,
-    onDragFractionDelta: ((Float) -> Unit)? = null,
+    onDragToFraction: ((Float) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     if (!canScroll) return
@@ -350,17 +348,10 @@ fun FastScrollbarBasic(
         return ((y - thumbH / 2f) / maxOffset).coerceIn(0f, 1f)
     }
 
-    // 上一次推送的手指比例；< 0 = 本次按下还没记起点（按下第一帧只记起点、不发增量）。
-    var lastFraction by remember { mutableFloatStateOf(-1f) }
-
-    /** 拖动每帧：给跟手/气泡的回调；按下第一帧由状态版自己判断"只记起点不滚"。 */
+    /** 拖动每帧：把手指目标比例交给状态版（换算成条目位置后按帧落位），再通知气泡。 */
     fun pushDragFraction(fraction: Float) {
-        if (onDragFractionDelta != null) {
-            // 增量 = 本帧比例 − 上帧比例：状态版拿它换算像素并同步滚动。
-            //   不在滚动条里直接调 scrollBy（suspend）：拖动时每帧都 launch/取消协程会丢增量 ⇒ 一顿一顿。
-            val last = lastFraction
-            lastFraction = fraction
-            if (last >= 0f) onDragFractionDelta(fraction - last)
+        if (onDragToFraction != null) {
+            onDragToFraction(fraction)
         } else {
             onScrollToFraction(fraction)
         }
@@ -387,7 +378,6 @@ fun FastScrollbarBasic(
                         holdDragProgress = false
                         holdTick++
                         dragging = true
-                        lastFraction = -1f
                         dragProgress = yToProgress(pos.y)
                         pushDragFraction(dragProgress)
                     },
@@ -397,11 +387,9 @@ fun FastScrollbarBasic(
                         pushDragFraction(dragProgress)
                     },
                     onDragEnd = {
-                        lastFraction = -1f
                         finishDrag(keepHold = true)
                     },
                     onDragCancel = {
-                        lastFraction = -1f
                         finishDrag(keepHold = false)
                     }
                 )
@@ -438,28 +426,6 @@ fun FastScrollbarBasic(
                 )
             }
     )
-}
-
-/**
- * 拖动"比例→像素"的比例尺持有器：按下（第一次拖动事件）时记一次 [ScrollGeometry.spanPx]，
- * 整次拖动都用它换算像素。
- *
- * 为什么不用实时几何：拖动期间 layoutInfo 每帧都变，比例↔像素的关系会跟着漂移（拇指走到哪、
- * 内容跟到哪就对不上），用按下时的快照才是一一对应的。
- */
-private class DragPixelScale {
-    var spanPx = 0f
-        private set
-
-    /** 首次调用时用 [geometry] 采快照，之后返回同一比例尺；几何暂时为空返回 0。 */
-    fun resolve(geometry: () -> ScrollGeometry?): Float {
-        if (spanPx <= 0f) spanPx = geometry()?.spanPx ?: 0f
-        return spanPx
-    }
-
-    fun reset() {
-        spanPx = 0f
-    }
 }
 
 /** 拇指长度的死区：变化小于该比例不更新（吸收"半行进出"的小幅抖动）。 */
@@ -616,10 +582,10 @@ private fun LazyListState.seekFor(
 /**
  * LazyGrid 版基础滚动条：进度 / 拇指长度 / 跳转目标全部由 [ScrollGeometry] 的纯函数从 [state] 派生。
  *
- * 拖动走**像素增量滚动**：拖动中只记录上一帧的比例，新比例到来时按按下时的比例尺换成像素。
- * 同一帧内的多份增量由 [FrameDeltaBatch] 合并后只派发一次 dispatchRawDelta（高采样屏一帧会来
- * 好几个 pointer 事件）；按下第一帧先用一次 suspend scrollBy(0f) 抢占滚动 mutex，取消仍在跑的
- * 惯性 fling / 点轨道触发的 scrollToItem —— 否则两股位移叠加，拖动会一顿一顿。
+ * 拖动按**目标位置**落位：每帧把手指比例换算成 (条目下标, 条内偏移)，再用 [LazyGridState.requestScrollToItem]
+ * 登记目标位置。它只失效测量、不强制重排，组合发生在本帧正常的测量相位，同一帧的多次调用自动合并。
+ * 不走逐帧 dispatchRawDelta：跨越整行的大像素增量会让 LazyGrid 在 pointer 回调里同步 forceRemeasure，
+ * 上千条的大库快拖时等于每帧组合一整屏新卡片，页面就会一顿一顿。
  *
  * @param headerItemCount 通栏头占几个条目（通常 1；0 = 没有通栏头）
  * @param headerHeightPx  通栏头实测高度（px；调用方用 onSizeChanged 量）。0/未量到 = 按无头处理
@@ -643,12 +609,6 @@ fun FastScrollbarBasic(
         }
     }
     val scope = rememberCoroutineScope()
-    // 拖动用的像素比例尺（按下时采一次几何快照）。
-    val dragScale = remember { DragPixelScale() }
-    // 拖动增量批量器：同一帧内的多份增量合并成一次 dispatchRawDelta。
-    val deltaBatch = remember { FrameDeltaBatch() }
-    // 本轮拖动是否已抢占过滚动 mutex（见 onDragProgress）。
-    val dragStarted = remember { booleanArrayOf(false) }
     // 拇指长度防闪烁：几何瞬空（visibleItemsInfo 短暂为空）时**保持上一帧长度**，
     //   不回退满格（否则拖动时实心部分会闪长闪短）；小幅变化被死区吸收。
     //   持有器是普通数组，只在绘制相位读写，不触发重组/重绘循环。
@@ -678,34 +638,16 @@ fun FastScrollbarBasic(
                 scope.launch { state.scrollToItem(index, offsetPx) }
             }
         },
-        // 拖动：把"手指比例增量"按按下时的比例尺换成像素，同一帧只派发一次。
-        //   不走 suspend 的 scrollBy：逐帧 launch/取消协程会丢增量 ⇒ 拖动一顿一顿；
-        //   但每份增量都同步 dispatchRawDelta 又会让一帧内做多次滚动布局，所以先用
-        //   FrameDeltaBatch 合并，等下一帧开始再一次性派发（列表仍然逐帧跟手）。
-        onDragFractionDelta = { fractionDelta ->
-            val px = fractionDelta * dragScale.resolve { geometry() }
-            if (px.isFinite() && abs(px) > 0.01f && deltaBatch.add(px)) {
-                scope.launch {
-                    withFrameNanos { }
-                    val delta = deltaBatch.drain()
-                    if (delta.isFinite() && delta != 0f) state.dispatchRawDelta(delta)
-                }
+        // 拖动：手指比例 → 目标条目位置，交给下一次测量落位（不在这里同步滚动）。
+        //   requestScrollToItem 不阻塞 pointer 事件、同一帧多次调用合并，大库快拖也不会在
+        //   输入回调里反复组合整屏新卡片。
+        onDragToFraction = { f ->
+            geometry()?.let { g ->
+                val (index, offsetPx) = state.seekFor(g, f, headerItemCount, headerHeightPx)
+                state.requestScrollToItem(index, offsetPx)
             }
         },
         onDragProgress = { f ->
-            if (f == null) {
-                dragScale.reset()  // 松手/取消：下次按下重新采快照
-                // 把还没派发的最后一小段补上（不丢尾巴），批量器归零。
-                val rest = deltaBatch.drain()
-                if (rest.isFinite() && rest != 0f) state.dispatchRawDelta(rest)
-                dragStarted[0] = false
-            } else if (!dragStarted[0]) {
-                // 按下第一帧：用 suspend scrollBy(0f) 抢 mutex，取消在途的惯性 fling /
-                //   点轨道触发的 scrollToItem 动画。dispatchRawDelta 不经过 mutatorMutex，
-                //   不取消的话两股位移叠加会让页面一顿一顿/跳。
-                dragStarted[0] = true
-                scope.launch { state.scrollBy(0f) }
-            }
             onDraggingChange?.invoke(f != null)
             onDragProgress?.invoke(f)
         },
@@ -731,9 +673,6 @@ fun FastScrollbarBasic(
         }
     }
     val scope = rememberCoroutineScope()
-    val dragScale = remember { DragPixelScale() }
-    val deltaBatch = remember { FrameDeltaBatch() }
-    val dragStarted = remember { booleanArrayOf(false) }
     // 防闪烁持有器，同 LazyGrid 版（条目高度可变，几何按可见数计，抖动全靠"保持上一帧 + 死区"吸收）。
     val lastSpan = remember { floatArrayOf(1f) }
     fun geometry(): ScrollGeometry? = state.scrollbarGeometry(headerItemCount, headerHeightPx)
@@ -759,33 +698,14 @@ fun FastScrollbarBasic(
                 scope.launch { state.scrollToItem(index, offsetPx) }
             }
         },
-        // 拖动：把"手指比例增量"按按下时的比例尺换成像素，同一帧只派发一次。
-        //   每份增量都同步 dispatchRawDelta 会让一帧内做多次滚动布局，所以先用
-        //   FrameDeltaBatch 合并，等下一帧开始再一次性派发（列表仍然逐帧跟手）。
-        onDragFractionDelta = { fractionDelta ->
-            val px = fractionDelta * dragScale.resolve { geometry() }
-            if (px.isFinite() && abs(px) > 0.01f && deltaBatch.add(px)) {
-                scope.launch {
-                    withFrameNanos { }
-                    val delta = deltaBatch.drain()
-                    if (delta.isFinite() && delta != 0f) state.dispatchRawDelta(delta)
-                }
+        // 拖动：同 LazyGrid 版 —— 手指比例换算成目标条目，交给下一次测量落位。
+        onDragToFraction = { f ->
+            geometry()?.let { g ->
+                val (index, offsetPx) = state.seekFor(g, f, headerItemCount, headerHeightPx)
+                state.requestScrollToItem(index, offsetPx)
             }
         },
         onDragProgress = { f ->
-            if (f == null) {
-                dragScale.reset()  // 松手/取消：下次按下重新采快照
-                // 把还没派发的最后一小段补上（不丢尾巴），批量器归零。
-                val rest = deltaBatch.drain()
-                if (rest.isFinite() && rest != 0f) state.dispatchRawDelta(rest)
-                dragStarted[0] = false
-            } else if (!dragStarted[0]) {
-                // 按下第一帧：用 suspend scrollBy(0f) 抢 mutex，取消在途的惯性 fling /
-                //   点轨道触发的 scrollToItem 动画。dispatchRawDelta 不经过 mutatorMutex，
-                //   不取消的话两股位移叠加会让页面一顿一顿/跳。
-                dragStarted[0] = true
-                scope.launch { state.scrollBy(0f) }
-            }
             onDraggingChange?.invoke(f != null)
             onDragProgress?.invoke(f)
         },
@@ -795,7 +715,7 @@ fun FastScrollbarBasic(
 
 /**
  * 连续滚动条 + 拖动居中气泡：本地库"全部 / 时间"视图用。
- * 行为 = [FastScrollbarBasic]（拖动实时像素滚动），拖动时屏幕中间显示当前分节文字
+ * 行为 = [FastScrollbarBasic]（拖动按手指比例落位），拖动时屏幕中间显示当前分节文字
  * （样式与分段版逐字一致）；几何瞬空时沿用上一帧文字。
  *
  * @param emptyLabel markers 为空时的气泡文字（作者页把作者名钉在气泡里；null = 不弹气泡）

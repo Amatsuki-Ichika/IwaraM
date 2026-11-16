@@ -193,7 +193,7 @@ fun LibraryScreen(
         val authorState = rememberLazyListState()
         val timeState = rememberLazyListState()
         val pageScope = rememberCoroutineScope()
-        // 拖滚动条走 dispatchRawDelta，**不会**置 isScrollInProgress ⇒ 单独记「scrub 中」，
+        // 拖滚动条不走手势滚动（走 requestScrollToItem），**不会**置 isScrollInProgress ⇒ 单独记「scrub 中」，
         //   并入下面的玻璃背景冻结判据：否则拖动期间每帧全屏重录背景，UI 线程掉帧。
         var scrollbarDragging by remember { mutableStateOf(false) }
         // 同一个判据喂两处：本页顶栏那条冻结门 + 宿主的整屏录制门（MainActivity）。

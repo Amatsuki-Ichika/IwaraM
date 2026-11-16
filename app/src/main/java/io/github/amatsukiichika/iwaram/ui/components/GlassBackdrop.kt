@@ -246,7 +246,7 @@ fun Modifier.glassScrollBackdropSource(
  * 主内容滚动活动汇总：主 tab 页把「本页列表正在滚 / 正在拖滚动条」写进来，宿主用它当
  * 主内容背景源的录制门。
  *
- * 判据必须与页内 [glassScrollBackdropSource] 完全一致 —— 拖滚动条走 `dispatchRawDelta`，
+ * 判据必须与页内 [glassScrollBackdropSource] 完全一致 —— 拖滚动条走 `requestScrollToItem`，
  * **不会**置 `isScrollInProgress`，只看后者会漏掉整段拖动。
  *
  * 为什么需要这条单独通道：主内容背景源挂在宿主内容区上（底栏、静态顶栏都采样它），

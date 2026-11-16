@@ -247,7 +247,7 @@ internal fun <T> PagedGrid(
     val scope = rememberCoroutineScope()
     // 滚动期可冻结的内容级源：拖动时停录（长列表掉帧大头），回顶按钮采样上一帧。
     val scrollBackdrop = rememberGlassScrollBackdrop()
-    // 拖滚动条走 dispatchRawDelta，**不会**置 isScrollInProgress ⇒ 单独记「scrub 中」并入冻结判据。
+    // 拖滚动条不走手势滚动（走 requestScrollToItem），**不会**置 isScrollInProgress ⇒ 单独记「scrub 中」并入冻结判据。
     var scrollbarDragging by remember { mutableStateOf(false) }
     val showTop by remember {
         derivedStateOf { gridState.firstVisibleItemIndex > 0 || gridState.firstVisibleItemScrollOffset > 0 }
