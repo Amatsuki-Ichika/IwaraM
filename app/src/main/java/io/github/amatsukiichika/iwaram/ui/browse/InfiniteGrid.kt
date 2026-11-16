@@ -46,6 +46,7 @@ import io.github.amatsukiichika.iwaram.ui.components.ScrollToTopButton
 import io.github.amatsukiichika.iwaram.ui.components.animateScrollToTop
 import io.github.amatsukiichika.iwaram.ui.components.scrollToTopBottomPaddingOverlaid
 import io.github.amatsukiichika.iwaram.ui.components.debugAwareErrorText
+import io.github.amatsukiichika.iwaram.ui.components.ReportMainContentScrollActivity
 import io.github.amatsukiichika.iwaram.ui.components.glassScrollBackdropSource
 import io.github.amatsukiichika.iwaram.ui.components.rememberGlassScrollBackdrop
 import kotlinx.coroutines.delay
@@ -150,13 +151,16 @@ fun <T> InfiniteGrid(
     val viewBackdrop = rememberGlassScrollBackdrop()
     // 拖滚动条走 dispatchRawDelta，**不会**置 isScrollInProgress ⇒ 单独记「scrub 中」并入冻结判据。
     var scrollbarDragging by remember { mutableStateOf(false) }
+    // 同一个判据喂两处：本页顶栏那条冻结门 + 宿主的整屏录制门（MainActivity）。
+    val scrolling: () -> Boolean = { gridState.isScrollInProgress || scrollbarDragging }
+    ReportMainContentScrollActivity(scrolling)
     Box(Modifier.fillMaxSize()) {
         LazyVerticalGrid(
             columns = columns,
             state = gridState,
             modifier = modifier
                 .fillMaxSize()
-                .glassScrollBackdropSource(viewBackdrop) { gridState.isScrollInProgress || scrollbarDragging },
+                .glassScrollBackdropSource(viewBackdrop, scrolling),
             // 卡片间距收一点（10 → [GRID_CARD_GAP]），外侧对称留白不动。
             horizontalArrangement = Arrangement.spacedBy(GRID_CARD_GAP),
             verticalArrangement = Arrangement.spacedBy(GRID_CARD_GAP),

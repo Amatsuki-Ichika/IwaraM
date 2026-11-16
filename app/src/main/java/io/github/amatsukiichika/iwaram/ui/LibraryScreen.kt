@@ -73,6 +73,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import io.github.amatsukiichika.iwaram.ui.components.TOP_BAR_CONTENT_HEIGHT
+import io.github.amatsukiichika.iwaram.ui.components.ReportMainContentScrollActivity
 import io.github.amatsukiichika.iwaram.ui.components.glassScrollBackdropSource
 import io.github.amatsukiichika.iwaram.ui.components.rememberGlassScrollBackdrop
 import androidx.compose.runtime.rememberCoroutineScope
@@ -195,19 +196,22 @@ fun LibraryScreen(
         // 拖滚动条走 dispatchRawDelta，**不会**置 isScrollInProgress ⇒ 单独记「scrub 中」，
         //   并入下面的玻璃背景冻结判据：否则拖动期间每帧全屏重录背景，UI 线程掉帧。
         var scrollbarDragging by remember { mutableStateOf(false) }
+        // 同一个判据喂两处：本页顶栏那条冻结门 + 宿主的整屏录制门（MainActivity）。
+        val scrolling: () -> Boolean = {
+            scrollbarDragging || when (state.mode) {
+                LibraryMode.ALL -> allState.isScrollInProgress
+                LibraryMode.FOLDER -> folderState.isScrollInProgress
+                LibraryMode.AUTHOR -> authorState.isScrollInProgress
+                LibraryMode.TIME -> timeState.isScrollInProgress
+                LibraryMode.TAG -> false
+            }
+        }
+        ReportMainContentScrollActivity(scrolling)
 
         Box(
             Modifier
                 .fillMaxSize()
-                .glassScrollBackdropSource(topBackdrop) {
-                    scrollbarDragging || when (state.mode) {
-                        LibraryMode.ALL -> allState.isScrollInProgress
-                        LibraryMode.FOLDER -> folderState.isScrollInProgress
-                        LibraryMode.AUTHOR -> authorState.isScrollInProgress
-                        LibraryMode.TIME -> timeState.isScrollInProgress
-                        LibraryMode.TAG -> false
-                    }
-                }
+                .glassScrollBackdropSource(topBackdrop, scrolling)
         ) {
             // 内容区：按方向左右滑动切换（右往左进时向左推，左往右进时向右推）
             AnimatedContent(

@@ -17,9 +17,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -38,7 +36,6 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.zIndex
 import androidx.media3.common.Player
@@ -248,7 +245,7 @@ internal fun PlayerContent(
                 PlayerEntryPoster(
                     visible = entryPosterVisible,
                     model = video.localThumbnailPath ?: video.thumbnailUrl,
-                    loading = entryPosterLoading
+                    loadingText = if (entryPosterLoading) switchLoadingText else null
                 )
                 // 在线地址解析失败（断连 / 私密 403 / 外嵌）→ 在页内给出说明 + 「重试 / 退出」，
                 // 绝不自动关页。私密与外嵌这两类大概率打不开，文案里直接点明，
@@ -482,13 +479,16 @@ private const val ENTRY_POSTER_FADE_MS = 220
  * 目的：① 滑入动画里不建 PlayerView（SurfaceView 首次 attach + 首帧绘制最贵）；
  * ② 落位后视频还没出画面的那几百毫秒（在线要解析地址）有封面可看，而不是黑屏+转圈。
  * [visible] 变 false 后整块淡出，露出真实画面；淡完立即撤掉，不留全屏图片层。
- * 没有封面地址时只有黑底与（必要时的）转圈 —— 仍比"黑屏闪一下"稳。
+ * 没有封面地址时只有黑底与（必要时的）加载提示 —— 仍比"黑屏闪一下"稳。
+ *
+ * 加载提示复用 [CenterLoadingOverlay]（与换片空窗那层同一组件、同一文案、同一位置），
+ * 遮罩淡出时它与底下的加载层严丝合缝，不会出现"小转圈换成大转圈"的跳变。
  */
 @Composable
 private fun PlayerEntryPoster(
     visible: Boolean,
     model: String?,
-    loading: Boolean
+    loadingText: String?
 ) {
     val alpha by animateFloatAsState(
         targetValue = if (visible) 1f else 0f,
@@ -512,14 +512,8 @@ private fun PlayerEntryPoster(
             // 封面可能很亮：轻压一层，保证滑入时顶栏白字/返回键仍看得清。
             Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.12f)))
         }
-        if (loading) {
-            CircularProgressIndicator(
-                color = Color.White,
-                strokeWidth = 2.dp,
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .size(28.dp)
-            )
+        if (loadingText != null) {
+            CenterLoadingOverlay(text = loadingText, modifier = Modifier.align(Alignment.Center))
         }
     }
 }

@@ -759,12 +759,33 @@ fun FastScrollbarBasic(
                 scope.launch { state.scrollToItem(index, offsetPx) }
             }
         },
+        // 拖动：把"手指比例增量"按按下时的比例尺换成像素，同一帧只派发一次。
+        //   每份增量都同步 dispatchRawDelta 会让一帧内做多次滚动布局，所以先用
+        //   FrameDeltaBatch 合并，等下一帧开始再一次性派发（列表仍然逐帧跟手）。
         onDragFractionDelta = { fractionDelta ->
             val px = fractionDelta * dragScale.resolve { geometry() }
-            if (px.isFinite() && abs(px) > 0.01f) state.dispatchRawDelta(px)
+            if (px.isFinite() && abs(px) > 0.01f && deltaBatch.add(px)) {
+                scope.launch {
+                    withFrameNanos { }
+                    val delta = deltaBatch.drain()
+                    if (delta.isFinite() && delta != 0f) state.dispatchRawDelta(delta)
+                }
+            }
         },
         onDragProgress = { f ->
-            if (f == null) dragScale.reset()
+            if (f == null) {
+                dragScale.reset()  // 松手/取消：下次按下重新采快照
+                // 把还没派发的最后一小段补上（不丢尾巴），批量器归零。
+                val rest = deltaBatch.drain()
+                if (rest.isFinite() && rest != 0f) state.dispatchRawDelta(rest)
+                dragStarted[0] = false
+            } else if (!dragStarted[0]) {
+                // 按下第一帧：用 suspend scrollBy(0f) 抢 mutex，取消在途的惯性 fling /
+                //   点轨道触发的 scrollToItem 动画。dispatchRawDelta 不经过 mutatorMutex，
+                //   不取消的话两股位移叠加会让页面一顿一顿/跳。
+                dragStarted[0] = true
+                scope.launch { state.scrollBy(0f) }
+            }
             onDraggingChange?.invoke(f != null)
             onDragProgress?.invoke(f)
         },

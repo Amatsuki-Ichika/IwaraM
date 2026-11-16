@@ -149,6 +149,8 @@ import io.github.amatsukiichika.iwaram.ui.components.GlassMode
 import io.github.amatsukiichika.iwaram.ui.components.GlassSettings
 import io.github.amatsukiichika.iwaram.ui.components.GlassTopBar
 import io.github.amatsukiichika.iwaram.ui.components.LocalGlassSettings
+import io.github.amatsukiichika.iwaram.ui.components.LocalMainContentScrollActivity
+import io.github.amatsukiichika.iwaram.ui.components.MainContentScrollActivity
 import io.github.amatsukiichika.iwaram.ui.components.glassContentBackdropSource
 import io.github.amatsukiichika.iwaram.ui.components.rememberGlassContentBackdrop
 import io.github.amatsukiichika.iwaram.ui.components.LocalDebugDetails
@@ -423,6 +425,9 @@ class MainActivity : ComponentActivity() {
                 // 底栏与所有角标胶囊都从这里取。
                 val glassOpacity by vm.glassOpacityFlow.collectAsStateWithLifecycle()
                 val glassMode by vm.glassModeFlow.collectAsStateWithLifecycle()
+                // 主内容滚动活动：主 tab 页往里登记「正在滚 / 正在拖滚动条」，主内容背景源的
+                // 录制门据此停录（见 GlassBackdrop 模块第三之二节与决策 0019）。
+                val mainScrollActivity = remember { MainContentScrollActivity() }
                 CompositionLocalProvider(
                     // 仓库正门：UI 各处经 LocalAppRepository.current 取数据/设置，
                     // 不再各自强转 application（见 IwaraApp.kt 的定义）。
@@ -430,7 +435,8 @@ class MainActivity : ComponentActivity() {
                     LocalDownloadedIwaraIds provides downloadedIds,
                     LocalShowR18Tag provides showR18Tag,
                     LocalDebugDetails provides debugDetails,
-                    LocalGlassSettings provides GlassSettings(glassOpacity, GlassMode.of(glassMode))
+                    LocalGlassSettings provides GlassSettings(glassOpacity, GlassMode.of(glassMode)),
+                    LocalMainContentScrollActivity provides mainScrollActivity
                 ) {
                     MainContent(vm, cvm, app, updateVm)
                 }
@@ -847,8 +853,10 @@ class MainActivity : ComponentActivity() {
         //  ① 真模糊是可选档（默认 = 透明，零成本，见 repo 的 glassMode 默认值）；
         //  ② 录制门 = 主页面是否被完全遮挡：过渡动画期间与部分遮挡期间照常录制，只有 `cover` 到 1
         //     （覆盖动画收尾、主页面整块看不见）才停，切页过渡时材质不会中途消失；
-        //     若"首次进播放页"再次卡顿，可把门收紧成 `backdropEnabled && !mainFullyCovered && mainPageIdle`；
-        //  ③ 挂载标记同步派生（见 playerMounted），慢一帧也不会"打不开"。
+        //  ③ 主 tab 页滚动 / 拖滚动条期间也停录（`mainScrollActivity`，各页自行上报）：
+        //     长列表滚动时每帧重录整屏是一次额外的全屏离屏 pass，是掉帧的主要来源（决策 0019）；
+        //     此时底栏与静态顶栏采样上一帧，停下立刻恢复实时。
+        //  ④ 挂载标记同步派生（见 playerMounted），慢一帧也不会"打不开"。
         // 设置改为全局一份（[LocalGlassSettings]），这里只读。
         val glassSettings = LocalGlassSettings.current
         // 库的 LayerBackdrop 录制管线：blur 需 API 31+（lens 部分 33+，之下退化成纯模糊/无效果）。
@@ -863,6 +871,9 @@ class MainActivity : ComponentActivity() {
         // 在组合期直接读会逐帧重组整个 MainContent；derivedStateOf 只在结果翻转时通知。
         val mainFullyCovered by remember { derivedStateOf { cover >= 1f } }
         val backdropEnabled = barGlassConfigured && !mainFullyCovered
+        // 主内容滚动活动（onCreate 下发）：任一主 tab 页在滚 / 拖滚动条时停录主内容背景源，
+        // 见上面录制门取舍③。
+        val mainScrollActivity = LocalMainContentScrollActivity.current
 
         // ---- 拉伸过滚动期间冻结磨砂 ----
         // Compose 1.7.3 的拉伸过滚动（API 31+）在拉伸期间把列表内容重录进一个平台 RenderNode
@@ -1142,7 +1153,9 @@ class MainActivity : ComponentActivity() {
                 Modifier
                     .fillMaxSize()
                     .nestedScroll(overscrollGate)
-                    .glassContentBackdropSource(mainBackdrop) { backdropEnabled && !overscrollHold }
+                    .glassContentBackdropSource(mainBackdrop) {
+                        backdropEnabled && !overscrollHold && mainScrollActivity?.isScrolling != true
+                    }
                     .padding(top = topBarHeight)
             ) {
                 if (topBarHeight > 0.dp) {

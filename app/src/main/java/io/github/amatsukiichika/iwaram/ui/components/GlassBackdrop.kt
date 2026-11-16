@@ -7,11 +7,15 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
@@ -233,6 +237,60 @@ fun Modifier.glassScrollBackdropSource(
     source: MainContentBackdrop?,
     scrolling: () -> Boolean
 ): Modifier = if (source == null) this else glassContentBackdropSource(source) { !scrolling() }
+
+/* --------------------------------------------------------------------------------------------
+ * 三之二、主内容滚动上报（滚动期停录宿主那条主内容背景源）
+ * ------------------------------------------------------------------------------------------ */
+
+/**
+ * 主内容滚动活动汇总：主 tab 页把「本页列表正在滚 / 正在拖滚动条」写进来，宿主用它当
+ * 主内容背景源的录制门。
+ *
+ * 判据必须与页内 [glassScrollBackdropSource] 完全一致 —— 拖滚动条走 `dispatchRawDelta`，
+ * **不会**置 `isScrollInProgress`，只看后者会漏掉整段拖动。
+ *
+ * 为什么需要这条单独通道：主内容背景源挂在宿主内容区上（底栏、静态顶栏都采样它），
+ * 它不认识各 tab 页的列表状态；而滚动期间每帧重录整屏是长列表掉帧的主要来源（见决策 0019）。
+ *
+ * 用「令牌 → 在滚」而不是单个布尔：切 tab / 切模式时旧页面释放与新页面首帧的写入会交错，
+ * 单布尔可能被旧的 false 覆盖成"没在滚"。
+ */
+class MainContentScrollActivity {
+    private val scrollingTokens = mutableStateMapOf<Any, Unit>()
+
+    /**
+     * 是否有页面正在滚动。只在绘制相位读：翻转只触发重绘，不会重组宿主。
+     */
+    val isScrolling: Boolean
+        get() = scrollingTokens.isNotEmpty()
+
+    fun report(token: Any, scrolling: Boolean) {
+        if (scrolling) scrollingTokens[token] = Unit else scrollingTokens.remove(token)
+    }
+}
+
+/**
+ * 主内容滚动活动通道；由 `MainActivity` 在整棵树之外提供，缺省 null（页面照常工作）。
+ */
+val LocalMainContentScrollActivity = staticCompositionLocalOf<MainContentScrollActivity?> { null }
+
+/**
+ * 把本页列表的 [scrolling] 上报给宿主的录制门：在页面里无条件调一次即可，
+ * 页面被摘掉（切 tab / 切模式）时靠协程取消清账。
+ */
+@Composable
+fun ReportMainContentScrollActivity(scrolling: () -> Boolean) {
+    val activity = LocalMainContentScrollActivity.current ?: return
+    val token = remember { Any() }
+    LaunchedEffect(activity, token) {
+        try {
+            snapshotFlow(scrolling).collect { activity.report(token, it) }
+        } finally {
+            // 页面离开时必须撤掉自己的令牌，否则一次滚动能把宿主永久冻在旧帧。
+            activity.report(token, false)
+        }
+    }
+}
 
 /* --------------------------------------------------------------------------------------------
  * 四、玻璃配方（全 app 唯一处 —— 想调模糊/折射只改这里）

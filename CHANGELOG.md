@@ -27,7 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Library and feed cards keep their tag row to exactly one line: tags are measured to the card width, a tag that does not fit is ellipsized, and a trailing +N chip always reports how many tags are not shown (the ellipsized tag is not counted), so cards no longer differ in height because of their tags.
 
-- Scrolling a long list no longer re-records the frosted backdrop on every frame: recording pauses while the finger or fling is moving and resumes when the list stops, which removes a full-screen render pass per frame during the scroll.
+- Scrolling a long list no longer re-records the frosted backdrop on every frame: recording pauses while the finger or fling is moving and resumes when the list stops, which removes a full-screen render pass per frame during the scroll. The library, Iwara and Me pages also report their own scrolling to the window, so the floating bottom bar and the static top bar stop re-recording the whole content area while a page scrolls or its scrollbar is dragged.
 
 - Opening the player still slides the real page in over 320 ms, but the video area now shows the video's cover while the page slides in and until the first video frame is ready; the player is only created after the slide settles and the cover then fades out, so the transition has no placeholder, no black flash and no dropped frames.
 
