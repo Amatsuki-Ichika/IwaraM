@@ -24,6 +24,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
@@ -108,10 +109,23 @@ data class VideoCardModel(
 )
 
 /**
+ * 拖动滚动条期间的卡片降级开关。
+ *
+ * 拖动时列表每帧按目标位置落位，目标处那一屏卡片必须在**当前帧内**组合/测量完成；
+ * 封面图请求与解码、标签行 [TagRow] 的多次 subcompose 正是这一屏的主要成本，
+ * 上千条的大库快拖时叠加成能感觉到的微卡顿。拖动中只画底色骨架 + 标题（高度与真实
+ * 卡片逐像素一致，排布不跳），松手立刻切回真实卡片，把拖动帧留轻。
+ */
+internal val LocalScrubbingCards = staticCompositionLocalOf { false }
+
+/**
  * 视频卡片的**唯一渲染实现**（本地 / 在线共用）。
  *
  * 三行恒渲染（标题 / 作者 / 标签）—— 没有作者名、没有 tag 时也保留最小高度，
  * 保证同一排卡片严格等高（这是"整齐统一"的硬保证）。
+ *
+ * [LocalScrubbingCards] 为 true 时只画骨架：封面图、角标、作者名与标签行全部跳过，
+ * 但封面框、标题行、作者行与标签行的占位高度都保留 ⇒ 卡片高度、网格排布与真实卡片完全一致。
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -124,6 +138,7 @@ fun VideoCardContent(
     onAuthorClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
+    val scrubbing = LocalScrubbingCards.current
     Card(modifier = modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)) {
         Column {
             Box(
@@ -132,7 +147,8 @@ fun VideoCardContent(
                     .aspectRatio(16f / 9f)
                     .background(MaterialTheme.colorScheme.surfaceVariant)
             ) {
-                if (model.thumbnail != null) {
+                // 拖动滚动条期间只留底色：不建 AsyncImage（省掉封面请求/解码）、不画角标。
+                if (!scrubbing && model.thumbnail != null) {
                     AsyncImage(
                         // 网格卡片**显式关掉 crossfade** —— Coil 2 默认开 100ms 渐变，
                         //   双列网格快速滑动时几十个渐变同时在跑，是可见的掉帧来源；
@@ -147,7 +163,7 @@ fun VideoCardContent(
                     )
                 }
                 // 左上角：「本地」药丸（只有在线卡且本地库已有该 iwaraId 时为 true）。
-                if (model.showLocalBadge) {
+                if (!scrubbing && model.showLocalBadge) {
                     LocalPill(
                         Modifier
                             .align(Alignment.TopStart)
@@ -157,19 +173,21 @@ fun VideoCardContent(
                 // 右上角：R18 药丸。只认显式 ecchi —— 未匹配到 iwara（rating 为空）的本地视频
                 // 不打角标（未知 ≠ 确认 R18），但它们仍按 R18 参与「分级」筛选。
                 // 该药丸用红底实色，不消费卡片背景层。
-                R18Pill(
-                    model.rating,
-                    model.showR18,
-                    Modifier.align(Alignment.TopEnd).padding(VideoCardSpec.overlayPadding)
-                )
-                // 左下角发布日期：纯文字，只有一层很淡的黑色柔边保可读；更贴角、与下方文字左对齐
-                //   （start 用内容区的内边距，bottom 收到 4dp）。
-                CardDateLabel(
-                    createdAtMs = model.createdAtMs,
-                    modifier = Modifier
-                        .align(Alignment.BottomStart)
-                        .padding(start = VideoCardSpec.contentPadding, bottom = 4.dp)
-                )
+                if (!scrubbing) {
+                    R18Pill(
+                        model.rating,
+                        model.showR18,
+                        Modifier.align(Alignment.TopEnd).padding(VideoCardSpec.overlayPadding)
+                    )
+                    // 左下角发布日期：纯文字，只有一层很淡的黑色柔边保可读；更贴角、与下方文字左对齐
+                    //   （start 用内容区的内边距，bottom 收到 4dp）。
+                    CardDateLabel(
+                        createdAtMs = model.createdAtMs,
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(start = VideoCardSpec.contentPadding, bottom = 4.dp)
+                    )
+                }
             }
 
             Column(modifier = Modifier.padding(VideoCardSpec.contentPadding)) {
@@ -192,19 +210,22 @@ fun VideoCardContent(
                         .heightIn(min = VideoCardSpec.authorRowMinHeight),
                     contentAlignment = Alignment.CenterStart
                 ) {
-                    Text(
-                        text = model.author,
-                        style = MaterialTheme.typography.bodySmall,
-                        minLines = 1,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = if (onAuthorClick != null) {
-                            Modifier.clickable(onClick = onAuthorClick)
-                        } else {
-                            Modifier
-                        }
-                    )
+                    // 拖动滚动条期间跳过作者名（整行占位高度不变）。
+                    if (!scrubbing) {
+                        Text(
+                            text = model.author,
+                            style = MaterialTheme.typography.bodySmall,
+                            minLines = 1,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = if (onAuthorClick != null) {
+                                Modifier.clickable(onClick = onAuthorClick)
+                            } else {
+                                Modifier
+                            }
+                        )
+                    }
                 }
                 Spacer(Modifier.height(VideoCardSpec.gapAuthorTags))
 
@@ -218,7 +239,8 @@ fun VideoCardContent(
                         .heightIn(min = VideoCardSpec.tagRowMinHeight),
                     contentAlignment = Alignment.CenterStart
                 ) {
-                    if (model.tags.isNotEmpty()) {
+                    // 拖动滚动条期间跳过标签行（SubcomposeLayout 的多次 subcompose 是拖动帧的主要成本之一）。
+                    if (!scrubbing && model.tags.isNotEmpty()) {
                         TagRow(tags = model.tags, onTagClick = onTagClick)
                     }
                 }

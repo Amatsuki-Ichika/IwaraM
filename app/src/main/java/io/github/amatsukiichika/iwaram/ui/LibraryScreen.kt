@@ -53,6 +53,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.ui.browse.CompactSearchSlot
 import io.github.amatsukiichika.iwaram.ui.browse.RATING_OPTIONS
@@ -230,24 +231,29 @@ fun LibraryScreen(
                             // 背景源已提升到页面级（`topBackdrop`，与回顶按钮共用），
                             //   这里不再各自 `rememberGlassViewBackdrop()`，避免两层嵌套录制白付成本。
                             //   网格自己铺满整个区域（顶部 contentPadding = 悬浮条高度）⇒ 卡片会**从顶栏底下穿过**。
-                            VideoGrid(
-                                videos = state.videos,
-                                showTags = state.showTags,
-                                showR18Tag = state.showR18Tag,
-                                onOpenVideo = onOpenVideo,
-                                onTagClick = vm::selectTag,
-                                onLongClick = { linkTarget = it },
-                                onImport = onImport,
-                                onAuthorClick = { v ->
-                                    onOpenAuthor(v.authorId ?: VideoViewModel.UNKNOWN_AUTHOR_KEY, v.author)
-                                },
-                                // 全局筛选器：筛空时换一条空态文案（不然会显示"还没有视频，导入…"）
-                                hiddenByFilter = state.hiddenByFilter,
-                                state = allState,
-                                bottomPadding = bottomPadding,
-                                // 顶栏是覆盖层，首行需为其让出高度。
-                                topPadding = topPadding
-                            )
+                            // 拖动滚动条期间把卡片降级为骨架（见 [LocalScrubbingCards]）：
+                            //   拖动每帧落位一屏新卡片，封面加载 + 标签行 subcompose 是那一帧的主要成本；
+                            //   骨架高度与真实卡片逐像素一致，松手立刻恢复，排布不跳。
+                            CompositionLocalProvider(LocalScrubbingCards provides scrollbarDragging) {
+                                VideoGrid(
+                                    videos = state.videos,
+                                    showTags = state.showTags,
+                                    showR18Tag = state.showR18Tag,
+                                    onOpenVideo = onOpenVideo,
+                                    onTagClick = vm::selectTag,
+                                    onLongClick = { linkTarget = it },
+                                    onImport = onImport,
+                                    onAuthorClick = { v ->
+                                        onOpenAuthor(v.authorId ?: VideoViewModel.UNKNOWN_AUTHOR_KEY, v.author)
+                                    },
+                                    // 全局筛选器：筛空时换一条空态文案（不然会显示"还没有视频，导入…"）
+                                    hiddenByFilter = state.hiddenByFilter,
+                                    state = allState,
+                                    bottomPadding = bottomPadding,
+                                    // 顶栏是覆盖层，首行需为其让出高度。
+                                    topPadding = topPadding
+                                )
+                            }
                             // 换在线同款连续滚动条（拖动实时滚）+ 居中分节气泡；
                             //   左右 12dp 对称后滚动条悬浮右缘，不再占位。
                             //   轨道顶部让出悬浮顶栏：节点仍铺满，可见/可拖区域从顶栏下沿开始。

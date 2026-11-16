@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Every scrollbar now starts below the floating search bar instead of running under it. Dragging the thumb lands the list at the position under the finger instead of applying a pixel delta for every pointer event, so dragging through a large library no longer builds a screen of new cards inside the input callback and stays smooth; a drag still takes over from an in-flight fling or a track-tap jump, and releasing the thumb no longer makes it jump back before the list catches up.
 
+- While a scrollbar thumb is held, library cards draw as plain placeholders with their titles instead of loading covers, badges, authors and tags; releasing the thumb brings the full cards back. The placeholder keeps the exact card height and row alignment, so the grid does not shift, and dragging through a very large library no longer spends every frame composing covers and tag rows.
+
 - Scroll positions and already loaded pages survive switching between the library, Iwara and Me tabs, and between Iwara segments and searches. Returning to a tab no longer starts at the top or fetches the first page again.
 
 - Predictive back works again on overlay pages, action sheets and the player: the back gesture is claimed by the topmost page and, on Android 14 and later, follows the finger with the page sliding under it. Previously the system found no page claiming the gesture and always showed "back to the home screen", even with pages open.
