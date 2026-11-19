@@ -41,7 +41,8 @@
 
 - **Online browsing** — trending and latest feeds, tag browsing, search and author pages.
 - **Local library** — import and scan media folders, fetch metadata, then browse by folder,
-  author, date or tag with search and sorting. The scanner indexes MP4, MKV, WebM and MOV videos.
+  author, date or tag with search and sorting. The scanner indexes MP4, MKV, WebM, MOV
+  and M4V videos.
 - **Playback** — swipe to seek, double-tap to seek, fullscreen, quality selection and
   resume from where you left off. Audio is decoded by a bundled FFmpeg decoder, so streams the
   device's platform decoder rejects still play; video decoders are retried with ExoPlayer's decoder
@@ -92,7 +93,7 @@ echo "sdk.dir=$ANDROID_HOME" > local.properties
 
 The version name has a single source of truth in `gradle.properties` (`app.versionName`) and can be
 overridden per build with `-Papp.versionName=0.2.2`; `versionCode` is derived from it in
-`app/build.gradle.kts` (`major * 10000 + minor * 100 + patch`, pre-release suffix ignored).
+`app/build.gradle.kts` (`major * 1,000,000 + minor * 1,000 + patch`, pre-release suffix ignored).
 
 ## Architecture
 

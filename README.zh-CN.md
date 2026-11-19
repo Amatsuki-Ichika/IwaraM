@@ -41,7 +41,7 @@
 
 - **在线浏览** —— 热门/最新信息流、标签浏览、搜索、作者页。
 - **本地库** —— 导入并扫描媒体目录、抓取元数据，再按文件夹 / 作者 / 日期 / 标签浏览，
-  支持搜索与排序。扫描器会索引 MP4、MKV、WebM 与 MOV 视频。
+  支持搜索与排序。扫描器会索引 MP4、MKV、WebM、MOV 与 M4V 视频。
 - **播放** —— 左右滑动定位、双击定位、全屏、清晰度选择、从上次进度续播。音频由内置的
   FFmpeg 解码器解码，设备平台解码器拒绝的音频流也能播放；视频解码器则通过 ExoPlayer 的
   解码器回退依次重试。实际编解码能力仍取决于设备与系统。
@@ -86,7 +86,7 @@ echo "sdk.dir=$ANDROID_HOME" > local.properties
 
 版本名的唯一来源是 `gradle.properties` 里的 `app.versionName`，也可在构建时用
 `-Papp.versionName=0.2.2` 覆盖；`versionCode` 由 `app/build.gradle.kts` 从版本名推导
-（`major * 10000 + minor * 100 + patch`，忽略预发布后缀）。
+（`major * 1,000,000 + minor * 1,000 + patch`，忽略预发布后缀）。
 
 ## 架构
 

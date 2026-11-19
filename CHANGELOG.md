@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The app can check for updates in-app and install them without leaving it. Settings > About > Updates shows the current version, a stable/beta update channel, an automatic check switch, a check frequency (every start, daily, weekly, or never — "never" turns the automatic switch off while remembering the last interval), a manual check, and the option to ignore a version; releases are read from GitHub Releases, the APK is verified against the published SHA-256 checksum and then handed to the system installer. Automatic checks stay quiet when the app is up to date, and the ignored version is cleared when the update channel changes.
 
+- An 18+ self-declaration on the final page of the first-run guide: "Get started" stays disabled until "I am 18 or older" is checked, and Skip shows the same content notice before it completes, so no path reaches the main screen without the declaration. The declaration is asked once; installs that finished the guide before this version are not prompted again.
+
+- A "Protect screenshots" switch under Settings > General > Privacy (default off). While it is on, screenshots, screen recordings and the recent-apps preview of the app are blank, so downloaded or streamed adult content is not captured by accident.
+
 ### Changed
 
 - Author pages now have a continuous scrollbar with the author's name in the drag bubble, like the other feeds.
@@ -35,7 +39,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Fullscreen player controls inset from the cutout, navigation bar and gesture area with 48 dp touch targets, so buttons are no longer close to the screen corners or covered by system bars.
 
+- The R18 badge is more legible: its red is darker and the label is light, raising the pill's text contrast from about 3.3:1 to about 5.3:1 at its current text size.
+
+- Version codes now follow `major * 1,000,000 + minor * 1,000 + patch`, so two versions can no longer share a code (0.2.100 and 0.3.0 both produced 300 under the old scheme) and update checks compare the right release; the in-app updater derives the remote code with the same rule.
+
+- The download list keeps the 20 most recently finished downloads and no longer drops queued tasks from the list; each task is merged by video id instead of being appended as a duplicate.
+
+- Opening a page from a long-press action sheet now slides the new page in over the sheet instead of replacing the sheet in place, so the transition matches every other overlay push.
+
 ### Fixed
+
+- A download is only recorded as complete when the received byte count matches the server's total size. A truncated transfer now keeps its partial file and is retried instead of being reported as a finished download, and a resumed download is rejected when the server answers with a Content-Range that does not start at the requested offset, so a resumed file can no longer be stitched from mismatched byte ranges.
+
+- Seeking inside a streamed video now checks the range of the server's partial response: a response that does not start at the requested byte offset is rejected instead of being played, so a seek can no longer decode from the wrong position. Download links delivered over plain `http` are upgraded to `https` instead of failing as a cleartext request.
 
 - Opening an author from Following no longer fails intermittently with a network error. Author targets are normalized before any request, so an entry without a username no longer sends a profile request with an empty handle; author requests are also limited, retried once on rate limiting and server errors, and the page shows its own error with a retry action.
 
@@ -47,6 +63,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The back-to-top button on author, profile and playlist pages now sits at the same height as the library's bottom bar and uses the same frosted fill as the bar in both themes, instead of a lower position and a darker or plain translucent circle.
 
 - Dragging a scrollbar thumb now counts as scrolling for the frosted backdrop, so a long list no longer re-records the background on every frame while the thumb is held; a fast drag stays smooth instead of stuttering.
+
+- Downloads that were queued or running when the app was closed are now actually resumed on the next start. The resume plan used to be computed after the interrupted tasks had already been restored into the live list, so every task was skipped and the plan was always empty.
+
+- A file that the library scanner has already indexed is no longer treated as a finished download just because it is non-empty. When the file is shorter than the recorded total size it is resumed, instead of being marked complete and then playing only up to the point where the interrupted transfer stopped.
+
+- A library scan no longer deletes entries when the folder provider fails to answer. The old check treated a failed query as "file missing" and removed rows; an undetermined answer now keeps the row and the next scan retries.
+
+- Re-fetching metadata for a video no longer brings back a row that was deleted in the meantime, and it no longer overwrites the file name, cover path or modification time that a download just wrote.
+
+- Long download file names are shortened to 120 characters and 200 bytes, keeping the video id and the file extension, so a long title no longer produces a name that the file system rejects or a file that opens as the wrong kind.
+
+- The download list no longer hides the seventh and later queued tasks: it used to show only six active tasks while every task past the sixth stayed invisible in the queue.
+
+- Scanning a library folder stops descending at 12 levels instead of walking arbitrarily deep trees, which keeps a mistake in the folder picker from turning into a scan that never ends.
+
+- Session tokens are no longer stored as bare plaintext. When the system keystore cannot encrypt, the app writes an explicitly marked degraded value and Settings > General shows a warning, so a token is never silently written in clear text; restoring the session no longer reads the keystore on the main thread either.
+
+- Switching between light and dark mode while the player is fullscreen no longer leaves the screen unlocked and the system bars visible; the fullscreen lock is re-applied after the theme change.
+
+- Switching between two local files of the same video (for example a converted copy and the original) no longer resets playback to the start: the watch-history key now follows the video rather than the file path, so progress carries over.
+
+- Unplugging headphones now pauses playback instead of continuing out of the speaker; the player reacts to the becoming-noisy broadcast like other music and video apps.
+
+- The predictive back gesture in the player now checks whether back is enabled for the page, so a page that has back disabled no longer consumes the gesture and appears stuck.
+
+- The notification permission is requested after the first-run guide instead of before it, so the guide is not interrupted by a system prompt the user has no context for; the prompt is also skipped when the permission is already granted or the system will not show it again.
+
+- Starting the app in dark mode no longer flashes a white window before the first frame: the window background follows the theme color instead of the platform default.
+
+- The player no longer recreates on a font-size, display-density or screen-size change, so changing the system font scale mid-playback keeps the position instead of restarting the video.
 
 ## [0.2.2] - 2026-11-03
 

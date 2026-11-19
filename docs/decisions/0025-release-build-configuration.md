@@ -1,0 +1,25 @@
+# 0025 — Keep R8 disabled and compile against the 37.2 preview platform
+
+Status: accepted
+
+## Problem
+
+Two toolchain choices in the release build are deliberate but unexplained in code. `app/build.gradle.kts` sets `isMinifyEnabled = false` for release, so R8 neither shrinks, optimizes nor obfuscates the APK users install, and the only sign of the decision is a two-line comment. The build also compiles against `compileSdk = 37` with `compileSdkMinor = 2`, a platform above the AGP-recommended maximum, and `gradle.properties` silences the warning with `android.suppressUnsupportedCompileSdk=37` while `targetSdk` stays at the stable 36. Both choices look like something to "fix" in review: enabling R8 is the documented release default, and suppressing a warning is normally a smell. A future change may enable minification or drop the preview platform without knowing what was considered, so the reasoning has to live somewhere other than a comment.
+
+## Decision
+
+Release keeps `isMinifyEnabled = false`. The app has no device-verified keep rules for its reflection-heavy stack — Retrofit and Gson models, Room, Media3 with the Jellyfin FFmpeg decoder, and Compose — and `app/proguard-rules.pro` today only keeps the whole data package, which is broader than a real rule set and has never been exercised on a device. The Android Studio project template ships release with minification disabled, and a minified release that breaks at runtime cannot be fixed after users install it, so the accepted cost is a larger APK. The decision is revisited when a device-verified keep-rule set and a test pass covering the player, downloads, the updater and Room migrations exist, or when APK size becomes a user-visible constraint; a minified test build type that runs the same checks is the intended intermediate step, not a direct jump to enabling R8 in release.
+
+The build keeps compiling against `android-37.2`. Compiling ahead of `targetSdk` is the normal Android upgrade path — the compiler and lint surface API changes before the target changes runtime behavior — and this project's build, lint and release gates all run on that platform, so it is the exercised toolchain rather than an unverified experiment. `targetSdk` stays at the stable 36, so nothing the app does depends on preview runtime behavior. The accepted risk is the explicit suppression: `android.suppressUnsupportedCompileSdk=37` hides AGP's warning that the platform is newer than the AGP release has tested, which means build-tool behavior on this platform is unverified by AGP even though the repository's gates verify the build. The flag names the major version 37, so a different platform major warns again; an AGP release that supports 37.2 drops the flag, and the decision is revisited when a stable `compileSdk` line covers the APIs in use, when an API-level bug is traced to the preview platform, or when AGP stops supporting `compileSdkMinor`.
+
+## Alternatives considered
+
+**Enable R8 in release with the template's default rules.** The default `proguard-android-optimize.txt` plus the current `proguard-rules.pro` would compile and probably ship, and shrinking is the documented default. Rejected because "probably" is the wrong standard for the only artifact users install: the current rules keep the entire data package, and untested reflection paths in media, Room and update handling would fail only in the release build, at runtime, after publication.
+
+**Enable R8 with a hand-written keep-rule set but no device verification.** A smaller and more precise rule set is the right end state, but without device verification it trades a measurable cost (APK size) for an unmeasurable risk (release-only crashes), and the only crash evidence is the local crash log a user may never report. Rejected for this release; the minified test build type is how to earn the rule set before enabling it in release.
+
+**Move to the stable `compileSdk` line now.** Building against a stable platform removes the suppressed warning and the AGP-untested risk. Rejected for now because it would downgrade the compile-time API surface without fixing a user-visible problem, and the platform move is a separate toolchain change that should be made deliberately, with its own verification, rather than as a side effect of a release-gates change.
+
+## Consequences
+
+Release APKs stay larger than a minified build would be, and release crash logs keep readable class and method names, which is accepted while there is no crash telemetry. Enabling R8 later requires the keep rules and the test pass described above, and the size ratchet gives that change a measured result instead of a guess. The preview compile platform means contributors must have `android-37.2` installed, as CONTRIBUTING and the CI workflows already require, and AGP upgrades must be checked against it. `android.suppressUnsupportedCompileSdk=37` must keep naming exactly the major version it suppresses; widening it to a range would hide the next unsupported-platform warning too.
