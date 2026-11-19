@@ -163,6 +163,19 @@ internal fun GeneralContent(
             onInfo = onInfo
         )
     }
+    // 截图保护：状态归 IwaraRepository 的 StateFlow（与「下载自动继续」同一范式），UI 不直接读 prefs。
+    val repo = LocalAppRepository.current
+    val screenshotProtection by repo.screenshotProtection.collectAsStateWithLifecycle()
+    SettingsSection(tr("隐私", "Privacy")) {
+        AppEntryCard(
+            title = tr("截图保护", "Protect screenshots"),
+            subtitle = tr(
+                "开启后截屏、录屏与最近任务预览均为黑屏，避免敏感内容外泄",
+                "Blank screenshots, recordings and the recent-apps preview to keep sensitive content private"
+            ),
+            trailing = { Switch(checked = screenshotProtection, onCheckedChange = repo::setScreenshotProtection) }
+        )
+    }
 }
 
 /** 「外观」区块 = 主题与显示 + 半透明材质（材质项已从开发者页移入）。 */

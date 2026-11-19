@@ -16,12 +16,14 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * IwaraSession token 加密迁移测试（Robolectric：需要真实 SharedPreferences）。
+ * IwaraSession token 存储策略测试（Robolectric：需要真实 SharedPreferences）。
  *
- * 覆盖三条路径：
+ * 覆盖：
  * 1. 存量明文 → restore 时平滑迁移成密文，且"重启"后仍能读回原 token；
- * 2. KeyStore 不可用 → 降级明文，登录态不受影响；
- * 3. 密钥丢失 → 旧密文不可读，按未登录处理（宁可重登也不回退明文）。
+ * 2. KeyStore 不可用 → 写成显式 `plain:` 值并上报降级，登录态不受影响；密钥恢复后自愈；
+ * 3. 密钥丢失 → 旧密文不可读，按未登录处理（宁可重登也不回退明文）；
+ * 4. 旧「手动粘贴 access_token」残留被清理，IwaraSession 是唯一 token 来源；
+ * 5. restoreAsync 在 IO 完成恢复，鉴权注入经有界等待拿到 token。
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -40,6 +42,12 @@ class IwaraSessionTokenMigrationTest {
         return key
     }
 
+    private fun useUnavailableKeystore() {
+        TokenCrypto.keyProvider = object : TokenCrypto.KeyProvider {
+            override fun getOrCreateKey(): SecretKey? = null
+        }
+    }
+
     @Before
     fun setUp() {
         context = ApplicationProvider.getApplicationContext()
@@ -53,11 +61,15 @@ class IwaraSessionTokenMigrationTest {
             .filter { it.javaClass.name.startsWith("org.conscrypt") }
             .forEach { java.security.Security.removeProvider(it.name) }
         useSoftwareKey()
+        prefs.edit().clear().commit()
+        // IwaraSession 是 object：清掉上一个测试留下的恢复状态与内存 token。
+        IwaraSession.resetRestoreStateForTest()
     }
 
     @After
     fun tearDown() {
         TokenCrypto.keyProvider = defaultProvider
+        IwaraSession.resetRestoreStateForTest()
     }
 
     @Test
@@ -73,6 +85,8 @@ class IwaraSessionTokenMigrationTest {
         assertEquals("legacy-access-token", IwaraSession.accessTokenFlow())
         assertTrue("存量明文应被迁移成 v1: 密文", prefs.getString("iwara_refresh_token", null)!!.startsWith("v1:"))
         assertTrue(prefs.getString("iwara_access_token", null)!!.startsWith("v1:"))
+        assertFalse("迁移成功不算降级", IwaraSession.tokenStorageDegraded.value)
+        assertFalse(prefs.getBoolean("iwara_token_storage_degraded", true))
 
         // 模拟重启：密文再读一遍，token 不变。
         IwaraSession.restore(context)
@@ -81,21 +95,46 @@ class IwaraSessionTokenMigrationTest {
     }
 
     @Test
-    fun `keystore unavailable falls back to plaintext and login keeps working`() {
-        TokenCrypto.keyProvider = object : TokenCrypto.KeyProvider {
-            override fun getOrCreateKey(): SecretKey? = null
-        }
+    fun `keystore unavailable stores explicit plaintext prefix and reports degraded`() {
+        useUnavailableKeystore()
         prefs.edit().putString("iwara_refresh_token", "legacy-refresh-token").commit()
 
         IwaraSession.restore(context)
         assertTrue("加密不可用不得破坏登录态", IwaraSession.isLoggedIn)
         assertEquals("legacy-refresh-token", IwaraSession.refreshToken)
-        assertEquals("降级路径保持明文原样", "legacy-refresh-token", prefs.getString("iwara_refresh_token", null))
+        assertEquals(
+            "降级写入必须带显式 plain: 前缀，不能落裸明文",
+            "plain:legacy-refresh-token",
+            prefs.getString("iwara_refresh_token", null)
+        )
+        assertTrue("降级状态必须对界面可见", IwaraSession.tokenStorageDegraded.value)
+        assertTrue("降级状态要持久化", prefs.getBoolean("iwara_token_storage_degraded", false))
+
+        // 重启后仍可读回（plain: 前缀是自描述格式），降级标记保持。
+        IwaraSession.restore(context)
+        assertEquals("legacy-refresh-token", IwaraSession.refreshToken)
+        assertTrue(IwaraSession.tokenStorageDegraded.value)
+    }
+
+    @Test
+    fun `degraded plaintext token heals back to ciphertext once the keystore recovers`() {
+        useUnavailableKeystore()
+        prefs.edit().putString("iwara_refresh_token", "legacy-refresh-token").commit()
+        IwaraSession.restore(context)
+        assertTrue(prefs.getString("iwara_refresh_token", null)!!.startsWith("plain:"))
+
+        // 系统密钥库恢复可用：下一次 restore 应把 plain: 值重新加密。
+        useSoftwareKey()
+        IwaraSession.restore(context)
+        assertEquals("legacy-refresh-token", IwaraSession.refreshToken)
+        assertTrue("自愈后应为 v1: 密文", prefs.getString("iwara_refresh_token", null)!!.startsWith("v1:"))
+        assertFalse("恢复加密后降级标记要清除", IwaraSession.tokenStorageDegraded.value)
+        assertFalse(prefs.getBoolean("iwara_token_storage_degraded", true))
     }
 
     @Test
     fun `key loss makes stored ciphertext unreadable - treated as logged out`() {
-        val key = useSoftwareKey()
+        useSoftwareKey()
         prefs.edit().putString("iwara_refresh_token", TokenCrypto.encrypt("secret-refresh")!!).commit()
 
         IwaraSession.restore(context)
@@ -109,5 +148,32 @@ class IwaraSessionTokenMigrationTest {
         IwaraSession.restore(context)
         assertFalse("密钥丢失后旧密文不可读，按未登录处理", IwaraSession.isLoggedIn)
         assertNull(IwaraSession.refreshToken)
+    }
+
+    @Test
+    fun `legacy manually pasted token key is removed on restore`() {
+        // 旧版本「手动粘贴 access_token」的落盘键：功能入口已删除，恢复时清理残留。
+        prefs.edit()
+            .putString("iwara_refresh_token", "legacy-refresh-token")
+            .putString("access_token", "legacy-manual-token")
+            .commit()
+
+        IwaraSession.restore(context)
+        assertFalse("旧的第二 token 来源必须被清理", prefs.contains("access_token"))
+        assertEquals("legacy-refresh-token", IwaraSession.refreshToken)
+    }
+
+    @Test
+    fun `restoreAsync completes on io and awaitAccessToken returns the restored token`() {
+        prefs.edit()
+            .putString("iwara_refresh_token", "legacy-refresh-token")
+            .putString("iwara_access_token", "legacy-access-token")
+            .commit()
+
+        IwaraSession.restoreAsync(context)
+        // 鉴权注入路径：有界等待恢复完成后拿到 token（不依赖调用线程是主线程）。
+        assertEquals("legacy-access-token", IwaraSession.awaitAccessToken())
+        assertEquals("legacy-refresh-token", IwaraSession.refreshToken)
+        assertTrue("恢复完成后应已迁移为密文", prefs.getString("iwara_refresh_token", null)!!.startsWith("v1:"))
     }
 }

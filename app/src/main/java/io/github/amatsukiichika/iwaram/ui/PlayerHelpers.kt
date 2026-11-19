@@ -52,7 +52,6 @@ import androidx.media3.datasource.HttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
-import io.github.amatsukiichika.iwaram.LocalAppRepository
 import io.github.amatsukiichika.iwaram.data.IwaraClient
 import io.github.amatsukiichika.iwaram.data.IwaraRepository
 import io.github.amatsukiichika.iwaram.data.IwaraVideoItem

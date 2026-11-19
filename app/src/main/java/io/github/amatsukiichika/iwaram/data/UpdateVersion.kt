@@ -25,13 +25,13 @@ data class UpdateVersion(
 
     /**
      * 与 app/build.gradle.kts 一致的 versionCode 公式（忽略预发布段）：
-     * major * 10000 + minor * 100 + patch。
+     * major * 1_000_000 + minor * 1_000 + patch，minor/patch 各占三位十进制。
      *
      * 忽略 pre 是刻意的：同一核心版本的 rc 与正式版共享 versionCode，
      * 测试者才能从 rc 版 APK 原地升级到正式版（见 build.gradle.kts 注释）。
      * 数字范围由 [parse] 限制，不会溢出。
      */
-    fun versionCode(): Int = major * 10000 + minor * 100 + patch
+    fun versionCode(): Int = major * 1_000_000 + minor * 1_000 + patch
 
     /** semver 比较；优先顺序：major → minor → patch → 预发布段。 */
     override fun compareTo(other: UpdateVersion): Int {
@@ -91,13 +91,13 @@ fun parse(raw: String?): UpdateVersion? {
 /**
  * versionCode 公式里各段的上限。
  *
- * minor/patch 在公式里各占两位十进制，超过 99 会和更大的 major 撞码；
+ * minor/patch 在公式里各占三位十进制，超过 999 会和更大的 major 撞码；
  * major 上限由 Android/Play 的 versionCode 上限 2_100_000_000 反推
- * （209_999 * 10000 + 99 * 100 + 99 = 2_099_999_999）。超范围视为非法版本。
+ * （2099 * 1_000_000 + 999 * 1_000 + 999 = 2_099_999_999）。超范围视为非法版本。
  */
-private const val VERSION_MAJOR_MAX = 209_999
-private const val VERSION_MINOR_MAX = 99
-private const val VERSION_PATCH_MAX = 99
+private const val VERSION_MAJOR_MAX = 2099
+private const val VERSION_MINOR_MAX = 999
+private const val VERSION_PATCH_MAX = 999
 
 /** 解析一段十进制数字并收敛到公式可表示的上限；非法返回 null。 */
 private fun String.toVersionPart(max: Int): Int? {

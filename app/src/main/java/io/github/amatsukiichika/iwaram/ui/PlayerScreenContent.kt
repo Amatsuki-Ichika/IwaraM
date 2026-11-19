@@ -24,7 +24,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -43,6 +42,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import io.github.amatsukiichika.iwaram.data.VideoEntity
+import java.lang.ref.WeakReference
 
 /**
  * 播放页的 UI 树（从 PlayerScreen() 的绘制段抽出）。
@@ -527,15 +527,20 @@ private fun PlayerEntryPoster(
  * 安全边界：只交出 `parent == null`（确实已脱离视图树）的实例；仍挂在树上的
  * （快速退出后立刻再进、上一份组合尚未销毁）直接丢弃并新建，
  * 绝不把一个 View 同时挂到两个父节点上。
+ *
+ * 生命周期边界：持有的是**弱引用**。池是进程级 object，强引用会把 PlayerView 的
+ * Context（即 MainActivity）留到进程结束才回收；缓存只省一次 inflate，不值得延长
+ * 一个 Activity 的寿命。同一 Activity 内复用，配置重建换了 Activity 后旧实例
+ * 带着已销毁的 Context，即使还活着也不复用。
  */
 @OptIn(UnstableApi::class)
 private object PlayerViewPool {
-    private var idle: PlayerView? = null
+    private var idle: WeakReference<PlayerView>? = null
 
     fun acquire(context: Context): PlayerView {
-        val cached = idle
+        val cached = idle?.get()
         idle = null
-        if (cached != null && cached.parent == null) {
+        if (cached != null && cached.parent == null && cached.context === context) {
             cached.player = null
             return cached
         }
@@ -545,6 +550,6 @@ private object PlayerViewPool {
     fun release(view: PlayerView) {
         // 先解绑播放器（别让闲置实例握着一个已释放的 player）。
         view.player = null
-        idle = view.takeIf { it.parent == null }
+        idle = view.takeIf { it.parent == null }?.let { WeakReference(it) }
     }
 }

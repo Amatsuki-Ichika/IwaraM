@@ -34,6 +34,15 @@ class ScanPruneTest {
     }
 
     @Test
+    fun `an undetermined existence keeps the row`() {
+        val unseen = listOf(ref("content://tree/unknown.mp4"))
+        assertTrue(
+            "查询失败/授权暂失无法判定时必须保留（否则一次抖动删光库索引）",
+            rowsToPrune(unseen) { null }.isEmpty()
+        )
+    }
+
+    @Test
     fun `only the rows with a missing file are pruned`() {
         val unseen = listOf(ref("content://tree/a.mp4"), ref("content://tree/b.mp4"))
         val doomed = rowsToPrune(unseen) { uri -> uri.endsWith("b.mp4") }

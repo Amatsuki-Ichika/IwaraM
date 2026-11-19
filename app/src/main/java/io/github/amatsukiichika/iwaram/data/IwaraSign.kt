@@ -86,8 +86,18 @@ object IwaraSign {
         return chosen.name.orEmpty() to httpsUrl(chosen.src!!.view!!)
     }
 
-    /** 兼容协议相对地址（//host/...），与 yt-dlp 的 _proto_relative_url 同款处理。 */
-    fun httpsUrl(url: String): String = if (url.startsWith("//")) "https:$url" else url
+    /**
+     * 归一化文件地址：协议相对地址（//host/...）补 https；明文 http 一律升级为 https。
+     *
+     * manifest 未开启 cleartext，targetSdk 下明文请求会被 OkHttp/ExoPlayer 直接拒绝，
+     * 因此这里不是"保留原协议"而是升级，免得签名地址以 http:// 下发时在播放/下载阶段
+     * 才报一个与真实原因无关的传输错误。
+     */
+    fun httpsUrl(url: String): String = when {
+        url.startsWith("//") -> "https:$url"
+        url.startsWith("http://", ignoreCase = true) -> "https://" + url.substring("http://".length)
+        else -> url
+    }
 
     /**
      * 构造下载地址：归一化协议相对地址（src.download 常为 //host/...，不归一化 OkHttp 直接报

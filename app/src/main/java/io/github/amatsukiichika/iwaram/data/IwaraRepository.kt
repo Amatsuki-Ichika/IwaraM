@@ -41,6 +41,12 @@ internal const val KEY_LANGUAGE = "language"
 /** 首次使用引导完成标记（「跳过」同样置位）。 */
 internal const val KEY_ONBOARDING_DONE = "onboarding_done"
 
+/** 18+ 自我声明标记：引导完成或跳过路径写入；已装用户升级后保持 false，不重复询问（见 docs/decisions/0028）。 */
+internal const val KEY_ADULT_CONFIRMED = "adult_confirmed"
+
+/** 截图保护开关：开启时主窗口加 FLAG_SECURE，截屏/录屏/最近任务缩略图为黑屏。 */
+internal const val KEY_SCREENSHOT_PROTECTION = "screenshot_protection"
+
 /**
  * 排序偏好的落点（**纯函数**，便于单测）。
  *
@@ -51,10 +57,6 @@ internal const val KEY_ONBOARDING_DONE = "onboarding_done"
 internal fun resolveVideoSort(stored: String?, migrated: Boolean): String =
     if (!migrated) DEFAULT_VIDEO_SORT
     else stored?.takeIf { it.isNotBlank() } ?: DEFAULT_VIDEO_SORT
-
-/**
- * 业务仓库：连接 Room 数据库、iwara API 与本地文件系统。
- */
 
 /**
  * 业务仓库：连接 Room 数据库、iwara API 与本地文件系统。
@@ -87,14 +89,6 @@ class IwaraRepository(
     internal val pendingDownloadType = object : TypeToken<List<PendingDownload>>() {}.type
 
     init {
-        // 与 IwaraSession.restore 协调初始化——IwaraApp.onCreate 先行 restore，
-        // 已把会话 access token 同步给 IwaraApi；本处只在 legacy 手动 token 存在时覆盖
-        // （手动模式优先级更高，与 restore 的语义一致），不存在时保留会话 token，
-        // 避免本 init 在 repository 首次创建时用 null 抹掉已恢复的鉴权头。
-        // 必须经 getAccessToken() 读：手动 token 落盘时是 v1: 密文（见 setAccessToken），
-        // 把原始值直接当 Bearer 发出去，元数据与 R18 鉴权会全部 401。
-        getAccessToken()?.let { IwaraApi.accessToken = it }
-
         // 旧版本的播放列表离线缓存用全局 key（不区分账号），换号后断网会读到上一个账号的
         // 内容。新 key 按 userId 分区（见 playlistsCacheKey），这一份直接丢弃：
         // 它是纯缓存、可重建，不需要迁移。
@@ -332,6 +326,42 @@ class IwaraRepository(
 
     /** 引导完成状态的单一真源。 */
     val onboardingDone: StateFlow<Boolean> = _onboardingDone.asStateFlow()
+
+    /* ---------- 内容安全（18+ 自我声明 / 截图保护，见 docs/decisions/0028） ---------- */
+
+    /**
+     * 是否已做过 18+ 自我声明（引导最后一页勾选或跳过时确认）。
+     *
+     * 只是本机自述，不做真实年龄验证；已装用户升级后保持 false，且不会再次弹出引导（有意取舍）。
+     */
+    fun setAdultConfirmed(value: Boolean) {
+        prefs.edit().putBoolean(KEY_ADULT_CONFIRMED, value).apply()
+        _adultConfirmed.value = value
+    }
+
+    fun getAdultConfirmed(): Boolean = prefs.getBoolean(KEY_ADULT_CONFIRMED, false)
+
+    private val _adultConfirmed = MutableStateFlow(getAdultConfirmed())
+
+    /** 18+ 自我声明状态的单一真源。 */
+    val adultConfirmed: StateFlow<Boolean> = _adultConfirmed.asStateFlow()
+
+    /**
+     * 截图保护：开启后 MainActivity 给窗口加 FLAG_SECURE，截屏、录屏与最近任务预览均为黑屏。
+     *
+     * 默认关闭（opt-in）：用户可能确实需要截图/录屏，默认开启会被误认为功能故障。
+     */
+    fun setScreenshotProtection(value: Boolean) {
+        prefs.edit().putBoolean(KEY_SCREENSHOT_PROTECTION, value).apply()
+        _screenshotProtection.value = value
+    }
+
+    fun getScreenshotProtection(): Boolean = prefs.getBoolean(KEY_SCREENSHOT_PROTECTION, false)
+
+    private val _screenshotProtection = MutableStateFlow(getScreenshotProtection())
+
+    /** 截图保护开关的单一真源（设置页读写这里，UI 不直接读 prefs）。 */
+    val screenshotProtection: StateFlow<Boolean> = _screenshotProtection.asStateFlow()
 
     /* ---------- 半透明材质（底栏玻璃 / 角标胶囊统一走这一份） ---------- */
 
@@ -614,25 +644,6 @@ class IwaraRepository(
      * （= 一次写库事务 + 一次 observeAll 失效），见 [importFolder] 内注释。
      */
     internal val importBatchSize = 20
-
-    /* ---------- Token（可选的登录模式；留空即公开无 token 模式） ---------- */
-
-    fun setAccessToken(token: String?) {
-        if (token.isNullOrBlank()) prefs.edit().remove("access_token").apply()
-        // 手动粘贴的 access token 同样落盘前加密（Keystore 不可用时降级明文，保持旧行为）。
-        else prefs.edit().putString("access_token", TokenCrypto.encrypt(token) ?: token).apply()
-        IwaraApi.accessToken = token?.takeIf { it.isNotBlank() }
-        _accessToken.value = token?.takeIf { it.isNotBlank() }.orEmpty()
-    }
-
-    /** 兼容旧版明文与 `v1:` 密文；密文解密失败（密钥丢失）按公开无 token 模式处理。 */
-    fun getAccessToken(): String? =
-        prefs.getString("access_token", null)?.takeIf { it.isNotBlank() }?.let { TokenCrypto.decrypt(it) }
-
-    private val _accessToken = MutableStateFlow(getAccessToken().orEmpty())
-
-    /** 手动 access token 的单一真源（空串 = 公开无 token 模式）。 */
-    val accessToken: StateFlow<String> = _accessToken.asStateFlow()
 
 }
 

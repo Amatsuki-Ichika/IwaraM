@@ -18,10 +18,11 @@ import org.robolectric.annotation.Config
 /**
  * v2→v3 索引迁移回归用例。
  *
- * 手工复刻 v2 库（DDL 逐字取自 app/schemas/…AppDatabase/2.json），四张表各塞数据后用 Room
- * 打开 —— Room 会跑 [AppDatabase.MIGRATION_2_3] 并按 v3 实体期望做**全 schema 校验**
- * （索引名/列序与实体对不上直接炸）。另用 `EXPLAIN QUERY PLAN` 钉住「索引真的被查询用上」，
- * 防止索引建了但列序不对而沦为摆设。
+ * 旧库不是手抄 DDL：直接执行导出 schema v2（app/schemas/…AppDatabase/2.json）里 Room 生成的
+ * createSql，等于「打开上一版的导出 schema」。Room 打开后会跑 [AppDatabase.MIGRATION_2_3] 及后续
+ * 迁移，并按当前实体期望做**全 schema 校验**（索引名/列序与实体对不上直接炸）；迁移后再用
+ * PRAGMA 读出真实形状，与终点版本导出的 schema 逐表比对（[SchemaJson.assertMatchesExported]）。
+ * 另用 `EXPLAIN QUERY PLAN` 钉住「索引真的被查询用上」，防止索引建了但列序不对而沦为摆设。
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -30,31 +31,14 @@ class RoomIndicesMigrationTest {
     private lateinit var context: Context
     private val dbName = "room_indices_migration_test.db"
 
-    /** v2 的四张表 DDL —— 与 Room 为 v2 实体生成的建表语句逐字一致，勿手改。 */
-    private val v2Ddl = listOf(
-        "CREATE TABLE IF NOT EXISTS `videos` (`localUri` TEXT NOT NULL, `fileName` TEXT NOT NULL, " +
-            "`iwaraId` TEXT, `title` TEXT NOT NULL, `author` TEXT, `authorId` TEXT, `createdAt` INTEGER, " +
-            "`viewCount` INTEGER, `likeCount` INTEGER, `commentCount` INTEGER, `rating` TEXT, " +
-            "`thumbnailUrl` TEXT, `localThumbnailPath` TEXT, `relPath` TEXT, `tagsCsv` TEXT, " +
-            "`metaFetched` INTEGER NOT NULL, `addedAt` INTEGER NOT NULL, PRIMARY KEY(`localUri`))",
-        "CREATE TABLE IF NOT EXISTS `tags` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, PRIMARY KEY(`id`))",
-        "CREATE TABLE IF NOT EXISTS `video_tag_cross_ref` (`videoUri` TEXT NOT NULL, `tagId` TEXT NOT NULL, " +
-            "PRIMARY KEY(`videoUri`, `tagId`))",
-        "CREATE TABLE IF NOT EXISTS `watch_history` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
-            "`videoKey` TEXT NOT NULL, `iwaraId` TEXT, `localUri` TEXT, `title` TEXT NOT NULL, `author` TEXT, " +
-            "`authorId` TEXT, `thumbnail` TEXT, `isLocal` INTEGER NOT NULL, `lastWatchAt` INTEGER NOT NULL, " +
-            "`positionMs` INTEGER NOT NULL, `durationMs` INTEGER NOT NULL)",
-        "CREATE UNIQUE INDEX IF NOT EXISTS `index_watch_history_videoKey` ON `watch_history` (`videoKey`)"
-    )
-
     @Before
     fun setUp() {
         context = ApplicationProvider.getApplicationContext()
         context.deleteDatabase(dbName)
-        // 手工建 v2 库（version=1 的 pragma 无关紧要：打开时 Room 按文件里的 user_version 走迁移，
-        // 这里直接把 user_version 写成 2，等价于"装过 v2 版本的旧库"）。
+        // 手工建 v2 库：建表语句取自已导出的 2.json（Room 为 v2 实体生成的语句），不是手抄副本；
+        // user_version 直接写成 2，等价于「装过 v2 版本的旧库」。
         val raw = context.openOrCreateDatabase(dbName, Context.MODE_PRIVATE, null)
-        v2Ddl.forEach(raw::execSQL)
+        SchemaJson.load(2).createStatements().forEach(raw::execSQL)
         raw.execSQL(
             "INSERT INTO videos (localUri, fileName, iwaraId, title, author, authorId, createdAt, " +
                 "viewCount, likeCount, commentCount, rating, thumbnailUrl, localThumbnailPath, relPath, " +
@@ -142,6 +126,9 @@ class RoomIndicesMigrationTest {
                 "getMissingMetadata 应走索引，实际: $missingPlan",
                 missingPlan.any { it.contains("USING INDEX") }
             )
+
+            // ---- 迁移终点形状与导出的 v4 schema 逐表一致（列/类型/NOT NULL/默认值/索引/外键）----
+            SchemaJson.assertMatchesExported(raw)
         } finally {
             room.close()
         }

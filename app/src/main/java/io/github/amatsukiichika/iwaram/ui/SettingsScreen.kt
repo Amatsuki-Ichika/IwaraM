@@ -51,6 +51,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.github.amatsukiichika.iwaram.data.IwaraSession
 import io.github.amatsukiichika.iwaram.i18n.AppLanguage
 import io.github.amatsukiichika.iwaram.i18n.LanguageMode
 import io.github.amatsukiichika.iwaram.i18n.tr
@@ -251,6 +253,8 @@ fun SettingsScreen(
                 )
             }
         ) { innerPadding ->
+            // 会话 token 明文降级提示：状态由 IwaraSession 维护（唯一 token 来源），只读订阅。
+            val sessionTokenDegraded by IwaraSession.tokenStorageDegraded.collectAsStateWithLifecycle()
             LazyColumn(
                 modifier = Modifier
                     .fillMaxSize()
@@ -258,6 +262,20 @@ fun SettingsScreen(
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                // AndroidKeyStore 不可用时会话 token 只能明文落盘：这是安全相关的可见提示，
+                // 不能只留在诊断日志里。
+                if (sessionTokenDegraded) {
+                    item(key = "token-storage-degraded") {
+                        AppEntryCard(
+                            title = tr("会话安全提示", "Session security notice"),
+                            subtitle = tr(
+                                "系统密钥库不可用，登录状态以未加密方式保存在本设备；建议只在受信任设备上保持登录。",
+                                "The system keystore is unavailable, so your login state is stored unencrypted on this device. Stay signed in only on trusted devices."
+                            ),
+                            icon = Icons.Filled.Info
+                        )
+                    }
+                }
                 // 一条目一卡（AppEntryCard，「我的」页同款），大卡内分隔线与行距空白取消。
                 items(SettingsCategory.entries) { category ->
                     AppEntryCard(

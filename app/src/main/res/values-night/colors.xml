@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 深色系统下的冷启动窗口底色：与 Theme.kt 中 darkColorScheme.background 一致。
+         应用内强制浅色（themeMode=light）而系统为深色时，首帧前仍会短暂看到这个深色底，
+         这是资源级窗口底色无法跟随应用内主题的固有限制。 -->
+    <color name="window_background">#FF121317</color>
+</resources>

@@ -16,7 +16,6 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
 import java.io.IOException
-import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 
 /**
@@ -67,9 +66,7 @@ object UpdateInstaller {
     private const val AUTHORITY_SUFFIX = ".updates"
 
     private const val APK_MIME = "application/vnd.android.package-archive"
-    private const val SHA256_ALGORITHM = "SHA-256"
     private const val BUFFER_SIZE = 64 * 1024
-    private const val HEX_DIGITS = "0123456789abcdef"
 
     /** GitHub 资产名形如 IwaraM-0.2.2-arm64-v8a.apk；只接受安全字符，防路径穿越。 */
     private val APK_FILE_NAME = Regex("[A-Za-z0-9._-]+\\.apk", RegexOption.IGNORE_CASE)
@@ -208,12 +205,12 @@ object UpdateInstaller {
     private fun verifySha256(release: GitHubRelease, file: File) {
         val expected = fetchExpectedSha256(release)
         val actual = sha256Of(file)
-        if (!actual.equals(expected, ignoreCase = true)) {
+        if (!UpdateChecksum.hashesMatch(expected, actual)) {
             throw UpdateInstallException(UpdateInstallFailure.SHA_MISMATCH, "SHA-256 mismatch")
         }
     }
 
-    /** 校验文件可能是 "hash  filename"（sha256sum 输出）或纯 hash，只取第一段。 */
+    /** 拉取 .sha256 资产并解析出期望摘要；解析交给 [UpdateChecksum.parseExpectedHash]，这里只管网络与错误分类。 */
     private fun fetchExpectedSha256(release: GitHubRelease): String {
         val request = Request.Builder()
             .url(release.shaUrl)
@@ -233,31 +230,13 @@ object UpdateInstaller {
         } catch (error: IOException) {
             throw UpdateInstallException(UpdateInstallFailure.NETWORK, "I/O failure while fetching SHA-256", error)
         }
-        val hash = text.trim().substringBefore(' ').substringBefore('\t').trim()
-        if (hash.isEmpty()) {
-            throw UpdateInstallException(UpdateInstallFailure.SHA_MISMATCH, "empty SHA-256")
-        }
-        return hash
+        return UpdateChecksum.parseExpectedHash(text)
+            ?: throw UpdateInstallException(UpdateInstallFailure.SHA_MISMATCH, "invalid SHA-256 file")
     }
 
     /** 流式计算文件 SHA-256，返回小写十六进制串。 */
-    private fun sha256Of(file: File): String {
-        val digest = MessageDigest.getInstance(SHA256_ALGORITHM)
-        file.inputStream().buffered().use { input ->
-            val buffer = ByteArray(BUFFER_SIZE)
-            while (true) {
-                val read = input.read(buffer)
-                if (read < 0) break
-                digest.update(buffer, 0, read)
-            }
-        }
-        val hex = StringBuilder(64)
-        for (byte in digest.digest()) {
-            val value = byte.toInt() and 0xFF
-            hex.append(HEX_DIGITS[value ushr 4]).append(HEX_DIGITS[value and 0x0F])
-        }
-        return hex.toString()
-    }
+    private fun sha256Of(file: File): String =
+        file.inputStream().buffered().use { input -> UpdateChecksum.sha256Hex(input) }
 
     /** 优先用 URL 末段的资产名；不合法时回退到发布工作流的标准命名。 */
     private fun apkFileName(release: GitHubRelease): String {

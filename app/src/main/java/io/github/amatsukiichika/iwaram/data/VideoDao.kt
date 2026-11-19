@@ -122,18 +122,62 @@ interface VideoDao {
     suspend fun clearCrossRefs(videoUri: String)
 
     /**
-     * 复合写（原子）：upsert 视频 → 清旧标签关联 → 重建标签与关联。
-     * 中途崩溃不会产生孤儿 cross-ref 或"半更新"的条目；调用方不得再在事务外
-     * 直接调用 [clearCrossRefs]。
+     * 远端元数据只更新这些列 —— 调用前由 [applyFetchedMetadata] 在事务里判存在，
+     * 不整行 REPLACE，避免覆盖扫描/下载期间并发写入的 fileName/localThumbnailPath/fileModifiedAt。
+     * @return 受影响行数（0 = 行已不存在）
+     */
+    @Query(
+        """UPDATE videos SET title = :title, author = :author, authorId = :authorId,
+           createdAt = :createdAt, viewCount = :viewCount, likeCount = :likeCount,
+           commentCount = :commentCount, rating = :rating, thumbnailUrl = :thumbnailUrl,
+           tagsCsv = :tagsCsv, metaFetched = 1
+           WHERE localUri = :localUri"""
+    )
+    suspend fun updateFetchedMetadata(
+        localUri: String,
+        title: String,
+        author: String?,
+        authorId: String?,
+        createdAt: Long?,
+        viewCount: Int?,
+        likeCount: Int?,
+        commentCount: Int?,
+        rating: String?,
+        thumbnailUrl: String?,
+        tagsCsv: String?
+    ): Int
+
+    /**
+     * 复合写（原子）：更新远端元数据 → 清旧标签关联 → 重建标签与关联。
+     *
+     * 关键点：行被扫描收尾删掉时（文件已不在）[updateFetchedMetadata] 返回 0，
+     * 这里直接返回 false，不再插入 —— 旧的 `@Insert(REPLACE)` 会把删掉的行**复活**，
+     * 让"已下载"标记和本地库索引重新指回不存在的文件。
+     *
+     * @return 是否真的写入了（false = 行已不存在，调用方无需当作失败）
      */
     @Transaction
-    suspend fun upsertVideoWithTags(video: VideoEntity, tags: List<TagEntity>, refs: List<VideoTagCrossRef>) {
-        upsert(video)
+    suspend fun applyFetchedMetadata(video: VideoEntity, tags: List<TagEntity>, refs: List<VideoTagCrossRef>): Boolean {
+        val affected = updateFetchedMetadata(
+            localUri = video.localUri,
+            title = video.title,
+            author = video.author,
+            authorId = video.authorId,
+            createdAt = video.createdAt,
+            viewCount = video.viewCount,
+            likeCount = video.likeCount,
+            commentCount = video.commentCount,
+            rating = video.rating,
+            thumbnailUrl = video.thumbnailUrl,
+            tagsCsv = video.tagsCsv
+        )
+        if (affected == 0) return false
         clearCrossRefs(video.localUri)
         if (tags.isNotEmpty()) {
             upsertTags(tags)
             insertCrossRefs(refs)
         }
+        return true
     }
 
     /** 复合删（原子）：清标签关联 + 删库记录（不删磁盘文件）。 */

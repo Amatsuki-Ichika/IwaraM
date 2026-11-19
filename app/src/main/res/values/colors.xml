@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 冷启动窗口底色：必须与 Theme.kt 中 lightColorScheme.background 保持一致，
+         否则 Compose 首帧前会露出错误的底色（深色系统上最明显的是白闪）。 -->
+    <color name="window_background">#FFF7F8FA</color>
+</resources>

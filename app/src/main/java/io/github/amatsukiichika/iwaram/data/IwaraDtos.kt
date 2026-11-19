@@ -34,8 +34,10 @@ data class IwaraTagRef(
     val id: String? = null
 )
 
-// tag 联想结果复用 IwaraApi.kt 里的 IwaraTag(val id)（同包，避免重名声明）：
-// GET /tags?filter= 返回 {id, type, sensitive}，id 即 slug，可直接用于 /videos?tags=。
+/** tag 联想结果（GET /tags?filter= 返回 {id, type, sensitive}，id 即 slug，可直接用于 /videos?tags=）。 */
+data class IwaraTag(
+    val id: String? = null
+)
 
 data class IwaraAccount(
     val id: String? = null,

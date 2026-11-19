@@ -1,11 +1,18 @@
 package io.github.amatsukiichika.iwaram.ui
 
 import android.app.Activity
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ActivityInfo
+import android.media.AudioManager
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -92,6 +99,37 @@ internal fun PlayerPauseOnLeaveEffect(player: Player) {
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+}
+
+/**
+ * 拔耳机/断开蓝牙（ACTION_AUDIO_BECOMING_NOISY）时暂停播放。
+ *
+ * 音频焦点只覆盖"别的应用抢焦点"：耳机拔出是音频路由变化，系统只发这条广播，
+ * handleAudioFocus 收不到任何事件，声音会从扬声器继续外放。
+ * 随组合注册、随组合注销（页面销毁即解绑，不泄漏）；接收器跨播放器换代存活，
+ * 经 rememberUpdatedState 读最新实例 —— 只暂停，不退出页面、不改播放意图之外的状态。
+ */
+@Composable
+internal fun PlayerNoisyAudioPauseEffect(player: Player) {
+    val context = LocalContext.current
+    val currentPlayer = rememberUpdatedState(player)
+    DisposableEffect(context) {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                if (intent?.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY) {
+                    currentPlayer.value.pause()
+                }
+            }
+        }
+        // 只接收系统发出的广播（NOT_EXPORTED）：其他应用无法伪造"耳机已拔出"。
+        ContextCompat.registerReceiver(
+            context,
+            receiver,
+            IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY),
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
+        onDispose { context.unregisterReceiver(receiver) }
     }
 }
 

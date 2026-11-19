@@ -1,8 +1,5 @@
 package io.github.amatsukiichika.iwaram.ui
 
-import android.content.Context
-import android.content.Intent
-import android.net.Uri
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Animatable
@@ -666,15 +663,6 @@ private fun dateStr(epochMs: Long): String =
 private const val IWARA_WEB = "https://www.iwara.tv"
 
 private fun videoPageUrl(id: String): String = "$IWARA_WEB/video/$id"
-
-/** 用系统浏览器打开指定链接，失败则静默忽略。 */
-private fun openInBrowser(context: Context, url: String) {
-    runCatching {
-        context.startActivity(
-            Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        )
-    }
-}
 
 /**
  * 作者行的最小高度 = 40dp。

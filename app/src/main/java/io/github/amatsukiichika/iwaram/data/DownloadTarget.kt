@@ -35,6 +35,21 @@ internal fun chooseDownloadQuality(
 }
 
 /**
+ * 拼下载文件名：`[iwaraId] 标题 (档位).mp4`，只有标题允许被截断。
+ *
+ * 文件名同时承担三个用途：扫描器靠 `[iwaraId]` 认视频身份（[IwaraIdParser]）、
+ * 续传与档位解析靠末尾括号认档位（[qualityLabelOfFileName]）、播放器靠 `.mp4` 认容器。
+ * 因此不能先拼整串再 [FileNameSanitizer.sanitize]——尾部截断会先切掉档位和扩展名；
+ * 这里用 [FileNameSanitizer.compose] 把长度预算留给标题，前缀里的身份标记与后缀原样保留。
+ */
+internal fun downloadFileName(videoId: String, title: String, quality: String?): String =
+    FileNameSanitizer.compose(
+        prefix = "[$videoId] ",
+        title = title,
+        suffix = " (${quality.orEmpty()}).mp4"
+    )
+
+/**
  * 解析一条可下载的签名地址（详情 → 清晰度 → 归一化 URL + 文件名）。
  *
  * 下载入口与"排队期间地址过期"的重新解析走同一条路径：
@@ -68,7 +83,7 @@ internal suspend fun resolveDownloadTarget(
         )
     val title = detail.title?.takeIf { it.isNotBlank() } ?: videoId
     // 文件名里带 [iwaraId] 与档位：扫描时据此识别视频身份，续传时据此确认档位一致。
-    val fileName = "[$videoId] $title (${chosen.name}).mp4"
+    val fileName = downloadFileName(videoId, title, chosen.name)
     val raw = chosen.src?.download?.takeIf { it.isNotBlank() } ?: chosen.src?.view.orEmpty()
     val url = IwaraSign.buildDownloadUrl(raw, fileName)
         ?: throw IwaraSession.IwaraApiException(

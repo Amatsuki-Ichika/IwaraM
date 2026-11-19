@@ -49,8 +49,11 @@ class IwaraApp : Application(), ImageLoaderFactory {
         val languagePref = getSharedPreferences(APP_PREFS_NAME, MODE_PRIVATE)
             .getString(KEY_LANGUAGE, null)
         AppLanguage.set(LanguageMode.fromPref(languagePref))
-        // 会话恢复放在进程起点：下载/扫描服务先于浏览 tab 触发时，元数据请求从第一次起就带可用 token。
-        IwaraSession.restore(this)
+        // 会话恢复仍放在进程起点（下载/扫描服务先于浏览 tab 触发时，元数据请求从第一次起就带可用 token），
+        // 但读 prefs / Keystore 解密已挪到 IO 线程：主线程不再做加密操作，避免启动卡顿。
+        // 鉴权注入（IwaraClient 的拦截器）在发请求前有界等待恢复就绪（≤3s），
+        // 因此上述「第一次请求就带 token」的保证不变；超时按公开无 token 模式继续，不阻塞 UI。
+        IwaraSession.restoreAsync(this)
 
         // 提前在 IO 线程把两个懒加载单例建出来：此前它们的首次访问发生在 `VideoViewModel.init`
         //   （主线程）——`IwaraRepository` 构造期要读 SharedPreferences，prefs 里还存着下载历史

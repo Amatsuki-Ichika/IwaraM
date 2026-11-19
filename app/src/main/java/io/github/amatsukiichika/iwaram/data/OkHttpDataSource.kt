@@ -58,15 +58,32 @@ class OkHttpDataSource(private val callFactory: Call.Factory) : BaseDataSource(/
             )
         }
 
+        // 206 表示服务器接受了 Range 请求：起点必须等于请求的 position，否则读到的字节与
+        // 播放器认为的位置错位（花屏 / 拖动后画面与进度条对不上）。只看 code 不够，必须
+        // 校验 Content-Range 的起点；头缺失、起点错位、区间越界都按"不能安全续读"处理。
+        if (resp.code == 206) {
+            val requestedFrom = dataSpec.position
+            if (resumeRange(resp.header("Content-Range"), requestedFrom) == null) {
+                val contentRange = resp.header("Content-Range")
+                resp.close()
+                throw HttpDataSource.HttpDataSourceException(
+                    DownloadRangeMismatchException(contentRange, requestedFrom),
+                    dataSpec,
+                    HttpDataSource.HttpDataSourceException.TYPE_OPEN
+                )
+            }
+        }
+
         response = resp
         responseHeaders = resp.headers.toMultimap()
         uri = Uri.parse(resp.request.url.toString())
-        stream = resp.body?.byteStream()
+        // OkHttp 5 的 Response.body 非空：正常 2xx 一定带回可读的 body。
+        stream = resp.body.byteStream()
 
         // 服务器不支持 Range 而返回整段 200 时，读之前先丢弃 position 之前的字节。
         bytesToSkip = if (dataSpec.position > 0 && resp.code != 206) dataSpec.position else 0L
 
-        val contentLength = resp.body?.contentLength()?.takeIf { it > 0 } ?: C.LENGTH_UNSET.toLong()
+        val contentLength = resp.body.contentLength().takeIf { it > 0 } ?: C.LENGTH_UNSET.toLong()
         bytesRemaining = when {
             dataSpec.length != C.LENGTH_UNSET.toLong() -> dataSpec.length
             contentLength != C.LENGTH_UNSET.toLong() -> (contentLength - bytesToSkip).coerceAtLeast(0L)
@@ -80,7 +97,10 @@ class OkHttpDataSource(private val callFactory: Call.Factory) : BaseDataSource(/
 
     override fun read(buffer: ByteArray, offset: Int, readLength: Int): Int {
         if (readLength == 0) return 0
-        val input = stream ?: throw IOException("数据源尚未打开")
+        // stream 只在 open() 成功后赋值、close() 清空；此时再读是调用方状态机出错，
+        // 报文要能直接指向"没打开/已关闭"，而不是让人误以为响应体为空。
+        val input = stream
+            ?: throw IOException("OkHttpDataSource 未打开或已关闭：read() 必须在 open() 成功之后调用")
         if (bytesRemaining == 0L) return C.RESULT_END_OF_INPUT
 
         while (bytesToSkip > 0) {

@@ -9,10 +9,11 @@
     <!-- 应用内更新：下载 APK 后交给系统包安装器安装（Android 8.0+ 需声明）。 -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
-    <!-- 关闭云备份：会话 token 已用 AndroidKeyStore 的 AES-256-GCM 密钥加密后存入 SharedPreferences，
-         仅当 KeyStore 不可用时降级为明文；而 SAF 目录授权本来也无法跨设备还原，备份只会扩大凭据的暴露面。 -->
+    <!-- 关闭云备份：会话 token 用 AndroidKeyStore 的 AES-256-GCM 密钥加密后存入 SharedPreferences；
+         加密不可用时只写显式的 `plain:` 降级值并在设置页提示（见 ADR 0026），绝不静默存裸明文。
+         而 SAF 目录授权本来也无法跨设备还原，备份只会扩大凭据的暴露面。 -->
     <!-- 启动图标使用普通方形 drawable 而非自适应图标：原图的最大半径超出自适应图标的遮罩范围，
-         用自适应图标必然被裁掉边缘。 -->
+         用自适应图标必然被裁掉边缘（原图 1050×1034，解码约 4.3 MB，这是保留旧外观的代价）。 -->
     <application
         android:name=".IwaraApp"
         android:allowBackup="false"
@@ -25,7 +26,7 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode|fontScale|density"
             android:windowSoftInputMode="adjustNothing"
             android:theme="@style/Theme.IwaraManager">
             <intent-filter>

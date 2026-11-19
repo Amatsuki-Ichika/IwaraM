@@ -39,7 +39,7 @@ import java.time.format.DateTimeFormatter
 /** Iwara 客户端模块与本地库共用的本地视频 ViewModel：筛选、排序、导入、扫描、设置。 */
 class VideoViewModel(private val app: IwaraApp) : ViewModel() {
 
-        private val repo = app.repository
+    private val repo = app.repository
 
     private var rawVideos: List<VideoEntity> = emptyList()
     private var rawTags: List<TagEntity> = emptyList()
@@ -176,9 +176,6 @@ class VideoViewModel(private val app: IwaraApp) : ViewModel() {
     // 以下设置全部直通 IwaraRepository 的单一真源流（窄出口模式，同上面的
     // showR18TagFlow 等）：本 VM 不再自持镜像副本，setter 只写仓库，广播由仓库负责。
 
-    /** 手动 access token（空串 = 公开无 token 模式）。 */
-    val token: StateFlow<String> = repo.accessToken
-
     val fsOrientation: StateFlow<String> = repo.fullscreenOrientation
 
     val themeMode: StateFlow<String> = repo.themeMode
@@ -203,11 +200,6 @@ class VideoViewModel(private val app: IwaraApp) : ViewModel() {
 
     /** 应用主题色（THEME_COLOR_OPTIONS 的 value）。 */
     val themeColor: StateFlow<String> = repo.themeColor
-
-    /** 当前是否为无 token 公开模式。 */
-    fun isPublicMode(): Boolean = repo.accessToken.value.isBlank()
-
-    fun setToken(value: String) = repo.setAccessToken(value.trim())
 
     fun setFsOrientation(value: String) = repo.setFullscreenOrientation(value)
 

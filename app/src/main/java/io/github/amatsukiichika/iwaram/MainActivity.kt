@@ -3,9 +3,11 @@ package io.github.amatsukiichika.iwaram
 import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -100,8 +102,8 @@ import io.github.amatsukiichika.iwaram.data.IwaraFileRef
 import io.github.amatsukiichika.iwaram.data.WatchHistoryEntity
 import io.github.amatsukiichika.iwaram.data.GlobalFilterHolder
 import io.github.amatsukiichika.iwaram.data.resumeStartMs
+import io.github.amatsukiichika.iwaram.data.autoResumePlanBeforeRestore
 import io.github.amatsukiichika.iwaram.data.loadPendingDownloads
-import io.github.amatsukiichika.iwaram.data.resumePlan
 import io.github.amatsukiichika.iwaram.data.thumbnailFileIdFromUrl
 import io.github.amatsukiichika.iwaram.i18n.AppLanguage
 import io.github.amatsukiichika.iwaram.i18n.LanguageMode
@@ -399,12 +401,17 @@ class MainActivity : ComponentActivity() {
                 onDispose { lifecycle.removeObserver(observer) }
             }
 
-            val notifPermission = rememberLauncherForActivityResult(
-                ActivityResultContracts.RequestPermission()
-            ) { }
-            LaunchedEffect(Unit) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+            // 截图保护：FLAG_SECURE 挂在 Activity 窗口上，播放页/全屏/最近任务预览一并生效。
+            // 关闭时清标记；不要放在 onDispose 里无条件清，否则组合重跑会把开启状态误清掉。
+            val screenshotProtection by app.repository.screenshotProtection.collectAsStateWithLifecycle()
+            DisposableEffect(screenshotProtection) {
+                if (screenshotProtection) {
+                    window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                } else {
+                    window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                }
+                onDispose {
+                    // 退出组合时不清标记：用户仍开着保护，清掉会让期间的系统截图恢复可见。
                 }
             }
 
@@ -598,10 +605,38 @@ class MainActivity : ComponentActivity() {
                 onClearDownload = { vm.setDownloadRoot(null) },
                 onDefaultR18Change = { vm.setDefaultR18(it) },
                 onShowTagsChange = { vm.setShowTags(it) },
-                onFinish = { repository.setOnboardingDone(true) },
-                onSkip = { repository.setOnboardingDone(true) }
+                // 两条收尾路径（开始使用/跳过）都先记录 18+ 自我声明：跳过路径已在引导页内
+                // 经确认对话框同意，因此这里不再区分。
+                onFinish = {
+                    repository.setAdultConfirmed(true)
+                    repository.setOnboardingDone(true)
+                },
+                onSkip = {
+                    repository.setAdultConfirmed(true)
+                    repository.setOnboardingDone(true)
+                }
             )
             return
+        }
+
+        // 通知权限：先让用户看完引导页、看到应用要做什么，进入主界面后再请求一次。
+        // 已授权直接跳过；用户拒绝过（shouldShowRequestPermissionRationale 为 true ⇒ 之前拉起过，
+        // 被拒后系统也会返回 true）就不再每次冷启动重复弹系统对话框。
+        val notifPermission = rememberLauncherForActivityResult(
+            ActivityResultContracts.RequestPermission()
+        ) { }
+        LaunchedEffect(Unit) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return@LaunchedEffect
+            val granted = checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) ==
+                PackageManager.PERMISSION_GRANTED
+            if (granted) return@LaunchedEffect
+            if (this@MainActivity.shouldShowRequestPermissionRationale(
+                    Manifest.permission.POST_NOTIFICATIONS
+                )
+            ) {
+                return@LaunchedEffect
+            }
+            notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
 
         // 应用启动自动继续下载：上次进程被打断的 queued/running 任务，重新解析新鲜地址后入队。
@@ -609,12 +644,16 @@ class MainActivity : ComponentActivity() {
         LaunchedEffect(Unit) {
             val pending = withContext(Dispatchers.IO) { repository.loadPendingDownloads() }
             if (pending.isEmpty()) return@LaunchedEffect
-            // 先恢复列表条目（与下载页的 restoreIfAbsent 幂等），再决定自动继续谁。
+            // 顺序是正确性的一部分：liveIds 必须取"恢复列表条目之前"的内存快照。
+            // 先 restoreIfAbsent 再取，本轮要续的任务自己也变成了"已在跑"，计划恒空
+            //（自动继续一直不工作的根因；接线纯函数见 autoResumePlanBeforeRestore）。
+            val liveBeforeRestore = DownloadState.tasks.value
+            // 把记录恢复进列表（与下载页的 restoreIfAbsent 幂等），中断任务在下载页可见。
             DownloadState.restoreIfAbsent(pending.map { pendingToTask(it) })
             if (!repository.getAutoResumeDownloads()) return@LaunchedEffect
-            val plan = resumePlan(
+            val plan = autoResumePlanBeforeRestore(
                 pending = pending,
-                liveIds = DownloadState.tasks.value.map { it.videoId }.toSet(),
+                liveTasksBeforeRestore = liveBeforeRestore,
                 enabled = true
             )
             plan.forEach { p ->
@@ -673,8 +712,10 @@ class MainActivity : ComponentActivity() {
         fun pushOverlay(overlay: IwaraOverlay) {
             val top = overlays.lastOrNull()?.overlay
             when {
+                // 用新序号替换面板：面板本身不参与退场动画（isActionSheet 被排除），
+                // 保留旧序号会让新页面继承"已存在"身份、没有入场动画，看起来像原地跳变。
                 top is IwaraOverlay.VideoActions || top is IwaraOverlay.ImageActions ->
-                    overlays[overlays.lastIndex] = overlays.last().copy(overlay = overlay)
+                    overlays[overlays.lastIndex] = OverlayEntry(nextOverlaySeq(), overlay)
                 // 连点两下同一个页面（结构相等即同一页）不重复压栈，否则会叠出两层一模一样的页面。
                 top == overlay -> Unit
                 // 同一个作者页只允许在栈里存在一层：已经存在就回退到那一层（把上面的都弹掉），
