@@ -55,9 +55,12 @@ jobs:
         run: sdkmanager "platforms;android-37.2" "build-tools;36.0.0"
 
       # CodeQL's Kotlin extractor needs a traced compile, and autobuild cannot infer an Android
-      # Gradle project; run the same debug build CI runs.
+      # Gradle project; run the same debug build CI runs. setup-java caches the Gradle user home,
+      # which includes the local build cache, so on a warm run every compile task could be
+      # satisfied from cache without invoking javac/kotlinc and CodeQL would see no source;
+      # --no-build-cache forces the instrumented compilers to run.
       - name: Build debug APK
-        run: ./gradlew :app:assembleDebug --no-daemon
+        run: ./gradlew :app:assembleDebug --no-daemon --no-build-cache
 
       - name: Perform CodeQL analysis
         uses: github/codeql-action/analyze@v4
