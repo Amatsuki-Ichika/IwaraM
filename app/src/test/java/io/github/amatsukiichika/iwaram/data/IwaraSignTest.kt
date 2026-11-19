@@ -19,6 +19,14 @@ class IwaraSignTest {
     }
 
     @Test
+    fun `httpsUrl upgrades cleartext addresses to https`() {
+        // manifest 未开启 cleartext，targetSdk 30+ 下明文请求会被系统拒绝；下载地址一旦落到
+        // http:// 只能升级为 https，不能原样发出。
+        assertEquals("https://files.iwara.tv/a.mp4", IwaraSign.httpsUrl("http://files.iwara.tv/a.mp4"))
+        assertEquals("https://files.iwara.tv/a.mp4", IwaraSign.httpsUrl("HTTP://files.iwara.tv/a.mp4"))
+    }
+
+    @Test
     fun `buildDownloadUrl fixes scheme missing on download src`() {
         // src.download 形如 //host/...，不归一化时 OkHttp 会报
         // "Expected URL scheme 'http' or 'https' but no scheme was found"。

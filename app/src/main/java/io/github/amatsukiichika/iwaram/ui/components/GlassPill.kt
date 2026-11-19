@@ -15,7 +15,8 @@ import androidx.compose.ui.unit.sp
 
 /**
  * R18 内容角标：固定红底实色，不随材质档与不透明度变化。
- * 红底取 M3 errorContainer 深红 (#93000A) 与淡红 (#F2B8B5) 的中间色 #C25C5A。
+ * 红底取 M3 errorContainer 深红 (#93000A) 的提亮版 #A03533：10sp 小字需达 WCAG AA 4.5:1，
+ * 原中间色 #C25C5A 配淡粉文字只有 3.27:1。
  * 圆角、字号、内边距固定；仅在 [rating] 显式等于 `ecchi` 时显示（未知分级不打标）。
  */
 @Composable
@@ -37,11 +38,11 @@ fun R18Pill(rating: String?, enabled: Boolean, modifier: Modifier = Modifier) {
     }
 }
 
-/** R18 红底：M3 errorContainer 深红 (#93000A) 与淡红 (#F2B8B5) 的中间色。 */
-private val R18_RED = Color(0xFFC25C5A)
+/** R18 红底：M3 errorContainer 深红 #93000A 的提亮版，与 [R18_TEXT] 对比 5.33:1（AA 小字通过）。 */
+internal val R18_RED = Color(0xFFA03533)
 
-/** R18 文字色：M3 onErrorContainer 基线浅粉，在 #C25C5A 上对比充足。 */
-private val R18_TEXT = Color(0xFFFFDAD6)
+/** R18 文字色：M3 onErrorContainer 基线浅粉 #FFDAD6，作为红底上的固定文字色。 */
+internal val R18_TEXT = Color(0xFFFFDAD6)
 
 /**
  * 封面左下角的发布日期：纯文字、无胶囊底，外加一层很淡的黑色柔边

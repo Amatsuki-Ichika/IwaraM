@@ -20,10 +20,11 @@ import org.robolectric.annotation.Config
 /**
  * 观看历史迁移测试。
  *
- * 在 JVM（Robolectric）上**手工复刻 v1 库**（DDL 逐字取自 Room 2.6.1 为 v1 实体生成的
- * AppDatabase_Impl），塞入旧数据后用 Room 打开 —— Room 会自己跑 [AppDatabase.MIGRATION_1_2]
- * 并对 v2 schema 做**全表结构校验**：迁移 SQL 与实体期望差一个 NOT NULL / 索引都会在这里直接炸，
- * 等价于把"覆盖安装后旧数据无损"这件事在每次单测里都验一遍。
+ * 在 JVM（Robolectric）上**手工复刻 v1 库**（v1 早于 schema 导出，见 data/AGENTS.md，没有 1.json
+ * 可读，DDL 只能手写），塞入旧数据后用 Room 打开 —— Room 会自己跑 [AppDatabase.MIGRATION_1_2]
+ * 及后续迁移，并按当前实体做**全 schema 校验**。迁移终点（v4）的真实形状再用 PRAGMA 读出，
+ * 与导出的 4.json 逐表比对（[SchemaJson.assertMatchesExported]），等于把「覆盖安装后结构正确、
+ * 旧数据无损」这件事在每次单测里都验一遍。
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -32,7 +33,10 @@ class WatchHistoryMigrationTest {
     private lateinit var context: Context
     private val dbName = "watch_history_migration_test.db"
 
-    /** v1 的三张表 DDL —— 与 version=1 时 Room 生成的建表语句逐字一致，勿手改。 */
+    /**
+     * v1 的三张表 DDL —— v1 没有导出 schema，只能保留手写副本，使旧库与真实 v1 库同形。
+     * 迁移终点的结构由 4.json 比对负责，这里即便 rot 也会在 Room 的全 schema 校验里暴露。
+     */
     private val v1Ddl = listOf(
         "CREATE TABLE IF NOT EXISTS `videos` (`localUri` TEXT NOT NULL, `fileName` TEXT NOT NULL, " +
             "`iwaraId` TEXT, `title` TEXT NOT NULL, `author` TEXT, `authorId` TEXT, `createdAt` INTEGER, " +
@@ -136,6 +140,9 @@ class WatchHistoryMigrationTest {
             assertEquals(0, dao.count())
             // 查不存在的 key 返回 null 而不是抛错
             assertNull(dao.byKey("no_such_key"))
+
+            // ---- 迁移终点形状与导出的 v4 schema 逐表一致（列/类型/NOT NULL/默认值/索引/外键）----
+            SchemaJson.assertMatchesExported(room.openHelper.writableDatabase)
         } finally {
             room.close()
         }

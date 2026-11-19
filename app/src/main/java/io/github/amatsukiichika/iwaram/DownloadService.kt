@@ -30,6 +30,14 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import io.github.amatsukiichika.iwaram.data.DOWNLOAD_MAX_AUTO_RETRIES
 import io.github.amatsukiichika.iwaram.data.DownloadHistoryEntry
+import io.github.amatsukiichika.iwaram.data.DownloadControl
+import io.github.amatsukiichika.iwaram.data.DownloadIncompleteException
+import io.github.amatsukiichika.iwaram.data.deleteReplacedVideoRow
+import io.github.amatsukiichika.iwaram.data.libraryFileIsComplete
+import io.github.amatsukiichika.iwaram.data.upsertDownloadedVideo
+import io.github.amatsukiichika.iwaram.data.videoRowByIwaraId
+import io.github.amatsukiichika.iwaram.data.videoRowByUri
+import io.github.amatsukiichika.iwaram.data.DownloadRangeMismatchException
 import io.github.amatsukiichika.iwaram.data.FileNameSanitizer
 import io.github.amatsukiichika.iwaram.data.IwaraClient
 import io.github.amatsukiichika.iwaram.data.IwaraSign
@@ -41,11 +49,13 @@ import io.github.amatsukiichika.iwaram.data.downloadCardFailureReason
 import io.github.amatsukiichika.iwaram.data.downloadRetryDelayMs
 import io.github.amatsukiichika.iwaram.data.fetchAndApplyMetadata
 import io.github.amatsukiichika.iwaram.data.generateLocalThumbnail
+import io.github.amatsukiichika.iwaram.data.isDownloadComplete
 import io.github.amatsukiichika.iwaram.data.isSignedUrlExpired
 import io.github.amatsukiichika.iwaram.data.loadPendingDownloads
 import io.github.amatsukiichika.iwaram.data.needsThumbnailRepair
 import io.github.amatsukiichika.iwaram.data.removePendingDownload
 import io.github.amatsukiichika.iwaram.data.resolveDownloadTarget
+import io.github.amatsukiichika.iwaram.data.resumeRange
 import io.github.amatsukiichika.iwaram.data.savePendingDownload
 import io.github.amatsukiichika.iwaram.data.shouldRetryDownload
 import io.github.amatsukiichika.iwaram.i18n.tr
@@ -84,7 +94,12 @@ private data class DownloadAttemptResult(
     val total: Long = -1
 )
 
-/** 下载任务状态（UI 可观察）；列表只保留最近的任务用于界面提示。 */
+/**
+ * 下载任务状态（UI 可观察）。
+ *
+ * 列表保留**全部未完成任务**：排队/下载/暂停/失败都必须能在界面看见并操作，
+ * 只对完成态历史封顶（见 [trimDownloadTasks]）。
+ */
 object DownloadState {
     /** 任务状态机：queued → running →（done | failed | paused）。 */
     const val STATE_QUEUED = "queued"
@@ -115,8 +130,7 @@ object DownloadState {
 
     fun upsert(task: Task) {
         synchronized(this) {
-            val rest = _tasks.value.filterNot { it.videoId == task.videoId }
-            _tasks.value = (listOf(task) + rest).take(6)
+            _tasks.value = mergeDownloadTask(_tasks.value, task, DONE_TASK_HISTORY_LIMIT)
         }
     }
 
@@ -133,9 +147,7 @@ object DownloadState {
      */
     fun restoreIfAbsent(restored: List<Task>) {
         synchronized(this) {
-            val known = _tasks.value.map { it.videoId }.toSet()
-            val extra = restored.filter { it.videoId !in known }
-            if (extra.isNotEmpty()) _tasks.value = (_tasks.value + extra).take(6)
+            _tasks.value = mergeRestoredDownloadTasks(_tasks.value, restored, DONE_TASK_HISTORY_LIMIT)
         }
     }
 }
@@ -149,6 +161,72 @@ object DownloadState {
  */
 internal fun activeDownloadTasks(tasks: List<DownloadState.Task>): List<DownloadState.Task> =
     tasks.filter { it.state != DownloadState.STATE_DONE }
+
+/**
+ * 完成态条目的保留上限：完成态不显示在「正在下载」里（见 [activeDownloadTasks]），
+ * 只是收尾的瞬时值，留最近几条足够；真正的完成历史在下载记录库里。
+ */
+private const val DONE_TASK_HISTORY_LIMIT = 20
+
+/**
+ * 列表裁剪：**非完成态条目永不丢弃**，完成态最多保留最近 [doneLimit] 条。
+ *
+ * 旧实现用 `(list + rest).take(6)` 对整个列表一刀切：第 7 个任务起会从界面整条消失，
+ * 但 Job 仍在跑、持久化记录也还在 —— 用户既看不到进度，也没有暂停/继续/取消/重试入口。
+ * 真正需要封顶的只有完成态历史：排队/下载/暂停/失败是用户必须能看见并能操作的状态，
+ * 数量不设上限（[activeDownloadTasks] 也只排除完成态）。
+ *
+ * 输入顺序即“最近在前”（[DownloadState.upsert] 把新任务放头部、恢复的记录追加在尾部）；
+ * 完成态按出现顺序保留前 [doneLimit] 条（即最近的几条）。[doneLimit] <= 0 表示不留完成态。
+ */
+internal fun trimDownloadTasks(
+    tasks: List<DownloadState.Task>,
+    doneLimit: Int
+): List<DownloadState.Task> {
+    val limit = doneLimit.coerceAtLeast(0)
+    val kept = ArrayList<DownloadState.Task>(tasks.size)
+    var doneSeen = 0
+    for (task in tasks) {
+        if (task.state == DownloadState.STATE_DONE) {
+            if (doneSeen >= limit) continue
+            doneSeen++
+        }
+        kept.add(task)
+    }
+    return kept
+}
+
+/**
+ * [DownloadState.upsert] 的纯函数部分：同 videoId 去重（新任务排最前）后按
+ * [trimDownloadTasks] 裁剪。去重同时保证界面列表的 `key = videoId` 不会撞车。
+ */
+internal fun mergeDownloadTask(
+    tasks: List<DownloadState.Task>,
+    task: DownloadState.Task,
+    doneLimit: Int
+): List<DownloadState.Task> =
+    trimDownloadTasks(listOf(task) + tasks.filterNot { it.videoId == task.videoId }, doneLimit)
+
+/**
+ * [DownloadState.restoreIfAbsent] 的纯函数部分：已有同 id 的条目不覆盖，恢复的记录追加在尾部；
+ * 恢复列表内部也按 videoId 去重（重复 key 会让界面列表组合崩溃），最后按 [trimDownloadTasks]
+ * 裁剪 —— **未完成任务一条都不能因恢复而被丢掉**。
+ */
+internal fun mergeRestoredDownloadTasks(
+    tasks: List<DownloadState.Task>,
+    restored: List<DownloadState.Task>,
+    doneLimit: Int
+): List<DownloadState.Task> {
+    if (restored.isEmpty()) return tasks
+    val known = tasks.mapTo(HashSet(tasks.size)) { it.videoId }
+    val extra = ArrayList<DownloadState.Task>(restored.size)
+    for (task in restored) {
+        // add 返回 false 表示已存在：既不覆盖既有条目，也不重复恢复同一条记录。
+        if (known.add(task.videoId)) extra.add(task)
+    }
+    if (extra.isEmpty()) return tasks
+    return trimDownloadTasks(tasks + extra, doneLimit)
+}
 
 /**
  * 续传目标：应该往哪个文件写，以及可以从多少字节续起。
@@ -300,7 +378,7 @@ class DownloadService : Service() {
                 },
                 // 排队期间被取消的任务：出队即丢弃，绝不执行（旧的取消只清了记录与列表条目，
                 // Channel 里的 job 原封不动，worker 出队后又把任务写回「正在下载」并开下）。
-                isCancelled = { job -> cancelRequested.remove(job.videoId) },
+                isCancelled = { job -> control.consumeCancel(job.videoId) },
                 onCancelled = { job -> discardCancelled(job) },
                 onIdle = { lastStartId ->
                     // 前台通知随任务走：队列清空后收起常驻通知；随后按 startId 协议自停，
@@ -385,7 +463,7 @@ class DownloadService : Service() {
      */
     override fun onTimeout(startId: Int) {
         DiagLog.log("Download", "dataSync 前台服务到时（6h 限额）：在跑任务全部转暂停并自停")
-        activeJobs.forEach { pauseRequested.add(it) }
+        activeJobs.forEach { control.requestPause(it) }
         notify(
             DONE_NOTIF_ID,
             NotificationCompat.Builder(this, CHANNEL_ID)
@@ -426,7 +504,6 @@ class DownloadService : Service() {
     private suspend fun runDownload(job: Job): Unit = withContext(Dispatchers.IO) {
         val app = application as IwaraApp
         val repo = app.repository
-        val dao = app.database.videoDao()
         DownloadState.upsert(DownloadState.Task(job.videoId, job.title, url = job.url, fileName = job.fileName, quality = job.quality))
         // 开跑即写一条 running 记录（docUri 为 null，半成品尚未产生）。
         // 下载中进程被杀时记录留存，重启后按「下载中断」恢复进列表；正常完成/暂停/失败
@@ -490,15 +567,18 @@ class DownloadService : Service() {
             sourceUrl = fresh.getOrThrow().url
         }
 
-        // 库里**已经有这支视频**（同一个 iwaraId）而且文件还在 ⇒ 直接以已有文件收尾，
+        // 库里**已经有这支视频**（同一个 iwaraId）而且文件完整 ⇒ 直接以已有文件收尾，
         // 不再下载、更不新建第二份。不检查"这支视频是否已存在"时，同名/异名都会再复制一份进库，
         // 而 finishDownload 又会用一条 relPath=null 的裸记录去 upsert ⇒ 同一个视频两条记录
         // （一条保留扫描得到的文件夹路径、一条没有）。
-        val libraryRow = dao.byIwaraId(job.videoId)
+        // 注意：扫描器把"长度 > 0"的文件就收进库，所以只看"存在且非空"会把**半成品**
+        // 当成已完成（清单显示成功、播放断点黑屏、也没有续传入口）。有未完成记录时，
+        // 用它的总长度判断文件是否真的收满；没满就继续往下走续传流程。
+        val libraryRow = repo.videoRowByIwaraId(job.videoId)
         val libraryDoc = documentOf(libraryRow?.localUri)
-        if (libraryDoc != null && (libraryDoc.length() ?: 0L) > 0L) {
+        if (libraryDoc != null && libraryFileIsComplete(libraryDoc.length(), pending?.total ?: -1L)) {
             DiagLog.log("Download", "已在本地库，跳过重复下载：${job.title}")
-            finishDownload(job, repo, dao, libraryDoc, note = tr("本地库已有，未重复下载", "Already in your library; skipped"))
+            finishDownload(job, repo, libraryDoc, note = tr("本地库已有，未重复下载", "Already in your library; skipped"))
             return@withContext
         }
 
@@ -549,6 +629,15 @@ class DownloadService : Service() {
         // 仍被拒签才按「下载地址已过期」收尾。
         var attempt = job.attempt
         var reResolvedAuth = false
+        // 上次已经收满、只差收尾（进程在最后一步被杀）：磁盘长度等于记录的总长度就直接完成。
+        // 不再发 Range 请求 —— 对已经到 EOF 的文件请求 bytes=total- 只会换回 416，
+        // 把一份完整文件误判成失败。
+        val recordedTotal = pending?.total ?: -1L
+        if (recordedTotal > 0 && (doc?.length() ?: 0L) == recordedTotal) {
+            DiagLog.log("Download", "半成品已收满，直接收尾：${job.title}")
+            finishDownload(job, repo, doc)
+            return@withContext
+        }
         while (true) {
             // 续传起点每轮都从磁盘真实长度取：失败重试前可能已经写入了一部分字节。
             val resumeFrom = (doc?.length() ?: 0L).coerceAtLeast(0L)
@@ -557,7 +646,7 @@ class DownloadService : Service() {
                 when {
                     result.cancelled -> cancelDownload(job, repo, doc)
                     result.paused -> pauseTask(job, repo, doc, result.received, result.total, attempt)
-                    else -> finishDownload(job, repo, dao, doc)
+                    else -> finishDownload(job, repo, doc)
                 }
                 return@withContext
             } catch (e: CancellationException) {
@@ -601,10 +690,11 @@ class DownloadService : Service() {
                 retryTask(job, attempt, waitMs, receivedNow)
                 if (!awaitRetryWindow(job, waitMs)) {
                     // 退避期间用户暂停/取消：中止重试，按标记收尾，不把这次失败算成最终失败。
-                    if (cancelRequested.remove(job.videoId)) {
-                        cancelDownload(job, repo, doc)
-                    } else if (pauseRequested.remove(job.videoId)) {
-                        pauseTask(job, repo, doc, (doc?.length() ?: 0L).coerceAtLeast(0L), -1L, attempt)
+                    when (control.consumeStop(job.videoId)) {
+                        DownloadControl.Intent.CANCEL -> cancelDownload(job, repo, doc)
+                        DownloadControl.Intent.PAUSE ->
+                            pauseTask(job, repo, doc, (doc?.length() ?: 0L).coerceAtLeast(0L), -1L, attempt)
+                        null -> Unit
                     }
                     return@withContext
                 }
@@ -631,26 +721,30 @@ class DownloadService : Service() {
         if (resumeFrom > 0) reqBody.header("Range", "bytes=$resumeFrom-")
         IwaraClient.mediaHttp.newCall(reqBody.build()).execute().use { resp ->
             val total: Long
+            // 这次尝试应得的总字节数（从 0 算起）：206 用 Content-Range 的总量/区间终点，
+            // 200 用 Content-Length；<= 0 表示服务器没给长度（分块响应），只能信 EOF。
+            val expectedTotal: Long
             var received = 0L
             val input: java.io.InputStream
             val append: Boolean
-            if (resp.code == 206 && resumeFrom > 0) {
-                // 续传成功：Content-Range: bytes start-end/total。
+            if (resp.code == 206) {
+                // 续传响应：`Content-Range: bytes start-end/total`。起点必须等于本次请求的
+                // 续传位置、区间不得越界 —— 否则 append 会把两段不同位置的内容拼到一起，
+                // 长度对得上、内容却损坏（"下载成功却播不了"的来源之一）。
                 val contentRange = resp.header("Content-Range")
-                total = contentRange?.substringAfterLast('/')?.toLongOrNull() ?: -1L
+                val range = resumeRange(contentRange, resumeFrom)
+                    ?: throw DownloadRangeMismatchException(contentRange, resumeFrom)
+                total = range.total
+                expectedTotal = if (total > 0) total else range.end + 1
                 input = resp.body?.byteStream() ?: throw java.io.IOException("空响应")
-                append = true
-                received = resumeFrom
-                if (total > 0 && resumeFrom >= total) {
-                    // 半成品其实已经齐了（上次在收尾阶段被打断）——直接走完成路径。
-                    input.close()
-                    return DownloadAttemptResult(completed = true, received = received, total = total)
-                }
+                append = resumeFrom > 0
+                received = if (append) resumeFrom else 0L
                 DiagLog.log("Download", "续传 ${job.title}：从 $resumeFrom 字节继续（总 $total）")
             } else {
                 if (!resp.isSuccessful) throw DownloadHttpException(resp.code)
                 // 服务器不支持 Range（200 全量）或没有半成品：截断重下，绝不把两次内容拼在一起。
                 total = resp.body?.contentLength() ?: -1L
+                expectedTotal = total
                 input = resp.body?.byteStream() ?: throw java.io.IOException("空响应")
                 append = false
             }
@@ -665,21 +759,26 @@ class DownloadService : Service() {
                     // 收尾由 finishDownload() 兜底刷到完成态，观感无差别、开销降两个数量级。
                     var lastProgressAt = 0L
                     while (true) {
-                        // 用户在排队/下载中点「取消」：直接收尾，不把文件下完。
-                        if (cancelRequested.remove(job.videoId)) {
-                            return DownloadAttemptResult(cancelled = true, received = received, total = total)
+                        // 用户在排队/下载中点「取消」或「暂停」：消费一次意图，直接收尾。
+                        // 旧实现是「先查取消、再查暂停」两个独立集合；现在由 DownloadControl
+                        // 统一给出优先级（取消 > 暂停），同一意图不会被两个检查点各消费一次。
+                        when (control.consumeStop(job.videoId)) {
+                            DownloadControl.Intent.CANCEL ->
+                                return DownloadAttemptResult(cancelled = true, received = received, total = total)
+                            DownloadControl.Intent.PAUSE -> {
+                                // 暂停：关流保留半成品，状态由 pauseTask 记 PAUSED 并持久化。
+                                outs.flush()
+                                DiagLog.log("Download", "暂停 " + job.title + "：已接收 " + received + " 字节")
+                                return DownloadAttemptResult(paused = true, received = received, total = total)
+                            }
+                            null -> Unit
                         }
                         // 服务被销毁（scope.cancel）时也必须停：阻塞的 read 不响应协程取消，
                         // 只检查暂停标记会让它在服务销毁后继续把文件读完，最后卡在
                         // finishDownload 的第一个挂起点上抛 CancellationException ——
                         // 磁盘上留下一个既没入库、也不在续传列表里的孤儿文件。
                         currentCoroutineContext().ensureActive()
-                        if (pauseRequested.remove(job.videoId)) {
-                            // 暂停：关流保留半成品，状态由 pauseTask 记 PAUSED 并持久化。
-                            outs.flush()
-                            DiagLog.log("Download", "暂停 ${job.title}：已接收 $received 字节")
-                            return DownloadAttemptResult(paused = true, received = received, total = total)
-                        }
+
                         val n = ins.read(buf)
                         if (n < 0) break
                         outs.write(buf, 0, n)
@@ -701,6 +800,11 @@ class DownloadService : Service() {
                         }
                     }
                     outs.flush()
+                    // EOF 不等于下载完整：截断的连接、只回一半的 206 都会"正常"读到 EOF。
+                    // 只有字节数正好等于应得长度才算完成，否则抛可重试异常并保留半成品续传。
+                    if (!isDownloadComplete(received, expectedTotal)) {
+                        throw DownloadIncompleteException(received, expectedTotal)
+                    }
                     return DownloadAttemptResult(completed = true, received = received, total = total)
                 }
             }
@@ -785,12 +889,12 @@ class DownloadService : Service() {
     private suspend fun awaitRetryWindow(job: Job, waitMs: Long): Boolean {
         var remaining = waitMs
         while (remaining > 0) {
-            if (cancelRequested.contains(job.videoId) || pauseRequested.contains(job.videoId)) return false
+            if (control.hasPending(job.videoId)) return false
             val step = minOf(remaining, RETRY_WAIT_POLL_MS)
             delay(step)
             remaining -= step
         }
-        return !cancelRequested.contains(job.videoId) && !pauseRequested.contains(job.videoId)
+        return !control.hasPending(job.videoId)
     }
 
     /**
@@ -839,7 +943,6 @@ class DownloadService : Service() {
     private suspend fun finishDownload(
         job: Job,
         repo: io.github.amatsukiichika.iwaram.data.IwaraRepository,
-        dao: io.github.amatsukiichika.iwaram.data.VideoDao,
         doc: DocumentFile,
         note: String? = null
     ) {
@@ -852,9 +955,9 @@ class DownloadService : Service() {
         //  ② 同一个 iwaraId 但指向一份**已不存在的文件**的旧行 —— 用户删掉文件后重下，
         //     新文件是新 URI，以前这里按 URI 查不到就再插一条：库里同 iwaraId 两条，
         //     byIwaraId(...) 命中哪条看运气，点播可能打到已经消失的 URI。
-        val rowByUri = dao.byUri(doc.uri.toString())
+        val rowByUri = repo.videoRowByUri(doc.uri.toString())
         val staleRow = if (rowByUri == null) {
-            dao.byIwaraId(job.videoId)?.takeIf {
+            repo.videoRowByIwaraId(job.videoId)?.takeIf {
                 isStaleRowForSameVideo(
                     rowUri = it.localUri,
                     rowIwaraId = it.iwaraId,
@@ -904,10 +1007,10 @@ class DownloadService : Service() {
                 fileModifiedAt = doc.lastModified().coerceAtLeast(0L)
             )
         }
-        dao.upsert(entity)
+        repo.upsertDownloadedVideo(entity)
         if (staleRow != null) {
             // 旧行已被上面这条顶替：主键是 localUri，新行是新键，旧键必须显式删。
-            dao.deleteVideoWithTags(staleRow)
+            repo.deleteReplacedVideoRow(staleRow)
             // 旧行的封面文件只属于旧行；新行已换成自己的封面，这里顺手把孤儿文件清掉。
             if (staleRow.localThumbnailPath != entity.localThumbnailPath) {
                 repo.deleteLocalThumbnailFile(staleRow.localThumbnailPath)
@@ -1115,23 +1218,19 @@ class DownloadService : Service() {
         /** 自动重试退避期间暂停/取消标记的轮询间隔（毫秒）。 */
         private const val RETRY_WAIT_POLL_MS = 250L
 
-        /** 暂停标记：UI 置入，读循环每 64KB 检查一次；服务进程内单例，跨组件共享。 */
-        private val pauseRequested = CopyOnWriteArraySet<String>()
+        /**
+         * 暂停/取消意图：UI 与 onTimeout 置入，worker 消费一次（见 DownloadControl）。
+         * 服务进程内单例，跨组件共享；持久状态仍以 DownloadState/PendingDownload 为准。
+         */
+        private val control = DownloadControl()
 
         /** 在跑（已出队、尚未收尾）任务的 videoId 集合：onTimeout 据此批量转暂停。 */
         private val activeJobs = CopyOnWriteArraySet<String>()
 
-        /**
-         * 取消标记：UI 置入。
-         * worker 出队前消费一次（排队中取消），读循环每 64KB 再消费一次（正好在跑时取消）。
-         */
-        private val cancelRequested = CopyOnWriteArraySet<String>()
-
         fun start(context: Context, job: Job) {
             // 暂停/取消标记在「主动发起新任务」时清除：如果在 runDownload 出队后清，
             // 排队中的任务在入队前置入的标记会被出队时误清，导致"暂停/取消排队任务"失效。
-            pauseRequested.remove(job.videoId)
-            cancelRequested.remove(job.videoId)
+            control.clear(job.videoId)
             val i = Intent(context, DownloadService::class.java)
                 .putExtra(EXTRA_ID, job.videoId)
                 .putExtra(EXTRA_TITLE, job.title)
@@ -1142,9 +1241,9 @@ class DownloadService : Service() {
             context.startForegroundService(i)
         }
 
-        /** 暂停：置标记，读循环在下一次 64KB 检查时安全停下（文件、记录都保留）。 */
+        /** 暂停：置意图，读循环在下一次 64KB 检查时安全停下（文件、记录都保留）。 */
         fun pause(videoId: String) {
-            pauseRequested.add(videoId)
+            control.requestPause(videoId)
         }
 
         /**
@@ -1156,7 +1255,7 @@ class DownloadService : Service() {
          * 所以取消过的视频不会在下次下载时被误取消。
          */
         fun cancel(videoId: String) {
-            cancelRequested.add(videoId)
+            control.requestCancel(videoId)
         }
     }
 }

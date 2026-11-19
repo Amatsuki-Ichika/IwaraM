@@ -27,7 +27,8 @@ import java.io.File
 suspend fun IwaraRepository.fetchAndApplyMetadata(video: VideoEntity) {
         val id = video.iwaraId ?: return
         try {
-            val resp = IwaraApi.service.video(id)
+            // 元数据补全走唯一的 IwaraClient 网络栈（与浏览/登录共用鉴权、401 刷新与基址回退）。
+            val resp = IwaraClient.call { it.video(id) }
             if (resp.title.isNullOrBlank() && resp.id == null) return
 
             val tags = resp.tags.orEmpty().mapNotNull { it.id }.filter { it.isNotBlank() }
@@ -40,13 +41,14 @@ suspend fun IwaraRepository.fetchAndApplyMetadata(video: VideoEntity) {
                 likeCount = resp.numLikes,
                 commentCount = resp.numComments,
                 rating = resp.rating,
-                thumbnailUrl = resp.file?.id?.let { IwaraApi.thumbnailUrl(it) },
+                thumbnailUrl = IwaraClient.thumbnailUrl(resp.file?.id),
                 tagsCsv = tags.joinToString(","),
                 metaFetched = true
             )
-            // 四步写收进单个 Room 事务（upsert → 清旧关联 → 重建标签/关联），
-            // 中途崩溃不再留下孤儿 cross-ref 或半更新的条目。
-            dao.upsertVideoWithTags(
+            // 四步写收进单个 Room 事务（更新元数据列 → 清旧关联 → 重建标签/关联），
+            // 中途崩溃不再留下孤儿 cross-ref 或半更新的条目；行已被扫描收尾删掉时
+            // 事务内的 UPDATE 命中 0 行，直接放弃写入，不会把已删记录复活。
+            dao.applyFetchedMetadata(
                 video = updated,
                 tags = tags.map { TagEntity(id = it, name = it) },
                 refs = tags.map { VideoTagCrossRef(video.localUri, it) }

@@ -11,8 +11,11 @@ plugins {
 val appVersionName: String = findProperty("app.versionName") as String?
     ?: error("app.versionName is not set; define it in gradle.properties or pass -Papp.versionName=")
 
-// versionCode derives from the numeric base of versionName (major * 10000 + minor * 100 + patch) so
-// the numeric code can never drift from the single version source in gradle.properties. A semver
+// versionCode derives from the numeric base of versionName so the numeric code can never drift
+// from the single version source in gradle.properties. The scheme is monotonic and collision-free:
+// major * 1_000_000 + minor * 1_000 + patch. minor and patch must stay below 1000, otherwise a
+// carry would give two different release versions the same versionCode (the old
+// major * 10000 + minor * 100 + patch scheme made 0.2.100 and 0.3.0 both 300). A semver
 // pre-release suffix (e.g. 0.2.0-rc.1) is ignored, so an RC and its stable release share the same
 // versionCode and testers can upgrade from the RC APK to the stable APK in place.
 val appVersionCode: Int = appVersionName.substringBefore('-').split(".").let { parts ->
@@ -22,7 +25,12 @@ val appVersionCode: Int = appVersionName.substringBefore('-').split(".").let { p
     val (major, minor, patch) = parts.map { part ->
         part.toIntOrNull() ?: error("Non-numeric part in app.versionName: \"$appVersionName\"")
     }
-    major * 10000 + minor * 100 + patch
+    require(major in 0 until 2_100 && minor in 0 until 1_000 && patch in 0 until 1_000) {
+        "app.versionName parts are out of range (major=$major, minor=$minor, patch=$patch); " +
+            "versionCode is major*1_000_000 + minor*1_000 + patch, so minor/patch must be 0..999 " +
+            "and major must stay under Android's 2,100,000,000 versionCode limit"
+    }
+    major * 1_000_000 + minor * 1_000 + patch
 }
 
 // Release signing material is read from a git-ignored keystore.properties.

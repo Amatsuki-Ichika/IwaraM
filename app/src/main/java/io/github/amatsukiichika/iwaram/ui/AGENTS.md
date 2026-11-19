@@ -7,7 +7,7 @@ definition of done are in the root AGENTS.md; this file only adds what is specif
 
 - No DI framework, no Navigation library, no MVI. Screens compose directly; navigation is the
   hand-written overlay stack in `MainActivity`. Do not "modernize" this without a decision record.
-- A screen takes state and callbacks; it does not reach into a repository or a service.
+- A screen takes state and callbacks. It may read repository-owned `StateFlow`s through `LocalAppRepository` (settings, session, download state), the access path `docs/architecture.md` documents; it must not open the database, build a network client or obtain and start a service itself.
 - The overlay stack is the single navigation authority: pushing the same destination twice, and
   popping the root, are both bugs.
 

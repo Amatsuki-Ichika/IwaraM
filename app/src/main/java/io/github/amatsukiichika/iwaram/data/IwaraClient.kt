@@ -25,7 +25,7 @@ import java.net.UnknownHostException
 import java.util.concurrent.TimeUnit
 
 /**
- * Iwara 浏览客户端（浏览/登录/互动模块专用），与旧 [IwaraApi]（本地元数据补全）相互独立：
+ * Iwara 唯一的 HTTP 客户端（浏览/登录/互动/本地元数据补全共用）：
  * - 基址 2026 年起为 apiq.iwara.tv，api.iwara.tv 作回退；连接失败自动切换并重试一次；
  * - 公共请求头（Referer/Origin/X-Site/浏览器 UA）与 Bearer 鉴权由拦截器注入；
  * - 401 时由 Authenticator 同步刷新 access token 并重试一次。
@@ -107,7 +107,8 @@ object IwaraClient {
     }
 
     private fun authHeaders(): Interceptor = Interceptor { chain ->
-        val token = IwaraSession.accessTokenFlow()
+        // 启动恢复在 IO 线程进行：这里有界等待就绪（网络线程阻塞可接受），超时按无 token 继续。
+        val token = IwaraSession.awaitAccessToken()
         val req = if (token.isNullOrBlank()) chain.request() else chain.request().newBuilder()
             .header("Authorization", "Bearer $token")
             .build()
@@ -115,11 +116,16 @@ object IwaraClient {
     }
 
     /**
-     * 401 时同步刷新 access token 后重试一次；刷新失败则放行原 401。
+     * 401 时同步刷新 access token 后重试一次；刷新失败或请求体不可重放则放行原 401。
      *
      * 把「本次请求用的 token」透传给 [IwaraSession.refreshBlocking]、与其锁合并后，
      * 并发 401 只会触发一次真正刷新；若刷新拿回的仍是同一个 token
      * （未登录 / 刷新失败 / token 被撤销），重试只会再撞一次 401，故直接放行。
+     *
+     * 重试前提是请求体可重放：401 表示服务端没有执行该请求，所以方法是否幂等不影响重试，
+     * 但一次性（流式）请求体被消费后无法再次发送，此时重放只会抛异常或发出空 body。
+     * 本客户端当前的调用方只用内存里的 JSON 字符串构造 body（可重放），此守卫是为未来
+     * 流式上传留下的约束，不是现有路径的例外。
      */
     private fun refreshOn401(): Interceptor = Interceptor { chain ->
         val request = chain.request()
@@ -128,6 +134,9 @@ object IwaraClient {
         // 请求没带鉴权头（未登录）时的 401 属于权限问题，刷新没有意义。
         val stale = request.header("Authorization")?.removePrefix("Bearer ")?.trim()
         if (stale.isNullOrBlank()) return@Interceptor resp
+        // 一次性 body 无法重放：放行原 401，由调用方按普通失败处理。
+        val body = request.body
+        if (body != null && body.isOneShot()) return@Interceptor resp
         val fresh = IwaraSession.refreshBlocking(stale) ?: return@Interceptor resp
         if (fresh == stale) return@Interceptor resp
         resp.close()

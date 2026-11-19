@@ -9,6 +9,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -35,9 +36,11 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -88,8 +91,8 @@ private const val ONBOARDING_PAGE_COUNT = 5
  * @param onClearDownload 请求清除下载文件夹，改为跟随视频文件夹。
  * @param onDefaultR18Change 默认 R18 开关变化回调。
  * @param onShowTagsChange 卡片标签开关变化回调。
- * @param onFinish 点击"开始使用"：调用方负责持久化 onboarding_done 并进入主界面。
- * @param onSkip 点击"跳过"：调用方负责同样收尾，跳过后仍可稍后在设置里重看引导。
+ * @param onFinish 点击"开始使用"：调用方负责持久化 onboarding_done、记录 18+ 自我声明并进入主界面。
+ * @param onSkip 点击"跳过"：先弹出 18+ 确认对话框，确认后调用方同样收尾；跳过后仍可稍后在设置里重看引导。
  */
 @Composable
 fun OnboardingScreen(
@@ -108,6 +111,10 @@ fun OnboardingScreen(
     onSkip: () -> Unit,
 ) {
     var page by rememberSaveable { mutableStateOf(0) }
+    // 18+ 自我声明：只在最后一页勾选；未勾选时「开始使用」保持禁用（见 docs/decisions/0028）。
+    var adultConfirmed by rememberSaveable { mutableStateOf(false) }
+    // 「跳过」也要先确认 18+：跳过的是引导流程，不是年龄声明。
+    var showSkipConfirm by rememberSaveable { mutableStateOf(false) }
     val canAdvance = page != 1 || libraryName != null
 
     // 系统返回键在引导页内退回上一步，而不是直接离开应用。
@@ -125,7 +132,7 @@ fun OnboardingScreen(
         ) {
             OnboardingHeader(
                 showSkip = page < ONBOARDING_PAGE_COUNT - 1,
-                onSkip = onSkip,
+                onSkip = { showSkipConfirm = true },
             )
             AnimatedContent(
                 targetState = page,
@@ -155,6 +162,8 @@ fun OnboardingScreen(
                         downloadName = downloadName,
                         defaultR18 = defaultR18,
                         showTags = showTags,
+                        adultConfirmed = adultConfirmed,
+                        onAdultConfirmedChange = { adultConfirmed = it },
                     )
                 }
             }
@@ -162,12 +171,43 @@ fun OnboardingScreen(
             OnboardingBottomBar(
                 page = page,
                 canAdvance = canAdvance,
-                canFinish = libraryName != null,
+                canFinish = libraryName != null && adultConfirmed,
                 onBack = { page -= 1 },
                 onNext = { page += 1 },
                 onFinish = onFinish,
             )
         }
+    }
+
+    // 跳过引导前也要过 18+ 声明：对话框确认后才真正收尾（onSkip 由调用方落盘）。
+    if (showSkipConfirm) {
+        AlertDialog(
+            onDismissRequest = { showSkipConfirm = false },
+            title = { Text(tr("内容提示", "Content notice")) },
+            text = {
+                Text(
+                    tr(
+                        "IwaraM 是 iwara.tv 的非官方客户端，内容可能包含成人题材，仅限年满 18 周岁的用户使用。",
+                        "IwaraM is an unofficial client for iwara.tv. Its content may be adult material and is for users aged 18 or older.",
+                    ),
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showSkipConfirm = false
+                        onSkip()
+                    },
+                ) {
+                    Text(tr("我已满 18 岁", "I am 18 or older"))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSkipConfirm = false }) {
+                    Text(tr("返回", "Back"))
+                }
+            },
+        )
     }
 }
 
@@ -372,6 +412,8 @@ private fun DonePage(
     downloadName: String?,
     defaultR18: Boolean,
     showTags: Boolean,
+    adultConfirmed: Boolean,
+    onAdultConfirmedChange: (Boolean) -> Unit,
 ) {
     OnboardingPage {
         PageHeading(
@@ -389,6 +431,32 @@ private fun DonePage(
                 SummaryRow(tr("下载文件夹", "Download folder"), downloadName ?: tr("跟随视频文件夹", "Follows video folder"))
                 SummaryRow(tr("默认 R18", "Default R18"), onOff(defaultR18))
                 SummaryRow(tr("卡片显示标签", "Show tags"), onOff(showTags))
+            }
+        }
+        // 18+ 自我声明：勾选后「开始使用」才可用；只是本机自述，不做真实年龄验证。
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .clickable { onAdultConfirmedChange(!adultConfirmed) }
+                .padding(horizontal = 4.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Checkbox(checked = adultConfirmed, onCheckedChange = onAdultConfirmedChange)
+            Spacer(Modifier.width(8.dp))
+            Column {
+                Text(
+                    text = tr("我已满 18 周岁", "I am 18 or older"),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Text(
+                    text = tr(
+                        "应用中可能包含成人内容，仅限成年人使用。",
+                        "The app may contain adult content and is for adults only.",
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
         Text(

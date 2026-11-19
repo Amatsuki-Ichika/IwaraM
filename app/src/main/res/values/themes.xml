@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <style name="Theme.IwaraManager" parent="android:Theme.Material.Light.NoActionBar">
+        <!-- 冷启动窗口底色：Compose 首帧之前由系统绘制，取与 Theme.kt 的 background 相同的颜色，
+             避免深色系统下的白闪（values-night 覆盖为深色值）。 -->
+        <item name="android:windowBackground">@color/window_background</item>
         <!-- 把 dialogTheme 换成下面的非浮窗全屏主题：Compose 的 Dialog 在 API 31+ 会解析到平台浮窗主题，
              使自绘的底部抽屉被排在系统栏内侧而悬空。背景压暗仍在 Compose 侧完成。 -->
         <item name="android:dialogTheme">@style/IwaraDialogWindowTheme</item>

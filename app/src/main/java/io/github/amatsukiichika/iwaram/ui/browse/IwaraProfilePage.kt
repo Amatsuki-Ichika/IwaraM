@@ -84,6 +84,7 @@ import io.github.amatsukiichika.iwaram.data.localVideoKeys
 import io.github.amatsukiichika.iwaram.data.videoKeys
 import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.ui.DiagLog
+import io.github.amatsukiichika.iwaram.ui.openInBrowser
 import io.github.amatsukiichika.iwaram.ui.components.ScrollToTopButton
 import io.github.amatsukiichika.iwaram.ui.components.animateScrollToTop
 import io.github.amatsukiichika.iwaram.ui.components.scrollToTopBottomPadding
@@ -1043,18 +1044,6 @@ private fun AuthorVideosGrid(
             bottomPadding = scrollToTopBottomPaddingOverlaid(),
             endPadding = 24.dp,
             backdrop = scrollBackdrop
-        )
-    }
-}
-
-/** 解析资料失败（在线内容拉不到）时的占位。 */
-
-/** 用系统浏览器打开链接，失败静默忽略（作者页「主页 ↗」入口）。 */
-private fun openInBrowser(context: android.content.Context, url: String) {
-    runCatching {
-        context.startActivity(
-            android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
-                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
         )
     }
 }

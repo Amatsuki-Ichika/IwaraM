@@ -4,6 +4,8 @@
 //   node scripts/verify-apk-size.mjs            # compare built APKs against scripts/apk-size-baseline.json
 //   node scripts/verify-apk-size.mjs --update   # record the current sizes as the new baseline
 //   node scripts/verify-apk-size.mjs --root <dir> --baseline <file>
+// Note: measure a clean build. Incremental Gradle builds can leave zip-alignment padding inside
+// the debug APK from previously packaged dex files, which inflates the size without any new code.
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 
@@ -64,6 +66,7 @@ for (const apk of found.sort((a, b) => a.variant.localeCompare(b.variant))) {
   const ceiling = Math.floor(limit * (1 + tolerance));
   if (apk.size > ceiling) {
     results.push(`OVER     ${apk.variant} ${apk.size.toLocaleString()} B > ${ceiling.toLocaleString()} B (baseline ${limit.toLocaleString()}, tolerance ${(tolerance * 100).toFixed(1)}%). Shrink the APK, or raise the baseline with a stated reason.`);
+    results.push(`         Note: if this APK came from an incremental build, run "./gradlew :app:clean :app:assembleDebug" and re-check; zip-alignment padding left by a previous build is not a size regression.`);
     failed = true;
   } else {
     results.push(`OK       ${apk.variant} ${apk.size.toLocaleString()} B / ceiling ${ceiling.toLocaleString()} B`);

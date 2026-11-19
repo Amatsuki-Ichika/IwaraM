@@ -83,9 +83,36 @@ class TokenCryptoTest {
         TokenCrypto.keyProvider = object : TokenCrypto.KeyProvider {
             override fun getOrCreateKey(): SecretKey? = null
         }
-        assertNull("不可加密时应返回 null 让调用方降级明文", TokenCrypto.encrypt("secret"))
+        assertNull("不可加密时应返回 null 让调用方显式降级", TokenCrypto.encrypt("secret"))
         assertNull("无密钥时密文不可读", TokenCrypto.decrypt("v1:" + java.util.Base64.getEncoder().encodeToString(ByteArray(32))))
         assertEquals("旧明文原样透传", "plain.jwt", TokenCrypto.decrypt("plain.jwt"))
+    }
+
+    @Test
+    fun `sealForStorage encrypts when a key is available`() {
+        useSoftwareKey()
+        val stored = TokenCrypto.sealForStorage("secret-token")
+        assertTrue("有密钥时必须加密，而不是标记降级", stored.value.startsWith("v1:"))
+        assertTrue("加密成功不算降级", !stored.degraded)
+        assertEquals("secret-token", TokenCrypto.decrypt(stored.value))
+    }
+
+    @Test
+    fun `sealForStorage writes explicit plaintext prefix and reports degraded when encryption fails`() {
+        TokenCrypto.keyProvider = object : TokenCrypto.KeyProvider {
+            override fun getOrCreateKey(): SecretKey? = null
+        }
+        val stored = TokenCrypto.sealForStorage("secret-token")
+        assertTrue("降级值必须带显式 plain: 前缀", stored.value.startsWith("plain:"))
+        assertEquals("前缀后的值仍是原 token", "plain:secret-token", stored.value)
+        assertTrue("降级状态必须上报调用方", stored.degraded)
+        assertEquals("降级值仍可读回", "secret-token", TokenCrypto.decrypt(stored.value))
+    }
+
+    @Test
+    fun `plaintext prefix decrypts to the underlying token`() {
+        useSoftwareKey()
+        assertEquals("secret-token", TokenCrypto.decrypt("plain:secret-token"))
     }
 
     @Test

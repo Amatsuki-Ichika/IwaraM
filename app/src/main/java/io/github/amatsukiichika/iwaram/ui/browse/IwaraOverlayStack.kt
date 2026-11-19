@@ -142,39 +142,6 @@ fun profileRevertIndex(stack: List<IwaraOverlay>, incoming: IwaraOverlay.Profile
 fun layerStillOnScreen(shown: Boolean, currentState: Boolean, targetState: Boolean): Boolean =
     shown || currentState || targetState
 
-/**
- * **打开播放页时要不要补一次入场滑入**。
- *
- * 播放页被二级页盖住时**并不销毁** —— 可见状态恒为 true，只是按 `covered` 让位（左移 + 压暗），
- * 而它的**根 Box 是透明的**（底色在内层 Column 上，为的是预测式返回时露出底页）。所以只要它带着
- * 那条让位位移就冒到最上层，**右边就会露出一条缝**，缝里正是下面那页，表现为
- * 「作者页错误的覆盖在播放页上面」。
- *
- * ⇒ **每一次真正把播放页提到台前，都必须自己补一次右滑入**（不能依赖 `AnimatedVisibility` 的
- * enter：它只在"可见状态由 false 变 true"时播，播放页被盖住时可见状态本来就是 true，不重播）。
- *
- * 唯一不需要补的情况：播放页**已经在台前**（活着、且上面没有序号更大的可见层）。
- * 那时 `openPlayer()` 只是刷新层序，补动画会让整页凭空飞一次。
- *
- * 抽成纯函数是为了能直接单测（见 `OverlayStackTest`）。
- */
-fun shouldReplayPlayerEntry(
-    showingPlayer: Boolean,
-    playerSeq: Long,
-    /** 覆盖层栈里最上面的**页面**（动作面板不算）的打开序号；没有页面则为 null。 */
-    overlayTopSeq: Long?,
-    showingSettings: Boolean,
-    settingsSeq: Long
-): Boolean {
-    // 没开着 → 这是"新打开"，必须补。
-    if (!showingPlayer) return true
-    // 开着但被盖着（上面有序号更大的可见层）→ 必须补。
-    if (showingSettings && settingsSeq > playerSeq) return true
-    if (overlayTopSeq != null && overlayTopSeq > playerSeq) return true
-    // 已经就在台前 → 不补。
-    return false
-}
-
 /* ---------- 返回键归属（纯逻辑，供 MainActivity 的 BackHandler 使用） ---------- */
 
 /**

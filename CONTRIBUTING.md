@@ -79,8 +79,9 @@ reason in the pull request. The numbers live only in that file — do not restat
 ## Dependencies
 
 Dependency versions are centralised in `gradle/libs.versions.toml`. Add new entries there
-rather than hard-coding versions in `build.gradle.kts`. Dependency-update bots are disabled;
-updates are applied manually and verified with a debug build.
+rather than hard-coding versions in `build.gradle.kts`. Dependabot opens grouped weekly pull
+requests for Gradle dependencies and GitHub Actions; review and merge them like any other change,
+and verify the build rather than trusting the bump.
 
 ## Signing
 
@@ -145,8 +146,8 @@ same signing key, so the stable APK installs straight over the RC.
 
 `gradle.properties` is the single source of truth for the version: the tag must match
 `app.versionName` there (the workflow fails the build on a mismatch), and `versionCode` is
-derived from `versionName` automatically (major\*10000 + minor\*100 + patch, any pre-release
-suffix ignored). The workflow runs the unit tests, builds the signed APK on the tag, verifies
+derived from `versionName` automatically (major\*1,000,000 + minor\*1,000 + patch, any
+pre-release suffix ignored). The workflow runs the unit tests, builds the signed APK on the tag, verifies
 the signature with `apksigner` and uploads the APK plus its `.sha256` checksum to a GitHub
 Release. Generated release notes always compare against the previous stable tag, so RC tags
 do not truncate them. It needs these repository secrets: `KEYSTORE_BASE64` (the keystore

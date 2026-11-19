@@ -67,22 +67,31 @@ class IwaraClientViewModel(internal val app: IwaraApp) : ViewModel() {
     internal val _session = MutableStateFlow(SessionState())
     val session: StateFlow<SessionState> = _session.asStateFlow()
 
+    /**
+     * 本 ViewModel 注册到 [IwaraSession] 的监听器。
+     *
+     * 会话过期回调只有单槽（[IwaraSession.listener]），所以这里必须保存引用，
+     * 在 [onCleared] 里按身份摘除：否则销毁后的 ViewModel 会被仓库线程一直持有
+     * （直到下一个 ViewModel 覆盖它），既泄漏账号级状态又可能收到过期回调。
+     */
+    private val sessionListener = object : IwaraSession.Listener {
+        override fun onSessionExpired() {
+            _session.value = _session.value.copy(
+                loggedIn = false, username = "", userId = "", avatarUrl = null,
+                message = tr("登录已过期，请重新登录", "Your session has expired. Please sign in again")
+            )
+            // 过期与主动登出在数据层面是同一件事：凭证没了，账号级状态就必须清掉，
+            // 否则用户换个账号重新登录，看到的还是上一个账号的列表。
+            // 回调可能来自 OkHttp 线程（401 续期），用 viewModelScope 回到主线程再清
+            // ——followStates/likeStates 是 Compose 快照状态，跨线程写不安全。
+            viewModelScope.launch { resetAccountScopedState() }
+        }
+    }
+
     init {
         // 会话恢复已在 IwaraApp.onCreate（进程起点）完成，这里只注册 listener，
         // 不再依赖浏览 tab 的组合时序。
-        IwaraSession.listener = object : IwaraSession.Listener {
-            override fun onSessionExpired() {
-                _session.value = _session.value.copy(
-                    loggedIn = false, username = "", userId = "", avatarUrl = null,
-                    message = tr("登录已过期，请重新登录", "Your session has expired. Please sign in again")
-                )
-                // 过期与主动登出在数据层面是同一件事：凭证没了，账号级状态就必须清掉，
-                // 否则用户换个账号重新登录，看到的还是上一个账号的列表。
-                // 回调可能来自 OkHttp 线程（401 续期），用 viewModelScope 回到主线程再清
-                // ——followStates/likeStates 是 Compose 快照状态，跨线程写不安全。
-                viewModelScope.launch { resetAccountScopedState() }
-            }
-        }
+        IwaraSession.listener = sessionListener
         if (IwaraSession.isLoggedIn) {
             // 先用本地缓存立即显示（离线/弱网不空白转圈），再后台刷新远端资料。
             _session.value = SessionState(
@@ -96,6 +105,12 @@ class IwaraClientViewModel(internal val app: IwaraApp) : ViewModel() {
         } else {
             _session.value = _session.value.copy(checking = false)
         }
+    }
+
+    override fun onCleared() {
+        // 单槽监听器：只摘除自己注册的那个，避免误删之后新建 ViewModel 的监听器。
+        if (IwaraSession.listener === sessionListener) IwaraSession.listener = null
+        super.onCleared()
     }
 
     private suspend fun refreshSession(loadRemote: Boolean) {

@@ -7,6 +7,12 @@ IwaraM itself is released under the [GNU Affero General Public License v3.0](LIC
 (AGPL-3.0). The third-party components listed below keep their own licences and copyright
 notices.
 
+The complete corresponding source of IwaraM and of every component it redistributes is published
+in this repository: https://github.com/Amatsuki-Ichika/IwaraM. The Jellyfin Media3 FFmpeg decoder
+is redistributed unmodified from its upstream release, whose source is linked in the table below.
+Network users can therefore obtain the corresponding source, satisfying the source-offer
+obligations of AGPL-3.0 §13 and GPL-3.0.
+
 ## Runtime dependencies
 
 | Component | Licence | Source |

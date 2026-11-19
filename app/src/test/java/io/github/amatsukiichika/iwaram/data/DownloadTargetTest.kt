@@ -7,12 +7,15 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * 下载目标解析里的两段纯逻辑：**挑哪一档**，以及**队列里的地址还能不能用**。
+ * 下载目标解析里的纯逻辑：**挑哪一档**、**队列里的地址还能不能用**，以及**文件名的拼装**。
  *
- * 后者是本次修复的核心：签名地址带 expires，任务在队列里排久了，地址在真正开下之前就过期了，
+ * 地址判定是上一轮的修复：签名地址带 expires，任务在队列里排久了，地址在真正开下之前就过期了，
  * 以前只能等它以 401/403 失败、再让用户手动「重新下载」。出队时先按 expires 判一次，
  * 过期就重新解析。判定必须准：把毫秒当秒会把所有地址都判成过期（每次白解析一次），
  * 反过来漏判就还是失败。
+ *
+ * 文件名拼装承担身份：扫描器靠 \`[iwaraId]\` 认视频、续传与档位解析靠末尾括号认档位、
+ * 播放器靠 \`.mp4\` 认容器。长标题只能截标题，不能截掉这三样。
  */
 class DownloadTargetTest {
 
@@ -53,6 +56,36 @@ class DownloadTargetTest {
     fun `nothing usable yields null so the caller can report it`() {
         assertNull(chooseDownloadQuality(listOf(quality("Preview")), "Source"))
         assertNull(chooseDownloadQuality(emptyList(), "Source"))
+    }
+
+    @Test
+    fun `the download file name carries the iwara id and quality`() {
+        assertEquals(
+            "[4Xr9kT2mQaZ] Title (Source).mp4",
+            downloadFileName(videoId = "4Xr9kT2mQaZ", title = "Title", quality = "Source")
+        )
+    }
+
+    @Test
+    fun `a long title is truncated before the id and quality markers`() {
+        val id = "4Xr9kT2mQaZ"
+        val name = downloadFileName(id, "长".repeat(300), "Source")
+        assertTrue("身份标记必须完整保留", name.startsWith("[$id] "))
+        assertTrue("档位与扩展名必须完整保留", name.endsWith(" (Source).mp4"))
+        assertTrue(
+            "UTF-8 字节数必须在文件名上限内",
+            name.toByteArray(Charsets.UTF_8).size <= FileNameSanitizer.MAX_BYTES
+        )
+        assertEquals("扫描器还要能从文件名认出身份", id, IwaraIdParser.parse(name))
+        assertEquals("续传时还要能从文件名认出档位", "Source", qualityLabelOfFileName(name))
+    }
+
+    @Test
+    fun `illegal characters in the title are replaced but the markers stay`() {
+        assertEquals(
+            "[4Xr9kT2mQaZ] a＿b (720p).mp4",
+            downloadFileName("4Xr9kT2mQaZ", "a/b", "720p")
+        )
     }
 
     @Test

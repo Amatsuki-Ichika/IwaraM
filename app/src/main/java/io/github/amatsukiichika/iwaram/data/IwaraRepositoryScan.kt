@@ -1,10 +1,12 @@
 package io.github.amatsukiichika.iwaram.data
 
+import android.content.ContentResolver
 import android.content.Context
 import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Build
+import android.provider.DocumentsContract
 import androidx.documentfile.provider.DocumentFile
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
@@ -19,6 +21,13 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+
+/**
+ * 递归扫描深度上限。SAF 提供方可能把整块存储挂成一棵树（含指回上层的目录），用户也可能把
+ * 库根目录选在很浅的公共目录上；无上限递归会遍历整台设备，环状结构还会无限深入。
+ * 12 层远超正常的「库 / 作者 / 作品集 / 文件」嵌套，触顶的目录被跳过并留一条诊断日志。
+ */
+internal const val MAX_SCAN_DEPTH = 12
 
 /* ---------- 扫描导入（原 IwaraRepository 方法，扩展函数形式） ---------- */
     /* ---------- 扫描导入 ---------- */
@@ -145,10 +154,9 @@ suspend fun IwaraRepository.importFolder(treeUri: Uri, onProgress: (done: Int, t
             val unseen = existing.values.filter { it.localUri !in handled }
             if (files.isNotEmpty() && unseen.isNotEmpty()) {
                 val pruned = pruneMissingRows(unseen) { uri ->
-                    // 查询本身失败（授权暂失）当作"还在"：宁可留着一条脏行，也不误删库索引。
-                    runCatching {
-                        DocumentFile.fromSingleUri(context, Uri.parse(uri))?.exists() == true
-                    }.getOrDefault(true)
+                    // 无法确定的（授权暂失、provider 查询异常）一律当作"还在"：
+                    // 宁可留着一条脏行，也不误删库索引。
+                    documentExists(context, Uri.parse(uri))
                 }
                 if (pruned.isNotEmpty()) {
                     DiagLog.log("Repo", "扫描收尾：清理了 ${pruned.size} 条指向已不存在文件的库行")
@@ -164,8 +172,29 @@ suspend fun IwaraRepository.importFolder(treeUri: Uri, onProgress: (done: Int, t
  * 两个条件是"与"不是"或"。扫描没看到但文件还在（换了根目录、目录暂时不可达）绝不能删 ——
  * 那删的是用户的库索引。抽成纯函数是为了把这条判据钉在测试里。
  */
-internal fun rowsToPrune(unseen: List<VideoRefRow>, fileExists: (String) -> Boolean): List<VideoRefRow> =
-    unseen.filterNot { fileExists(it.localUri) }
+internal fun rowsToPrune(unseen: List<VideoRefRow>, fileExists: (String) -> Boolean?): List<VideoRefRow> =
+    unseen.filter { fileExists(it.localUri) == false }
+
+/**
+ * 判断 SAF 单文档是否仍存在：true=在，false=确定不在了，null=无法判断（按"还在"处理）。
+ *
+ * 不直接用 [DocumentFile.exists]：它内部吞掉查询异常并返回 false，
+ * 临时撤销/未就绪的授权会被误判成"文件已删除"，进而删掉用户的库索引。
+ * 这里自己查 [DocumentsContract.Document.COLUMN_DOCUMENT_ID]，
+ * 只有"查询成功且没有任何行"才认定为已删除。
+ */
+internal fun documentExists(context: Context, uri: Uri): Boolean? {
+    if (!ContentResolver.SCHEME_CONTENT.equals(uri.scheme, ignoreCase = true)) return null
+    return try {
+        context.contentResolver
+            .query(uri, arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID), null, null, null)
+            ?.use { cursor -> cursor.moveToFirst() && !cursor.isNull(0) }
+    } catch (e: Exception) {
+        // 含 SecurityException：授权状态此刻不可判定，留给下次扫描，绝不据此删行。
+        DiagLog.log("Repo", "扫描收尾查询失败，按仍在处理：" + e.javaClass.simpleName)
+        null
+    }
+}
 
 /**
  * 删除指向已不存在文件的行（连同标签关联）。
@@ -175,7 +204,7 @@ internal fun rowsToPrune(unseen: List<VideoRefRow>, fileExists: (String) -> Bool
  */
 private suspend fun IwaraRepository.pruneMissingRows(
     unseen: List<VideoRefRow>,
-    fileExists: (String) -> Boolean
+    fileExists: (String) -> Boolean?
 ): List<VideoRefRow> {
     val doomed = rowsToPrune(unseen, fileExists)
     for (ref in doomed) {
@@ -210,18 +239,27 @@ suspend fun IwaraRepository.fetchAllMissing(onProgress: (Int, Int) -> Unit) {
     /** 已入库视频总数。 */
 suspend fun IwaraRepository.countVideos(): Int = dao.count()
 
-    private fun collectVideoFiles(
+    /**
+     * 递归收集 [dir] 下的视频文件；[rel] 是相对库根目录的父目录路径，[depth] 是 [dir] 的层数
+     * （库根目录为 0）。超过 [MAX_SCAN_DEPTH] 的子目录整棵跳过，避免异常目录树把扫描拖死。
+     * 提取成 internal 顶层函数是为了让 JVM 单测用临时目录直接验证深度上限。
+     */
+    internal fun collectVideoFiles(
         dir: DocumentFile,
         rel: String,
-        out: MutableList<Pair<DocumentFile, String>>
+        out: MutableList<Pair<DocumentFile, String>>,
+        depth: Int = 0
     ) {
         for (f in dir.listFiles()) {
             when {
-                f.isDirectory -> collectVideoFiles(
-                    f,
-                    if (rel.isEmpty()) (f.name ?: "") else "$rel/${f.name}",
-                    out
-                )
+                f.isDirectory -> {
+                    val childRel = if (rel.isEmpty()) (f.name ?: "") else "$rel/${f.name}"
+                    if (depth + 1 > MAX_SCAN_DEPTH) {
+                        DiagLog.log("Repo", "跳过超过 $MAX_SCAN_DEPTH 层的目录：$childRel")
+                        continue
+                    }
+                    collectVideoFiles(f, childRel, out, depth + 1)
+                }
                 f.isFile && isVideo(f.name) -> out.add(f to rel)
             }
         }

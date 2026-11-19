@@ -15,10 +15,12 @@ import org.robolectric.annotation.Config
 /**
  * v3→v4「文件修改日期」列迁移回归用例。
  *
- * 手工复刻 v3 库（videos 的 DDL 逐字取自 app/schemas/…AppDatabase/3.json，含 v3 的两个索引），
- * 塞三行数据后用 Room 打开 —— Room 会跑 [AppDatabase.MIGRATION_3_4] 并按 v4 实体期望做
- * **全 schema 校验**：`fileModifiedAt INTEGER NOT NULL DEFAULT 0` 与实体上的
- * `@ColumnInfo(defaultValue = "0")` 差一个字都会直接炸，等于把迁移 DDL 钉死。
+ * 旧库不是手抄 DDL：直接执行导出 schema v3（app/schemas/…AppDatabase/3.json）里 Room 生成的
+ * createSql（含 v3 的两个索引），等于「打开上一版的导出 schema」。塞三行数据后用 Room 打开 ——
+ * Room 会跑 [AppDatabase.MIGRATION_3_4] 并按 v4 实体期望做 **全 schema 校验**：
+ * `fileModifiedAt INTEGER NOT NULL DEFAULT 0` 与实体上的 `@ColumnInfo(defaultValue = "0")`
+ * 差一个字都会直接炸；迁移后再用 PRAGMA 读出真实形状，与 v4 导出 schema 逐表比对
+ * （[SchemaJson.assertMatchesExported]）。
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -27,32 +29,13 @@ class FileModifiedMigrationTest {
     private lateinit var context: Context
     private val dbName = "file_modified_migration_test.db"
 
-    /** v3 的四张表 DDL —— 与 Room 为 v3 实体生成的建表语句逐字一致，勿手改。 */
-    private val v3Ddl = listOf(
-        "CREATE TABLE IF NOT EXISTS `videos` (`localUri` TEXT NOT NULL, `fileName` TEXT NOT NULL, " +
-            "`iwaraId` TEXT, `title` TEXT NOT NULL, `author` TEXT, `authorId` TEXT, `createdAt` INTEGER, " +
-            "`viewCount` INTEGER, `likeCount` INTEGER, `commentCount` INTEGER, `rating` TEXT, " +
-            "`thumbnailUrl` TEXT, `localThumbnailPath` TEXT, `relPath` TEXT, `tagsCsv` TEXT, " +
-            "`metaFetched` INTEGER NOT NULL, `addedAt` INTEGER NOT NULL, PRIMARY KEY(`localUri`))",
-        "CREATE INDEX IF NOT EXISTS `index_videos_iwaraId` ON `videos` (`iwaraId`)",
-        "CREATE INDEX IF NOT EXISTS `index_videos_metaFetched_iwaraId` ON `videos` (`metaFetched`, `iwaraId`)",
-        "CREATE TABLE IF NOT EXISTS `tags` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, PRIMARY KEY(`id`))",
-        "CREATE TABLE IF NOT EXISTS `video_tag_cross_ref` (`videoUri` TEXT NOT NULL, `tagId` TEXT NOT NULL, " +
-            "PRIMARY KEY(`videoUri`, `tagId`))",
-        "CREATE INDEX IF NOT EXISTS `index_video_tag_cross_ref_tagId` ON `video_tag_cross_ref` (`tagId`)",
-        "CREATE TABLE IF NOT EXISTS `watch_history` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
-            "`videoKey` TEXT NOT NULL, `iwaraId` TEXT, `localUri` TEXT, `title` TEXT NOT NULL, `author` TEXT, " +
-            "`authorId` TEXT, `thumbnail` TEXT, `isLocal` INTEGER NOT NULL, `lastWatchAt` INTEGER NOT NULL, " +
-            "`positionMs` INTEGER NOT NULL, `durationMs` INTEGER NOT NULL)",
-        "CREATE UNIQUE INDEX IF NOT EXISTS `index_watch_history_videoKey` ON `watch_history` (`videoKey`)"
-    )
-
     @Before
     fun setUp() {
         context = ApplicationProvider.getApplicationContext()
         context.deleteDatabase(dbName)
+        // 手工建 v3 库：建表语句取自已导出的 3.json，不是手抄副本；user_version 直接写成 3。
         val raw = context.openOrCreateDatabase(dbName, Context.MODE_PRIVATE, null)
-        v3Ddl.forEach(raw::execSQL)
+        SchemaJson.load(3).createStatements().forEach(raw::execSQL)
         raw.execSQL(
             "INSERT INTO videos (localUri, fileName, iwaraId, title, author, authorId, createdAt, " +
                 "viewCount, likeCount, commentCount, rating, thumbnailUrl, localThumbnailPath, relPath, " +
@@ -101,6 +84,9 @@ class FileModifiedMigrationTest {
                 listOf("content://v3/a.mp4" to 1_700_000_000_001L)
             )
             assertEquals(1_700_000_000_001L, dao.byIwaraId("abc")?.fileModifiedAt)
+
+            // ---- 迁移终点形状与导出的 v4 schema 逐表一致（列/类型/NOT NULL/默认值/索引/外键）----
+            SchemaJson.assertMatchesExported(room.openHelper.writableDatabase)
         } finally {
             room.close()
         }

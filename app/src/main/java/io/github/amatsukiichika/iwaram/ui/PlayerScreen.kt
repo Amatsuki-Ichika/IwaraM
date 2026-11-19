@@ -39,6 +39,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -46,17 +49,15 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.HttpDataSource
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
 import io.github.amatsukiichika.iwaram.LocalAppRepository
-import io.github.amatsukiichika.iwaram.data.IwaraClient
+import io.github.amatsukiichika.iwaram.data.playerDataSourceFactory
 import io.github.amatsukiichika.iwaram.data.IwaraRepository
 import io.github.amatsukiichika.iwaram.data.IwaraVideoItem
-import io.github.amatsukiichika.iwaram.data.OkHttpDataSource
 import io.github.amatsukiichika.iwaram.data.friendlyHttpError
 import io.github.amatsukiichika.iwaram.data.VideoEntity
 import io.github.amatsukiichika.iwaram.data.watchHistoryKey
@@ -191,7 +192,6 @@ fun PlayerScreen(
     // isPlaying 恒为 false，用它会把"错误后自动恢复播放"变成静默暂停。
     var playOnNextPrepare by remember { mutableStateOf(true) }
     val player = remember(playerEpoch) {
-        val httpFactory = OkHttpDataSource.Factory(IwaraClient.mediaHttp)
         // 解码器策略：
         // 1) 扩展渲染器优先 —— 音频优先交给 FFmpeg 软件解码（jellyfin 的 media3-ffmpeg-decoder，
         //    见 docs/decisions/0011-codec-support.md）：部分设备的平台解码器对 AAC Main 等
@@ -206,9 +206,8 @@ fun PlayerScreen(
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
         ExoPlayer.Builder(context)
             .setRenderersFactory(renderersFactory)
-            .setMediaSourceFactory(
-                DefaultMediaSourceFactory(DefaultDataSource.Factory(context, httpFactory))
-            )
+            // 数据源工厂由 data 层提供（网络栈细节不进 UI）。
+            .setMediaSourceFactory(DefaultMediaSourceFactory(playerDataSourceFactory(context)))
             .build()
     }
     // 所有**未按 player 作 key** 的手势/回调 lambda（拖动语义、双击、
@@ -229,12 +228,18 @@ fun PlayerScreen(
     var isPlaying by remember { mutableStateOf(true) }
     var positionMs by remember { mutableLongStateOf(0L) }
     var durationMs by remember { mutableLongStateOf(0L) }
+    // 观看历史 key，也是本页「当前这一部片」的稳定身份：
+    //   有 iwaraId 用 iwaraId，本地条目用 "local:<uri>" 兜底
+    //   （无 iwaraId 且无 localUri 的条目 key=null，不记录）。
+    //   组合期推导一次，监听器只在首次组合创建，video 经 rememberUpdatedState 读最新值。
+    val watchKey = remember(video) { playerVideoIdentity(video) }
     // 就地换片（点「相关推荐」）时视频实体会换 —— 清掉上一片的进度/时长，
     //   免得换片瞬间进度条残留旧值（装片后 400ms 轮询会立刻刷回真值）。
-    //   按「视频身份」作 key（iwaraId + localUri，与观看历史同口径）：在线互切时两侧
-    //   localUri 都是 ""，只看 localUri 永远不触发 → 新片会从旧片的进度起播
-    //   （超过新片时长直接 EOS）。同片换清晰度/切模型不触发。
-    LaunchedEffect(video.iwaraId, video.localUri) {
+    //   **按上面的稳定身份作 key，而不是 (iwaraId, localUri) 两个原始字段**：
+    //   同一部片的本地多源（同一 iwaraId、不同 localUri）换源时身份不变 → 不清进度，
+    //   换代重建仍能捕获旧进度续播；换了视频（推荐互切）身份才变 → 必须清零，
+    //   否则新片从旧片进度起播（超过新片时长直接 EOS）。
+    LaunchedEffect(watchKey) {
         positionMs = 0L
         durationMs = 0L
     }
@@ -352,16 +357,14 @@ fun PlayerScreen(
     // 播放源统一入口：本地取 localUri，在线取后台解析出的 mediaUrl；
     // 键变化（含重试时先清空再赋值）即重新装片，本地/在线只有这一条装片路径。
     val mediaUrl = video.localUri.ifBlank { online?.mediaUrl.orEmpty() }
-    // 超分：默认取设置页选择，播放器内可临时切换。
+    // 超分：默认取设置页选择，播放器内可临时切换（页面内只改局部状态，不回写设置）。
+    //   初值读仓库的 StateFlow（内存值，进程启动时已从磁盘加载）——组合期同步读
+    //   SharedPreferences 等于在每次重组的主线程上做磁盘 IO；这里只读一次 .value、
+    //   不 collect，页面里的临时切换才不会被设置项覆盖。
     // （声明在 listener 之前：7001 自动保播放需要在错误回调里读写 SR 开关。）
     val srRepo = LocalAppRepository.current
-    var srEnabled by remember { mutableStateOf(srRepo.getSuperResEnabled()) }
-    var srModel by remember { mutableStateOf(SuperRes.normalize(srRepo.getSuperResModel())) }
-    // 观看历史 key：组合期推导一次（无 iwaraId 且无 localUri 的条目 key=null，不记录）；
-    //   监听器只在首次组合创建，video 经 rememberUpdatedState 读最新值（与 currentOnline 同款）。
-    val watchKey = remember(video.iwaraId, video.localUri) {
-        watchHistoryKey(video.iwaraId, video.localUri)
-    }
+    var srEnabled by remember { mutableStateOf(srRepo.superResEnabled.value) }
+    var srModel by remember { mutableStateOf(SuperRes.normalize(srRepo.superResModel.value)) }
     val currentVideoState by rememberUpdatedState(video)
     // 监听器只在首次组合时创建一次，经 rememberUpdatedState 读取最新的在线播放上下文。
     val currentOnline by rememberUpdatedState(online)
@@ -718,24 +721,37 @@ fun PlayerScreen(
     // 切出页面（ON_PAUSE 早于 ON_STOP，减少退出自动暂停的延迟）时立即暂停，避免后台继续出声。
     // 已抽至 PlayerScreenEffects.kt。
     PlayerPauseOnLeaveEffect(player)
+    // 拔耳机/断开蓝牙（ACTION_AUDIO_BECOMING_NOISY）时暂停：音频焦点只覆盖"别的应用
+    //   抢焦点"，音频路由变化系统只发这条广播。随组合注册/注销，只暂停、不退出页面。
+    PlayerNoisyAudioPauseEffect(player)
 
     // 通知栏背景固定黑色，图标始终用浅色；导航栏仍跟随主题，退出播放页时恢复。
     // 退出恢复按**应用实际主题**（背景亮度）而非系统深浅色 ——
     //   应用内可强制 light/dark（themeMode），与系统不一致时按系统恢复就是"黑底黑字"。
     //   播放页自身的状态栏保持白图标（视频是黑底）；导航栏进入时跟应用主题。
-    //   取色在**组合期**完成（onDispose 不是 Composable 上下文、读不了 MaterialTheme），
-    //   并以它作 key ⇒ 主题在播放期间变化时 effect 重启、恢复值保持新鲜。
+    //   取色在**组合期**完成（onDispose 不是 Composable 上下文、读不了 MaterialTheme）。
     val restoreLightBars = MaterialTheme.colorScheme.background.luminance() > 0.5f
-    DisposableEffect(restoreLightBars) {
-        val controller = activity?.let { WindowCompat.getInsetsController(it.window, it.window.decorView) }
-        controller?.isAppearanceLightStatusBars = false
-        controller?.isAppearanceLightNavigationBars = restoreLightBars
+    // onDispose 里要读**最新**主题算出的值：主题变化不重建本 effect（见下），闭包里的旧值会过期。
+    val currentRestoreLightBars by rememberUpdatedState(restoreLightBars)
+    val windowController = remember(activity) {
+        activity?.let { WindowCompat.getInsetsController(it.window, it.window.decorView) }
+    }
+    // **明暗切换只刷新系统栏图标配色，绝不恢复方向/系统栏**：
+    //   播放期间切主题不是"离开播放页"，原来把它当 DisposableEffect 的 key，主题一变
+    //   就 onDispose → 方向解锁 + 系统栏弹出；而全屏方向 effect 的键不含主题，
+    //   不会重新沉浸 ⇒ 全屏被永久留在未锁定 + 系统栏可见。
+    LaunchedEffect(restoreLightBars) {
+        windowController?.isAppearanceLightStatusBars = false
+        windowController?.isAppearanceLightNavigationBars = restoreLightBars
+    }
+    // 真正离开播放页（组合销毁）才恢复：方向交还系统、系统栏重新显示、图标配色跟随应用主题。
+    DisposableEffect(windowController) {
         onDispose {
             activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
             setSystemBarsHidden(activity, false)
-            controller?.let { c ->
-                c.isAppearanceLightStatusBars = restoreLightBars
-                c.isAppearanceLightNavigationBars = restoreLightBars
+            windowController?.let { c ->
+                c.isAppearanceLightStatusBars = currentRestoreLightBars
+                c.isAppearanceLightNavigationBars = currentRestoreLightBars
             }
         }
     }
@@ -770,9 +786,27 @@ fun PlayerScreen(
         context = context
     )
 
-    // 轮询播放进度与总时长，用于底部进度条（拖动时暂停轮询，避免抖动）。
+    // 轮询播放进度与总时长，用于底部进度条（拖动时暂停进度采样，避免抖动）。
+    // **只在「播放中且页面在前台」时轮询**：暂停/后台时进度本来不变，一直转只会每 400ms
+    //   白碰一次播放器与若干页面状态。暂停/退后台/拖动结束各补一拍（点击暂停到
+    //   listener 回调之间有间隔，补拍保证进度条落在真实位置；退后台前那一拍让
+    //   onDispose 落笔的 positionMs 是最后一次播到的位置），其余时间协程停在这里，
+    //   由 snapshotFlow 在恢复播放/回前台时重新拉起。
+    val pollLifecycleOwner = LocalLifecycleOwner.current
+    var pageStarted by remember(pollLifecycleOwner) {
+        mutableStateOf(pollLifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))
+    }
+    DisposableEffect(pollLifecycleOwner) {
+        val observer = LifecycleEventObserver { _, _ ->
+            pageStarted =
+                pollLifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+        }
+        pollLifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { pollLifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     LaunchedEffect(player) {
-        while (true) {
+        // 单拍采样：进度/时长/画幅/缓冲一起刷，与原 400ms 循环逐拍等价。
+        fun samplePlayback() {
             val d = player.duration
             if (d > 0) durationMs = d
             if (!isSeeking) {
@@ -787,7 +821,16 @@ fun PlayerScreen(
             // 同步"是否在缓冲"（拖动进度后重新定位/取数据时会进入 BUFFERING）。
             val buffering = player.playbackState == androidx.media3.common.Player.STATE_BUFFERING
             if (buffering != isBuffering) isBuffering = buffering
-            delay(400)
+        }
+        snapshotFlow { listOf(isPlaying, pageStarted, isSeeking) }.collectLatest {
+            if (!(isPlaying && pageStarted)) {
+                samplePlayback()
+                return@collectLatest
+            }
+            while (isActive) {
+                samplePlayback()
+                delay(400)
+            }
         }
     }
 
@@ -834,7 +877,8 @@ fun PlayerScreen(
 
     // 全屏时：返回仅退出全屏（不跟手，手势完成才退出）。改走预测返回通道，
     //   与页面级返回共用一套回调，避免淡出全屏那一刻两套返回机制抢同一个手势。
-    PredictiveBackHandler(enabled = isFullscreen) { flow: Flow<BackEventCompat> ->
+    //   被上层页盖住（backEnabled=false）时不抢返回 —— 与下面页面级返回同一条所有权规则。
+    PredictiveBackHandler(enabled = isFullscreen && backEnabled) { flow: Flow<BackEventCompat> ->
         flow.collect { }
         isFullscreen = false
     }
@@ -989,6 +1033,17 @@ fun PlayerScreen(
         }
     )
 }
+
+/**
+ * 播放页「当前这一部片」的稳定身份（纯函数，单测见 PlayerIdentityTest）。
+ *
+ * 与观看历史同 key 口径（[watchHistoryKey]）：有 iwaraId 用 iwaraId，本地条目用
+ * "local:<uri>" 兜底，两者都没有则 null。
+ * 页面里的换片清零、同片换源续播、历史落笔都以它为准 —— **同一部片的本地多源**
+ * （同一 iwaraId、不同 localUri）身份不变，换源不清进度；换了视频身份才变。
+ */
+internal fun playerVideoIdentity(video: VideoEntity): String? =
+    watchHistoryKey(video.iwaraId, video.localUri)
 
 /** 播放页诊断日志 tag（切 SR 黑屏 / 播放报错都靠这条链定位）。 */
 private const val TAG = "PlayerScreen"
