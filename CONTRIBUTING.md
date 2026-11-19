@@ -79,9 +79,8 @@ reason in the pull request. The numbers live only in that file — do not restat
 ## Dependencies
 
 Dependency versions are centralised in `gradle/libs.versions.toml`. Add new entries there
-rather than hard-coding versions in `build.gradle.kts`. Dependabot opens grouped weekly pull
-requests for Gradle dependencies and GitHub Actions; review and merge them like any other change,
-and verify the build rather than trusting the bump.
+rather than hard-coding versions in `build.gradle.kts`. Dependency-update bots are disabled;
+updates are applied manually and verified with a debug build.
 
 ## Signing
 
