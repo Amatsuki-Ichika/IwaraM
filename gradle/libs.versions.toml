@@ -1,7 +1,7 @@
 [versions]
-agp = "9.4.1"
+agp = "9.5.1"
 kotlin = "2.4.21"
-ksp = "2.3.12"
+ksp = "2.3.14"
 composeBom = "2026.09.00"
 materialIconsExtended = "1.7.8"
 coreKtx = "1.19.1"
@@ -15,11 +15,11 @@ backdrop = "2.0.1"
 media3 = "1.5.0"
 # Jellyfin's prebuilt Media3 FFmpeg decoder extension. The version is the upstream media3
 # version plus a build suffix, so it must match the media3 version above (1.5.0 -> 1.5.0+1).
-jellyfinMedia3Ffmpeg = "1.5.0+1"
+jellyfinMedia3Ffmpeg = "1.9.0+"
 coroutines = "1.11.0"
 documentfile = "1.1.0"
 junit = "4.13.2"
-robolectric = "4.17"
+robolectric = "4.18"
 androidxTestCore = "1.6.1"
 
 [libraries]
