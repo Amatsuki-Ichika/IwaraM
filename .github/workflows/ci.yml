@@ -29,7 +29,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
 
       # Fast gate first: docs and repository hygiene fail in seconds, before Gradle warms up.
       - name: Repository gates
