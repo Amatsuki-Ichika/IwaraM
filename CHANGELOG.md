@@ -9,90 +9,91 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Failed or interrupted downloads resume automatically the next time the app opens. Only downloads that were queued or running when the app was closed are resumed, each address is resolved again before it is used, and a download that fails is retried up to three times with a 3 s / 10 s / 30 s backoff before it is marked failed. Settings > Storage > Auto-resume downloads turns this off.
+- Downloads that were queued or running when the app closed resume on the next launch. Settings > Storage > Auto-resume downloads turns this off.
 
-- The app can check for updates in-app and install them without leaving it. Settings > About > Updates shows the current version, a stable/beta update channel, an automatic check switch, a check frequency (every start, daily, weekly, or never — "never" turns the automatic switch off while remembering the last interval), a manual check, and the option to ignore a version; releases are read from GitHub Releases, the APK is verified against the published SHA-256 checksum and then handed to the system installer. Automatic checks stay quiet when the app is up to date, and the ignored version is cleared when the update channel changes.
+- Settings > About > Updates checks GitHub Releases for stable or beta updates, manually or automatically, verifies the APK's SHA-256 and installs it, with a frequency and an ignore-version option.
 
-- An 18+ self-declaration on the final page of the first-run guide: "Get started" stays disabled until "I am 18 or older" is checked, and Skip shows the same content notice before it completes, so no path reaches the main screen without the declaration. The declaration is asked once; installs that finished the guide before this version are not prompted again.
+- An 18+ declaration on the last first-run page keeps "Get started" disabled until "I am 18 or older" is checked; Skip shows the same notice. It is asked once.
 
-- A "Protect screenshots" switch under Settings > General > Privacy (default off). While it is on, screenshots, screen recordings and the recent-apps preview of the app are blank, so downloaded or streamed adult content is not captured by accident.
+- A "Protect screenshots" switch under Settings > General > Privacy (default off) blanks screenshots, recordings and the recent-apps preview.
 
 ### Changed
 
-- Author pages now have a continuous scrollbar with the author's name in the drag bubble, like the other feeds.
+- Author pages now have a continuous scrollbar with the author's name in the drag bubble, like other feeds.
 
-- Every scrollbar now starts below the floating search bar instead of running under it. Dragging the thumb lands the list at the position under the finger instead of applying a pixel delta for every pointer event, so dragging through a large library no longer builds a screen of new cards inside the input callback and stays smooth; a drag still takes over from an in-flight fling or a track-tap jump, and releasing the thumb no longer makes it jump back before the list catches up.
+- Scrollbars start below the search bar, and dragging the thumb lands the list under the finger without jank or a snap-back.
 
-- While a scrollbar thumb is held, library cards draw as plain placeholders with their titles instead of loading covers, badges, authors and tags; releasing the thumb brings the full cards back. The placeholder keeps the exact card height and row alignment, so the grid does not shift, and dragging through a very large library no longer spends every frame composing covers and tag rows.
+- While a scrollbar thumb is held, cards draw as same-height placeholders; releasing restores covers, badges, authors and tags.
 
-- Scroll positions and already loaded pages survive switching between the library, Iwara and Me tabs, and between Iwara segments and searches. Returning to a tab no longer starts at the top or fetches the first page again.
+- Scroll positions and loaded pages survive switching tabs, Iwara segments and searches; returning no longer jumps to top or refetches.
 
-- Predictive back works again on overlay pages, action sheets and the player: the back gesture is claimed by the topmost page and, on Android 14 and later, follows the finger with the page sliding under it. Previously the system found no page claiming the gesture and always showed "back to the home screen", even with pages open.
+- Predictive back works on overlay pages, sheets and the player again, and follows the finger on Android 14+.
 
-- Download cards are more compact: the title shares a line with the status and progress, redundant labels are gone, and the action buttons are smaller, so more downloads fit on screen.
+- Download cards are compact: title, status and progress share a line, redundant labels are gone, and buttons are smaller.
 
-- Library and feed cards keep their tag row to exactly one line: tags are measured to the card width, a tag that does not fit is ellipsized, and a trailing +N chip always reports how many tags are not shown (the ellipsized tag is not counted), so cards no longer differ in height because of their tags.
+- Card tags stay on one line; a trailing +N chip counts hidden tags, so cards keep equal height.
 
-- Scrolling a long list no longer re-records the frosted backdrop on every frame: recording pauses while the finger or fling is moving and resumes when the list stops, which removes a full-screen render pass per frame during the scroll. The library, Iwara and Me pages also report their own scrolling to the window, so the floating bottom bar and the static top bar stop re-recording the whole content area while a page scrolls or its scrollbar is dragged.
+- Scrolling no longer re-records the frosted backdrop every frame; recording pauses while the list moves and resumes when it stops.
 
-- Opening the player still slides the real page in over 320 ms, but the video area now shows the video's cover while the page slides in and until the first video frame is ready; the player is only created after the slide settles and the cover then fades out, so the transition has no placeholder, no black flash and no dropped frames.
+- The player still slides in over 320 ms, but the video area shows the cover until the first frame; the player is created after the slide and the cover fades out.
 
-- Fullscreen player controls inset from the cutout, navigation bar and gesture area with 48 dp touch targets, so buttons are no longer close to the screen corners or covered by system bars.
+- Fullscreen player controls inset from the cutout, navigation bar and gesture area with 48 dp touch targets.
 
-- The R18 badge is more legible: its red is darker and the label is light, raising the pill's text contrast from about 3.3:1 to about 5.3:1 at its current text size.
+- The R18 badge's contrast rises from about 3.3:1 to about 5.3:1.
 
-- Version codes now follow `major * 1,000,000 + minor * 1,000 + patch`, so two versions can no longer share a code (0.2.100 and 0.3.0 both produced 300 under the old scheme) and update checks compare the right release; the in-app updater derives the remote code with the same rule.
+- Version codes are now `major * 1,000,000 + minor * 1,000 + patch`, so 0.2.100 and 0.3.0 no longer collide and updates compare the right release.
 
-- The download list keeps the 20 most recently finished downloads and no longer drops queued tasks from the list; each task is merged by video id instead of being appended as a duplicate.
+- The download list keeps the 20 most recently finished downloads and no longer drops queued tasks; tasks merge by video id instead of duplicating.
 
-- Opening a page from a long-press action sheet now slides the new page in over the sheet instead of replacing the sheet in place, so the transition matches every other overlay push.
+- Opening a page from a long-press sheet now slides it in over the sheet, matching every other overlay push.
 
 ### Fixed
 
-- A download is only recorded as complete when the received byte count matches the server's total size. A truncated transfer now keeps its partial file and is retried instead of being reported as a finished download, and a resumed download is rejected when the server answers with a Content-Range that does not start at the requested offset, so a resumed file can no longer be stitched from mismatched byte ranges.
+- A download counts as complete only when the received bytes match the server's total; truncated transfers keep their partial file and retry.
 
-- Seeking inside a streamed video now checks the range of the server's partial response: a response that does not start at the requested byte offset is rejected instead of being played, so a seek can no longer decode from the wrong position. Download links delivered over plain `http` are upgraded to `https` instead of failing as a cleartext request.
+- Seeking a streamed video rejects a partial response that starts at the wrong offset, and plain `http` download links are upgraded to `https`.
 
-- Opening an author from Following no longer fails intermittently with a network error. Author targets are normalized before any request, so an entry without a username no longer sends a profile request with an empty handle; author requests are also limited, retried once on rate limiting and server errors, and the page shows its own error with a retry action.
+- Opening an author from Following no longer fails intermittently: handles are normalized, requests are limited and retried once, and the page shows a retryable error.
 
-- Downloads no longer fail permanently on a transient network error. A temporary failure is retried inside the same download with a visible countdown instead of stopping the task.
+- A transient network error now retries inside the same download with a visible 3 s / 10 s / 30 s countdown instead of failing the task.
 
-- Settings > About now lists the update settings instead of a duplicate read-only version card; the version is shown by the update card.
+- Settings > About shows the update settings instead of a duplicate version card.
 
-- Local covers no longer disappear after the app cache is cleared. Generated covers moved into private storage, covers left in the old cache are carried over on the next launch, and rescanning a folder now regenerates any cover whose file is missing instead of leaving the card blank.
-- The back-to-top button on author, profile and playlist pages now sits at the same height as the library's bottom bar and uses the same frosted fill as the bar in both themes, instead of a lower position and a darker or plain translucent circle.
+- Local covers no longer disappear after the cache is cleared: generated covers live in private storage, old cache covers carry over, and a rescan regenerates missing files.
 
-- Dragging a scrollbar thumb now counts as scrolling for the frosted backdrop, so a long list no longer re-records the background on every frame while the thumb is held; a fast drag stays smooth instead of stuttering.
+- The back-to-top button on author, profile and playlist pages now matches the library's bottom bar in height and frosted fill in both themes.
 
-- Downloads that were queued or running when the app was closed are now actually resumed on the next start. The resume plan used to be computed after the interrupted tasks had already been restored into the live list, so every task was skipped and the plan was always empty.
+- Dragging a scrollbar thumb now counts as scrolling for the frosted backdrop, so a fast drag no longer stutters.
 
-- A file that the library scanner has already indexed is no longer treated as a finished download just because it is non-empty. When the file is shorter than the recorded total size it is resumed, instead of being marked complete and then playing only up to the point where the interrupted transfer stopped.
+- Downloads interrupted by an app close now actually resume on the next start.
 
-- A library scan no longer deletes entries when the folder provider fails to answer. The old check treated a failed query as "file missing" and removed rows; an undetermined answer now keeps the row and the next scan retries.
+- An indexed file shorter than the recorded total is resumed instead of being treated as a finished download.
 
-- Re-fetching metadata for a video no longer brings back a row that was deleted in the meantime, and it no longer overwrites the file name, cover path or modification time that a download just wrote.
+- A library scan no longer deletes entries when the folder provider fails; an undetermined answer keeps the row and retries next scan.
 
-- Long download file names are shortened to 120 characters and 200 bytes, keeping the video id and the file extension, so a long title no longer produces a name that the file system rejects or a file that opens as the wrong kind.
+- Re-fetching metadata no longer resurrects a deleted video or overwrites the file name, cover path or modification time a download just wrote.
 
-- The download list no longer hides the seventh and later queued tasks: it used to show only six active tasks while every task past the sixth stayed invisible in the queue.
+- Long download names are shortened to 120 characters and 200 bytes, keeping the video id and extension.
 
-- Scanning a library folder stops descending at 12 levels instead of walking arbitrarily deep trees, which keeps a mistake in the folder picker from turning into a scan that never ends.
+- The download list no longer hides the seventh and later queued tasks.
 
-- Session tokens are no longer stored as bare plaintext. When the system keystore cannot encrypt, the app writes an explicitly marked degraded value and Settings > General shows a warning, so a token is never silently written in clear text; restoring the session no longer reads the keystore on the main thread either.
+- Library scans stop at 12 levels deep.
 
-- Switching between light and dark mode while the player is fullscreen no longer leaves the screen unlocked and the system bars visible; the fullscreen lock is re-applied after the theme change.
+- Session tokens are no longer stored as bare plaintext; when the keystore cannot encrypt, the app writes a marked degraded value and Settings > General shows a warning.
 
-- Switching between two local files of the same video (for example a converted copy and the original) no longer resets playback to the start: the watch-history key now follows the video rather than the file path, so progress carries over.
+- Switching light/dark while the player is fullscreen no longer leaves the screen unlocked or the system bars visible.
 
-- Unplugging headphones now pauses playback instead of continuing out of the speaker; the player reacts to the becoming-noisy broadcast like other music and video apps.
+- Switching between two local files of the same video no longer resets playback; the watch-history key follows the video, not the file path.
 
-- The predictive back gesture in the player now checks whether back is enabled for the page, so a page that has back disabled no longer consumes the gesture and appears stuck.
+- Unplugging headphones now pauses playback instead of continuing out of the speaker.
 
-- The notification permission is requested after the first-run guide instead of before it, so the guide is not interrupted by a system prompt the user has no context for; the prompt is also skipped when the permission is already granted or the system will not show it again.
+- The player's predictive back gesture now checks whether back is enabled, so a page with back disabled no longer consumes it.
 
-- Starting the app in dark mode no longer flashes a white window before the first frame: the window background follows the theme color instead of the platform default.
+- The notification permission is requested after the first-run guide, and skipped when already granted or when the system will not show it again.
 
-- The player no longer recreates on a font-size, display-density or screen-size change, so changing the system font scale mid-playback keeps the position instead of restarting the video.
+- Starting in dark mode no longer flashes a white window; the window background follows the theme.
+
+- The player no longer recreates on a font-size, display-density or screen-size change, so playback keeps its position.
 
 ## [0.2.2] - 2026-11-03
 

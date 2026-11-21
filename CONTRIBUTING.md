@@ -51,11 +51,12 @@ attach the log from the file described in `CrashLogger.kt` if you can retrieve i
   comments in Kotlin sources in Simplified Chinese, consistent with the rest of the codebase
   (build scripts keep English comments).
 - Add or update JVM unit tests for any pure logic you change. `./gradlew :app:test` must pass.
-- Update `CHANGELOG.md` under `[Unreleased]` when the change is user-visible.
+- Update `CHANGELOG.md` under `[Unreleased]` when the change is user-visible: one sentence per
+  entry, describing what the user sees rather than how it works.
 - Run the checks locally before requesting review:
   `./gradlew verify && node scripts/check.mjs`.
-- Fill in the pull request template, including the AI usage table when an agent did part of the
-  work. It tells reviewers how much of the diff to verify rather than skim.
+- Fill in the pull request template. When an agent did part of the work, the AI usage line names
+  the level and who made the decisions.
 
 ## Licensing
 
@@ -130,8 +131,9 @@ install link, and the app shows the suffixed version name (`0.2.0-rc.1`) so test
 they run. If the RC has problems, fix them on `main` and tag `v0.2.0-rc.2`; repeat until testing
 passes.
 
-**2. Stable.** Once an RC passes testing, bump `app.versionName` to the final version,
-move the CHANGELOG entries out of `[Unreleased]`, then:
+**2. Stable.** Once an RC passes testing, bump `app.versionName` to the final version, move the
+CHANGELOG entries out of `[Unreleased]` into `## [<version>] - <date>`, and open the section with
+one sentence that says what the release is about, then:
 
 ```bash
 git tag v0.2.0
@@ -148,9 +150,11 @@ same signing key, so the stable APK installs straight over the RC.
 derived from `versionName` automatically (major\*1,000,000 + minor\*1,000 + patch, any
 pre-release suffix ignored). The workflow runs the unit tests, builds the signed APK on the tag, verifies
 the signature with `apksigner` and uploads the APK plus its `.sha256` checksum to a GitHub
-Release. Generated release notes always compare against the previous stable tag, so RC tags
-do not truncate them. It needs these repository secrets: `KEYSTORE_BASE64` (the keystore
-file, base64-encoded), `STORE_PASSWORD`, `KEY_ALIAS` and `KEY_PASSWORD`.
+Release. The release body is the version's CHANGELOG section (the `[Unreleased]` section for an
+RC), followed by the APK name and checksum and a compare link to the previous stable tag; it does
+not list commits, and an RC body carries a one-line pre-release note. It needs these repository
+secrets: `KEYSTORE_BASE64` (the keystore file, base64-encoded), `STORE_PASSWORD`, `KEY_ALIAS` and
+`KEY_PASSWORD`.
 
 **Before tagging a stable release**, check that the repository gates pass on the tagged commit
 (`node scripts/check.mjs`), and that a persisted-data change has both a decision record and a
