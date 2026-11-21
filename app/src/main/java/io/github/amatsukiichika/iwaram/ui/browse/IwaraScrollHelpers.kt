@@ -7,17 +7,34 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.isImeVisible
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.InputChip
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.lerp
+import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.ui.components.SearchPill
 
 /* ---------- 搜索槽 / 网格间距 ---------- */
@@ -42,9 +59,16 @@ private val COLLAPSED_SEARCH_WIDTH = 44.dp
  * 无搜索按钮——在线页用键盘搜索键触发 [onSearch]（本地页实时过滤，可不传）。
  * 清除按钮用于清空并收起。文字 14sp、图标 18dp；展开态把排序/分级 chip 挤走的布局由调用方配合 `if (!open)` 实现。
  *
+ * **焦点是一次性事件，不是展开态的副作用**：只有点了小球才在下一帧 requestFocus + show(IME)；
+ * 展开态本身（切 tab 回来、旋转恢复、状态提升后重建）永远不请求焦点，因此不会自动拉起输入法。
+ * 失焦与用户收键盘（IME 高度下降沿）都通过 [onLostFocus] / [onImeClosed] 交给调用方收敛到
+ * 「展开但无焦点」——框不收、词不清、结果不动。状态机见 ui/components/SearchInteraction.kt。
+ *
  * 胶囊框本体已抽成公用组件 `ui/components/AppSearchField.kt` 的 [SearchPill]（筛选面板共用同一份
  * 样式）。本函数只剩"宽度补间 + 整条槽可点 + 收起态盖点击层"这三件事。
  */
+// isImeVisible 仍是实验 API（WindowInsets 的高度下降沿）；只在这里登记 OptIn。
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun CompactSearchSlot(
     open: Boolean,
@@ -54,11 +78,36 @@ fun CompactSearchSlot(
     onOpen: () -> Unit,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
-    onSearch: (() -> Unit)? = null
+    onSearch: (() -> Unit)? = null,
+    /** 输入框真的拿到焦点（用户在编辑）。 */
+    onFocused: (() -> Unit)? = null,
+    /** 输入框失焦：调用方据此收键盘、保留输入与结果。 */
+    onLostFocus: (() -> Unit)? = null,
+    /** 用户主动收起软键盘（IME 高度下降沿）：与失焦同一个归宿。 */
+    onImeClosed: (() -> Unit)? = null
 ) {
     val focusRequester = remember { FocusRequester() }
-    // 展开后再请求焦点；runCatching 兜住"还没 attach"的情况（本项目 Compose 版本没有 awaitFrame）
-    LaunchedEffect(open) { if (open) runCatching { focusRequester.requestFocus() } }
+    val focusManager = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    // 焦点只由点击驱动：pendingFocus 是一次点击要请求焦点的意图，展开态本身不触发任何 requestFocus。
+    //   （旧实现 LaunchedEffect(open) { requestFocus() } 在每次切 tab 重建顶栏时都会再弹一次输入法。）
+    var pendingFocus by remember { mutableStateOf(false) }
+    LaunchedEffect(pendingFocus) {
+        if (!pendingFocus) return@LaunchedEffect
+        // 等展开那一帧落定再请求焦点：补间首帧的布局还没就位，早请求会让 IME 把展开过程抖一下。
+        withFrameNanos { }
+        runCatching { focusRequester.requestFocus() }
+        keyboard?.show()
+        pendingFocus = false
+    }
+    // 用户收键盘（返回键 / 收起手势）没有焦点事件可听，只能看 IME 高度的下降沿。
+    val imeVisible = WindowInsets.isImeVisible
+    var imeWasVisible by remember { mutableStateOf(imeVisible) }
+    LaunchedEffect(imeVisible) {
+        // 只认"本槽展开时的收键盘"：收起态下别处（筛选面板等）开关键盘不能把这里当成编辑结束。
+        if (open && imeWasVisible && !imeVisible) onImeClosed?.invoke()
+        imeWasVisible = imeVisible
+    }
 
     // 收起态：整条槽可点（无涟漪，展开本身就是反馈）；展开态：交给输入框与 ✕。
     val interaction = remember { MutableInteractionSource() }
@@ -72,7 +121,10 @@ fun CompactSearchSlot(
                 else Modifier.clickable(
                     interactionSource = interaction,
                     indication = null
-                ) { onOpen() }
+                ) {
+                    onOpen()
+                    pendingFocus = true
+                }
             ),
         contentAlignment = Alignment.CenterStart
     ) {
@@ -94,9 +146,16 @@ fun CompactSearchSlot(
             placeholder = placeholder,
             modifier = Modifier.width(pillWidth),
             collapsed = !open,
-            onClear = onClose,
+            // 先收键盘、再收起（收起后失焦回调看到的是已收起，不会把 ✕ 当成一次提交），最后去焦点。
+            onClear = {
+                keyboard?.hide()
+                onClose()
+                focusManager.clearFocus()
+            },
             onSearch = onSearch,
             focusRequester = focusRequester,
+            onFocused = onFocused,
+            onLostFocus = onLostFocus,
             containerAlpha = if (open) 0.10f else 0.06f
         )
 
@@ -111,10 +170,37 @@ fun CompactSearchSlot(
                     .clickable(
                         interactionSource = interaction,
                         indication = null
-                    ) { onOpen() }
+                    ) {
+                        onOpen()
+                        pendingFocus = true
+                    }
             )
         }
     }
+}
+
+/** 「搜索结果：xxx ✕」chip：一眼看出当前在看搜索结果，点 ✕ 清词回信息流（框保持展开）。 */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SearchResultChip(
+    label: String,
+    onClear: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    InputChip(
+        selected = true,
+        onClick = onClear,
+        label = { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        trailingIcon = {
+            Icon(
+                Icons.Filled.Close,
+                contentDescription = tr("清除搜索", "Clear search"),
+                modifier = Modifier.size(16.dp)
+            )
+        },
+        colors = accentInputChipColors(),
+        modifier = modifier
+    )
 }
 
 /**

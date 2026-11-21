@@ -1,5 +1,6 @@
 package io.github.amatsukiichika.iwaram.ui
 
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -56,9 +57,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.ui.browse.CompactSearchSlot
+import io.github.amatsukiichika.iwaram.ui.browse.SearchResultChip
 import io.github.amatsukiichika.iwaram.ui.browse.RATING_OPTIONS
 import io.github.amatsukiichika.iwaram.ui.browse.SEARCH_ROW_HEIGHT
+import io.github.amatsukiichika.iwaram.ui.components.AppDialog
 import io.github.amatsukiichika.iwaram.ui.components.ScrollToTopButton
+import io.github.amatsukiichika.iwaram.ui.components.SearchFocusEvent
+import io.github.amatsukiichika.iwaram.ui.components.SearchPhase
 import io.github.amatsukiichika.iwaram.ui.browse.SelectorChip
 import io.github.amatsukiichika.iwaram.ui.browse.TagFilterRow
 import io.github.amatsukiichika.iwaram.ui.components.TagSuggestionRow
@@ -79,9 +84,14 @@ import io.github.amatsukiichika.iwaram.ui.components.glassScrollBackdropSource
 import io.github.amatsukiichika.iwaram.ui.components.rememberGlassScrollBackdrop
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
@@ -140,6 +150,15 @@ fun LibraryScreen(
      */
     backEnabled: Boolean = true,
     /**
+     * 搜索框的三态。提升到 MainActivity（主 tab 的 AnimatedContent 之外）才跨 tab 存活：
+     * 顶栏子树在切 tab 时会销毁重建，页面级 remember 保不住「展开到哪儿」。
+     */
+    searchPhase: SearchPhase = SearchPhase.COLLAPSED,
+    /** 顶栏搜索框的事件出口（转移规则集中在 SearchInteraction.reduceSearchPhase）。 */
+    onSearchEvent: (SearchFocusEvent) -> Unit = {},
+    /** 「检查文件完整性」；null = 本地长按菜单不显示该行。 */
+    onCheckIntegrity: ((VideoEntity) -> Unit)? = null,
+    /**
      * 悬浮玻璃底栏高度 → 四视图列表底部 contentPadding
      * （底栏后内容要穿过去，尾部空白由 contentPadding 承担，玻璃后面不露白块）。
      */
@@ -156,15 +175,28 @@ fun LibraryScreen(
 ) {
     val state by vm.uiState.collectAsStateWithLifecycle()
     var linkTarget by remember { mutableStateOf<VideoEntity?>(null) }
+    // 长按动作面板与它下面两个二级确认各自持有目标：面板先关，确认框再开，避免两层浮层叠在一起。
+    var actionTarget by remember { mutableStateOf<VideoEntity?>(null) }
+    var pendingRemove by remember { mutableStateOf<VideoEntity?>(null) }
+    var pendingDelete by remember { mutableStateOf<VideoEntity?>(null) }
+    val context = LocalContext.current
+    // 点内容区空白 = 「点输入框外」：交还焦点、收键盘（本地库是实时过滤，搜索词与结果保留）。
+    val focusManager = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
 
-    // 有搜索词 / 筛选条件 / 分级筛选时，返回键逐层清除（先搜索词、再筛选、再分级），清空后返回才退出应用
+    // 搜索框展开/结果态 → 搜索词 → 筛选 → 分级，返回键逐层清除，清空后返回才退出应用。
+    //   搜索框那一层是新增的第一层：它会先收成小球（保留与 Iwara 页一致的心智模型）。
     BackHandler(
         enabled = backEnabled &&
-            (state.query.isNotBlank() ||
+            (searchPhase != SearchPhase.COLLAPSED ||
+                state.query.isNotBlank() ||
                 state.activeFilter != null ||
                 (!state.defaultR18 && state.ratingFilter != "all"))
     ) {
-        if (state.query.isNotBlank()) {
+        if (searchPhase != SearchPhase.COLLAPSED) {
+            vm.setQuery("")
+            onSearchEvent(SearchFocusEvent.Clear)
+        } else if (state.query.isNotBlank()) {
             vm.setQuery("")
         } else if (state.activeFilter != null) {
             vm.clearFilter()
@@ -179,7 +211,20 @@ fun LibraryScreen(
     // 结构约束（见 GlassBackdrop.kt 的注释）：
     // ① 背景源挂在内容那一层上，回顶按钮是它的兄弟节点（消费点不在录制子树内，防自采样 SIGSEGV）；
     // ② 顶栏是覆盖层，其高度必须喂回内容的 contentPadding(top)，否则首行被压在条底下。
-    Box(modifier = Modifier.fillMaxSize()) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            // 点内容区空白（卡片之间的空隙）算「点输入框外」：交还焦点、收键盘，落到「展开无焦点」。
+            //   卡片自身的点击会先消费按下事件，滚动拖动会取消本次 tap，正常交互不受影响。
+            .pointerInput(searchPhase) {
+                detectTapGestures {
+                    if (searchPhase == SearchPhase.EDITING) {
+                        focusManager.clearFocus()
+                        keyboard?.hide()
+                    }
+                }
+            }
+    ) {
         // 滚动期可冻结的内容级背景源：拖动时停录，回顶按钮采样上一帧。
         val topBackdrop = rememberGlassScrollBackdrop()
         // 页面条的实测高度不再由本页测量：悬浮顶栏已移入 MainActivity 那条静态材质条
@@ -241,7 +286,7 @@ fun LibraryScreen(
                                     showR18Tag = state.showR18Tag,
                                     onOpenVideo = onOpenVideo,
                                     onTagClick = vm::selectTag,
-                                    onLongClick = { linkTarget = it },
+                                    onLongClick = { actionTarget = it },
                                     onImport = onImport,
                                     onAuthorClick = { v ->
                                         onOpenAuthor(v.authorId ?: VideoViewModel.UNKNOWN_AUTHOR_KEY, v.author)
@@ -369,6 +414,85 @@ fun LibraryScreen(
             onRemove = { vm.removeFromLibrary(target) }
         )
     }
+
+    // 本地卡片长按：先出动作面板；面板里的删除类动作再各开一个二级确认。
+    // 面板与确认框用不同的目标状态，切换时同一帧只保留一层浮层。
+    actionTarget?.let { target ->
+        LocalVideoActionsSheet(
+            video = target,
+            onManualLink = {
+                actionTarget = null
+                linkTarget = target
+            },
+            onRemoveFromLibrary = {
+                actionTarget = null
+                pendingRemove = target
+            },
+            onPermanentDelete = {
+                actionTarget = null
+                pendingDelete = target
+            },
+            onCheckIntegrity = onCheckIntegrity?.let { check -> { check(target) } },
+            onDismiss = { actionTarget = null }
+        )
+    }
+
+    pendingRemove?.let { target ->
+        AppDialog(
+            visible = true,
+            onDismiss = { pendingRemove = null },
+            title = tr("从库中移除？", "Remove from library?"),
+            text = target.fileName + "\n\n" +
+                tr(
+                    "仅从本地库移除该条目，不删除视频文件；重新扫描可找回。",
+                    "Removes this entry from the local library only; the video file is kept and rescanning restores it."
+                ),
+            confirmText = tr("确认移除", "Remove"),
+            onConfirm = {
+                pendingRemove = null
+                vm.removeFromLibrary(target) { error ->
+                    if (error != null) Toast.makeText(context, error, Toast.LENGTH_LONG).show()
+                }
+            },
+            dismissText = tr("取消", "Cancel"),
+            confirmDestructive = true
+        )
+    }
+
+    pendingDelete?.let { target ->
+        // 只删当前这一版：其它版本属于别的库行，这里明确告诉用户它们不受影响。
+        val otherVersions = vm.localSourcesOf(target).size - 1
+        val otherVersionsNote = if (otherVersions > 0) {
+            "\n\n" + tr(
+                "该视频还有 ${otherVersions} 个其它版本，不会被删除。",
+                "The other ${otherVersions} version(s) of this video will not be deleted."
+            )
+        } else {
+            ""
+        }
+        AppDialog(
+            visible = true,
+            onDismiss = { pendingDelete = null },
+            title = tr("彻底删除？", "Delete permanently?"),
+            text = tr(
+                "将删除《${target.title}》的本地文件与封面。此操作不可撤销，重新扫描也找不回来。",
+                "Deletes the local file and cover of \"${target.title}\". This cannot be undone, and a rescan cannot bring it back."
+            ) + otherVersionsNote + "\n\n" +
+                tr(
+                    "如果该视频正在下载，下载任务会一并取消。",
+                    "If this video is downloading, the download task is cancelled too."
+                ),
+            confirmText = tr("彻底删除", "Delete permanently"),
+            onConfirm = {
+                pendingDelete = null
+                vm.permanentlyDelete(target) { error ->
+                    if (error != null) Toast.makeText(context, error, Toast.LENGTH_LONG).show()
+                }
+            },
+            dismissText = tr("取消", "Cancel"),
+            confirmDestructive = true
+        )
+    }
 }
 
 /**
@@ -381,7 +505,11 @@ fun LibraryScreen(
  * 高度由调用方实测（`onSizeChanged`）并回灌给各视图的 `contentPadding(top)`。
  */
 @Composable
-fun LibraryTopBar(vm: VideoViewModel) {
+fun LibraryTopBar(
+    vm: VideoViewModel,
+    searchPhase: SearchPhase = SearchPhase.COLLAPSED,
+    onSearchEvent: (SearchFocusEvent) -> Unit = {}
+) {
     val state by vm.uiState.collectAsStateWithLifecycle()
     Column(Modifier.fillMaxWidth()) {
         // 进度条自己订阅 scanProgress（进度不进 UiState），进度 tick 只重组这一小块，
@@ -413,8 +541,20 @@ fun LibraryTopBar(vm: VideoViewModel) {
                 vm.selectTag(tag)
                 vm.setQuery("")
             },
+            searchPhase = searchPhase,
+            onSearchEvent = onSearchEvent,
             modifier = Modifier.zIndex(1f)
         )
+
+        // 结果态自解释：键盘收起后仍能看出「现在看的是搜索结果」，点 ✕ 清词回信息流。
+        //   本地页是实时过滤，清了 query 即回到原列表，搜索框保持展开。
+        if (state.query.isNotBlank()) {
+            SearchResultChip(
+                label = tr("搜索结果：", "Results for: ") + state.query,
+                onClear = { vm.setQuery("") },
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp)
+            )
+        }
 
         // 当前过滤条件。
         // TagFilterRow 本身即"空则高度 0"的容器，常驻组合才能在删掉最后一枚时把收起动画播完；
@@ -506,11 +646,16 @@ private fun SearchSortRow(
     allTags: List<String> = emptyList(),
     /** 点候选 tag = 应用为筛选 + 清空输入（由调用方接管两件事）。 */
     onPickSuggestedTag: (String) -> Unit = {},
+    /** 搜索框三态（由 MainActivity 提升：顶栏子树切 tab 时会重建，页面级 remember 保不住）。 */
+    searchPhase: SearchPhase = SearchPhase.COLLAPSED,
+    /** 搜索框事件出口（失焦 / 关 IME 都收敛到"展开无焦点"，本地页无提交动作）。 */
+    onSearchEvent: (SearchFocusEvent) -> Unit = {},
     /** 调用方用 zIndex 把这一整块抬到标签行之上（见调用处注释）。 */
     modifier: Modifier = Modifier
 ) {
     var expanded by remember { mutableStateOf(false) }
-    var searchOpen by remember { mutableStateOf(false) }
+    // 管理器是实时过滤：没有"提交"这一步，失焦只把键盘收掉、框与词都留着。
+    val searchOpen = searchPhase != SearchPhase.COLLAPSED
     // 候选 = 本地 tag 名对输入做不区分大小写 contains（列表在内存里，无需防抖；
     //   在线页打接口才要 350ms 防抖）。已打全的词不再提示。
     val suggestions = remember(query, allTags) {
@@ -540,11 +685,14 @@ private fun SearchSortRow(
                 query = query,
                 onQueryChange = onQueryChange,
                 placeholder = tr("搜索标题 / 作者 / 标签", "Search title / author / tag"),
-                onOpen = { searchOpen = true },
+                onOpen = { onSearchEvent(SearchFocusEvent.TapField) },
                 onClose = {
                     onQueryChange("")
-                    searchOpen = false
+                    onSearchEvent(SearchFocusEvent.Clear)
                 },
+                onFocused = { onSearchEvent(SearchFocusEvent.FieldFocused) },
+                onLostFocus = { onSearchEvent(SearchFocusEvent.FieldLostFocus) },
+                onImeClosed = { onSearchEvent(SearchFocusEvent.ImeHidden) },
                 modifier = Modifier.weight(1f)
             )
             if (!searchOpen) {
@@ -577,7 +725,7 @@ private fun SearchSortRow(
         }
         // 展开搜索且有输入时，下方摆 tag 候选；点候选由 onPickSuggestedTag
         //  （应用为筛选 + 清空输入）。联想行保持静态出现。
-        if (searchOpen && suggestions.isNotEmpty()) {
+        if (searchPhase == SearchPhase.EDITING && suggestions.isNotEmpty()) {
             TagSuggestionRow(
                 suggestions = suggestions,
                 onPick = onPickSuggestedTag,

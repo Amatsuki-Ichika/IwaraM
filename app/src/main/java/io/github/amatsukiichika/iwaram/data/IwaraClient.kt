@@ -150,8 +150,14 @@ object IwaraClient {
      * 全 app 共享的连接池与调度器 —— 各客户端若各自养一套（连接池 / 线程池），
      * 空闲连接与线程会成倍起跳。各客户端的差异只在拦截器与超时。
      */
-    internal val sharedConnectionPool = ConnectionPool(5, 5, TimeUnit.MINUTES)
-    internal val sharedDispatcher = Dispatcher()
+    internal val sharedConnectionPool = ConnectionPool(16, 5, TimeUnit.MINUTES)
+    internal val sharedDispatcher = Dispatcher().apply {
+        // 开播时同一屏会并行发：详情、清晰度、缩略图、播放分片、「下一集」预取（见 SignedUrlCache）。
+        // 默认的 64/5 会让播放分片排在缩略图后面；32/8 给首帧留出并发余量，
+        // 又不至于把站点当成爬虫打（预取本身限 1 个视频、缓存有上限）。
+        maxRequests = 32
+        maxRequestsPerHost = 8
+    }
 
     val http: OkHttpClient by lazy {
         OkHttpClient.Builder()
@@ -202,7 +208,13 @@ object IwaraClient {
                         .header("X-Version", IwaraSign.xVersion(req.url.toString()))
                         .build()
                 } else req
-                chain.proceed(signed)
+                val response = chain.proceed(signed)
+                // 播放地址是短时效签名：CDN 拒绝说明手头这份已过期，就地淘汰缓存，
+                // 播放页现有的 403/404/410 自动重试才会重新解析，而不是在原地重试死地址。
+                if (response.code == 403 || response.code == 404 || response.code == 410) {
+                    playbackSignedUrlCache.invalidateUrl(req.url.toString())
+                }
+                response
             }
             .addInterceptor { chain ->
                 val req = chain.request().newBuilder()

@@ -32,6 +32,9 @@ import io.github.amatsukiichika.iwaram.data.parseIwaraDate
 import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.ui.DiagLog
 import io.github.amatsukiichika.iwaram.ui.QualityOption
+import io.github.amatsukiichika.iwaram.ui.components.SearchFocusEvent
+import io.github.amatsukiichika.iwaram.ui.components.SearchPhase
+import io.github.amatsukiichika.iwaram.ui.components.reduceSearchPhase
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -418,19 +421,26 @@ class IwaraClientViewModel(internal val app: IwaraApp) : ViewModel() {
     val searchTags: StateFlow<List<String>> = _searchTags.asStateFlow()
 
     /**
-     * 搜索框的展开态与输入文字也放在 VM。
+     * 搜索框的三态（收起 / 编辑中 / 展开无焦点）也放在 VM。
      *
-     * 页面级 `remember` 会在切 tab、页面重建、动画期间重进时被重置，
-     * 表现为筛选/搜索状态丢失；与 tag 集合一起放在 VM 里可以保持。
+     * 页面级 `remember` 会在切 tab、页面重建、动画期间重进时被重置，表现为搜索状态丢失；
+     * 放到 VM 里，切 tab 再回来、旋转屏幕都保留「展开到哪儿、搜了什么、结果还在」。
+     * 状态转移只由 SearchInteraction.kt 的 reduceSearchPhase 决定，这里只转发事件。
      */
-    var searchExpanded by mutableStateOf(false)
+    var searchPhase by mutableStateOf(SearchPhase.COLLAPSED)
         private set
+
+    /** 兼容旧读点：展开 = 不是收起态（编辑中与结果态都算展开）。 */
+    val searchExpanded: Boolean
+        get() = searchPhase != SearchPhase.COLLAPSED
 
     var searchInput by mutableStateOf("")
         private set
 
+    /** 点小球展开：只有从收起态展开才回填当前 query；在结果态点输入框不覆盖已输入文字。 */
     fun expandSearch() {
-        searchExpanded = true
+        if (searchPhase == SearchPhase.COLLAPSED) syncSearchInput()
+        searchPhase = reduceSearchPhase(searchPhase, SearchFocusEvent.TapField)
     }
 
     /** 输入框打字（属性名与 setter 会撞 JVM 签名，所以这里用 update 前缀）。 */
@@ -438,16 +448,47 @@ class IwaraClientViewModel(internal val app: IwaraApp) : ViewModel() {
         searchInput = v
     }
 
+    /** 焦点真的落到输入框（包括点已展开的框）。 */
+    fun onSearchFocused() {
+        searchPhase = reduceSearchPhase(searchPhase, SearchFocusEvent.FieldFocused)
+    }
+
+    /** 失焦：只收焦点，保留 query、结果与输入框（→ 展开无焦点）。 */
+    fun defocusSearch() {
+        searchPhase = reduceSearchPhase(searchPhase, SearchFocusEvent.FieldLostFocus)
+    }
+
+    /** 用户主动收起软键盘（IME 高度下降沿）：与失焦同一个归宿。 */
+    fun onSearchImeClosed() {
+        searchPhase = reduceSearchPhase(searchPhase, SearchFocusEvent.ImeHidden)
+    }
+
+    /** 键盘「搜索」键：提交后收起键盘、保留结果态。 */
+    fun submitSearch() {
+        searchPhase = reduceSearchPhase(searchPhase, SearchFocusEvent.Submit)
+    }
+
+    /** 切走主 tab：只去焦点，不收回小球（切回不会自动弹键盘）。 */
+    fun onSearchTabSwitch() {
+        searchPhase = reduceSearchPhase(searchPhase, SearchFocusEvent.TabSwitch)
+    }
+
+    /** 点了 tag 联想：结果已刷新，收起键盘让结果露出来。 */
+    fun onSearchTagPick() {
+        searchPhase = reduceSearchPhase(searchPhase, SearchFocusEvent.TagPick)
+    }
+
+    /** 点 ✕：清词、清结果、收成小球（清筛选本身由调用方 clearSearch 负责）。 */
     fun collapseSearch() {
-        searchExpanded = false
+        searchPhase = reduceSearchPhase(searchPhase, SearchFocusEvent.Clear)
         searchInput = ""
     }
 
     /**
      * 把当前生效的查询词回填到输入框。
-     * 仅在展开搜索框时由 UI 调用一次（此时展示生效中的 `#a #b` 是合理引导）；
-     * 点选联想 tag / 移除 tag 之后不再回填 —— 输入框只反映键盘输入，
-     * 筛选状态由下方 TagFilterRow 表达。
+     * 只由 [expandSearch] 在"从收起态展开"时调用一次（此时展示生效中的 `#a #b` 是合理引导）；
+     * 展开态重建、切 tab 回来都不再回填 —— 那会冲掉用户还没提交的输入。
+     * 点选联想 tag / 移除 tag 之后同样不回填：输入框只反映键盘输入，筛选状态由 TagFilterRow 表达。
      */
     fun syncSearchInput() {
         searchInput = _searchQuery.value

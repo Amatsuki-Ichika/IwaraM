@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.FileInputStream
 
 /** 视频流排序偏好的 prefs 键（文件级，供读取与一次性重置共用）。 */
 private const val KEY_VIDEO_SORT = "iwara_video_sort"
@@ -645,6 +646,74 @@ class IwaraRepository(
      */
     internal val importBatchSize = 20
 
+    /* ---------- 下载文件完整性校验 ---------- */
+
+    /**
+     * 校验某个视频的本地下载文件是否完整（L1 长度 + L2 MP4 顶层 box 结构，见 [walkMp4]）。
+     *
+     * 纯读取：不改动文件、不删记录；是否重下由调用方按 [shouldAutoRedownload] 决定。
+     * 本地文件不存在 → [IntegrityVerdict.Broken] + [BrokenReason.Missing]；
+     * 读不出来（IO / 权限 / 长度不可知）→ [IntegrityVerdict.Unknown] —— 不确定不等于坏，不触发重下。
+     *
+     * 本地路径优先取下载历史（那里有服务端期望长度 totalBytes），历史被裁剪时回退到视频库行。
+     */
+    suspend fun checkDownloadedIntegrity(videoId: String): IntegrityVerdict = withContext(Dispatchers.IO) {
+        val entry = loadDownloadHistory().firstOrNull { it.videoId == videoId && it.success }
+        val uriString = entry?.localUri ?: videoRowByIwaraId(videoId)?.localUri?.toString()
+        if (uriString.isNullOrBlank()) {
+            return@withContext IntegrityVerdict.Broken(BrokenReason.Missing, "没有该视频的本地文件记录")
+        }
+        val uri = runCatching { Uri.parse(uriString) }.getOrNull()
+            ?: return@withContext IntegrityVerdict.Broken(BrokenReason.Missing, "本地文件地址无法解析")
+        val document = runCatching { DocumentFile.fromSingleUri(context, uri) }.getOrNull()
+        if (document == null || !document.exists()) {
+            return@withContext IntegrityVerdict.Broken(BrokenReason.Missing, "本地文件已不存在")
+        }
+        val length = resolveLocalFileLength(uri, document) ?: return@withContext IntegrityVerdict.Unknown
+        walkMp4(length, entry?.totalBytes) { offset, size -> readLocalFileBytes(uri, offset, size) }
+    }
+
+    /** 读本地文件长度；SAF 部分 provider 的 DocumentFile.length() 返回 0/-1，回退到文件描述符长度。 */
+    private fun resolveLocalFileLength(uri: Uri, document: DocumentFile): Long? {
+        val fromDocument = runCatching { document.length() }.getOrNull()
+        if (fromDocument != null && fromDocument > 0L) return fromDocument
+        val fromDescriptor = runCatching {
+            context.contentResolver.openAssetFileDescriptor(uri, "r")?.use { it.length }
+        }.getOrNull()
+        return fromDescriptor?.takeIf { it > 0L }
+    }
+
+    /** 按偏移随机读一小段（只用于 box 头）；返回 null = IO 错误 → [IntegrityVerdict.Unknown]。 */
+    private fun readLocalFileBytes(uri: Uri, offset: Long, size: Int): ByteArray? = runCatching {
+        context.contentResolver.openFileDescriptor(uri, "r")?.use { descriptor ->
+            FileInputStream(descriptor.fileDescriptor).use { stream ->
+                stream.channel.position(offset)
+                val buffer = ByteArray(size)
+                var read = 0
+                while (read < size) {
+                    val n = stream.read(buffer, read, size - read)
+                    if (n < 0) break
+                    read += n
+                }
+                buffer.copyOf(read)
+            }
+        }
+    }.getOrNull()
+
+    /**
+     * 把一次完整性校验的结论回写到下载历史（静默、尽力而为，失败不影响下载流程）。
+     * 复用 [addDownloadHistory] 的读-改-写锁与同 videoId 去重语义，不在第二处手写 prefs JSON。
+     */
+    fun markDownloadVerified(videoId: String, verdict: IntegrityVerdict) {
+        val existing = loadDownloadHistory().firstOrNull { it.videoId == videoId && it.success } ?: return
+        addDownloadHistory(
+            existing.copy(
+                verifiedAt = System.currentTimeMillis(),
+                verifyNote = integrityVerdictNote(verdict)
+            )
+        )
+    }
+
 }
 
 /** 一条下载历史记录（已完成/失败），持久化于 prefs JSON 供「下载列表」展示。 */
@@ -656,7 +725,13 @@ data class DownloadHistoryEntry(
     val success: Boolean,
     val message: String? = null,
     /** 完成后文件的 SAF 地址 —— 「文件丢失检测」与「移除任务和文件」依赖它；旧记录为 null。 */
-    val localUri: String? = null
+    val localUri: String? = null,
+    /** 下载完成时服务端报告的文件长度（Content-Length），供之后的完整性校验比对；旧记录为 null。 */
+    val totalBytes: Long? = null,
+    /** 最近一次完整性校验的时间戳（毫秒）；从未校验过为 null，旧记录天然缺省。 */
+    val verifiedAt: Long? = null,
+    /** 最近一次完整性校验的机器可读结论（见 [integrityVerdictNote]）：ok / unknown / broken:xxx。 */
+    val verifyNote: String? = null
 )
 
 /** 一条未完成下载（排队/暂停/失败），持久化于 prefs JSON，供「继续 / 重新下载」断点续传。 */

@@ -46,6 +46,7 @@ import io.github.amatsukiichika.iwaram.ui.BackVelocityTracker
 import io.github.amatsukiichika.iwaram.ui.VideoViewModel
 import io.github.amatsukiichika.iwaram.ui.exitDurationMs
 import io.github.amatsukiichika.iwaram.ui.rememberAdaptivePageShape
+import io.github.amatsukiichika.iwaram.data.IwaraVideoItem
 import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collectLatest
@@ -104,7 +105,9 @@ fun IwaraOverlayHost(
      */
     coveredByOther: Boolean = false,
     /** 不是最上层时让出系统返回键（PredictiveBackHandler 后注册者优先）。 */
-    backEnabled: Boolean = true
+    backEnabled: Boolean = true,
+    /** 动作面板里的「检查文件完整性」；null = 不显示该行（仅已下载的视频显示）。 */
+    onCheckIntegrity: ((IwaraVideoItem) -> Unit)? = null
 ) {
     val screenWidthPx = with(LocalDensity.current) { LocalConfiguration.current.screenWidthDp.dp.toPx() }
     // 让位量用固定 dp（[COVER_SHIFT_DP]，条目卡首字恰被屏缘盖住的口径）。
@@ -215,7 +218,7 @@ fun IwaraOverlayHost(
     //   接管预测返回跟手；这里只负责把面板挂出来，覆盖层栈照常渲染（面板开关不丢栈的动画状态）。
     when (val sheet = overlays.lastOrNull()?.overlay) {
         is IwaraOverlay.VideoActions ->
-            VideoActionsSheet(sheet.video, cvm, actions, { onPop() }, sheet.pickPlaylistDirectly)
+            VideoActionsSheet(sheet.video, cvm, actions, { onPop() }, sheet.pickPlaylistDirectly, onCheckIntegrity)
         is IwaraOverlay.ImageActions ->
             ImageActionsSheet(sheet.image, cvm, actions) { onPop() }
         else -> Unit

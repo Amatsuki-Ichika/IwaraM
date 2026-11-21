@@ -1,6 +1,5 @@
 package io.github.amatsukiichika.iwaram.ui.components
 
-import android.os.Build
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
@@ -9,34 +8,21 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.grid.LazyGridState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.kyant.backdrop.Backdrop
-import com.kyant.backdrop.drawBackdrop
 import io.github.amatsukiichika.iwaram.i18n.tr
 
 /*
@@ -105,14 +91,13 @@ fun BoxScope.ScrollToTopButton(
 
 /**
  * 一键回到顶部：内容下滚后于右下角以缩放+上浮弹性动画出现。
- *  底色走**半透明材质模块**，与底栏 / 角标胶囊同一份"材质不透明度"，不自己写 surface 底色。
- *  **自绘圆钮**（不用 M3 Card）：M3 Surface 的 shadow / 最小触控机制与"半透明底色"组合时
- *  会出现"八边形边框"。改成与 [GlassPill] 同一套画法（半透明底 + 1dp 内描边、无 M3 机制），
- *  PILL 材质随「材质方案」变化；涟漪关闭（玻璃上就是"扩散噪点"，与底栏同判）。
- *  **磨砂档**：[backdrop] 非 null 且方案选了磨砂时走 AndroidLiquidGlass 的 drawBackdrop
- *  （真背景模糊 + 边缘折射）。调用方必须保证按钮不在 backdrop 的录制子树内（各页把录制层挂在
- *  **滚动内容**上、按钮是它的兄弟节点 —— 防库文档明示的自采样 SIGSEGV）。
- *  null（二级页未接背景层 / 半透明 / 关档）→ 半透明路径。
+ *
+ * 圆钮本身（底色 / 磨砂 / 图标色 / 涟漪关闭）全部交给 [GlassRoundButton] ——
+ * 与播放页的返回 / 更多按钮**共用同一份材质**，材质一改只有一处。
+ * **磨砂档**：[backdrop] 非 null 且方案选了磨砂时走 AndroidLiquidGlass 的 drawBackdrop
+ * （真背景模糊 + 边缘折射）。调用方必须保证按钮不在 backdrop 的录制子树内（各页把录制层挂在
+ * **滚动内容**上、按钮是它的兄弟节点 —— 防库文档明示的自采样 SIGSEGV）。
+ * null（二级页未接背景层 / 半透明 / 关档）→ 半透明路径。
  */
 @Composable
 fun ScrollToTopButton(
@@ -121,23 +106,6 @@ fun ScrollToTopButton(
     modifier: Modifier = Modifier,
     backdrop: Backdrop? = null
 ) {
-    val cs = MaterialTheme.colorScheme
-    val settings = LocalGlassSettings.current
-    val glassActive = backdrop != null &&
-        settings.mode.isLiquid &&
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
-    val isLight = cs.surface.luminance() > 0.5f
-    val material = glassMaterialFor(
-        role = GlassRole.PILL,
-        settings = settings,
-        surface = cs.surface,
-        dark = !isLight,
-        backdropActive = glassActive
-    )
-    // 主题自适应配色 —— 浅色主题（玻璃亮雾面 / 半透明亮雾面 / 关档实心 surface）⇒ 深色图标；
-    //   深色主题（surface 雾面 / 实心 surface）⇒ 白图标。fill 已全档跟随深浅色，图标同轨。
-    val iconTint = if (isLight) cs.onSurface.copy(alpha = 0.9f)
-    else Color.White.copy(alpha = 0.92f)
     AnimatedVisibility(
         visible = visible,
         modifier = modifier,
@@ -147,47 +115,13 @@ fun ScrollToTopButton(
         ),
         exit = fadeOut(tween(150)) + scaleOut(targetScale = 0.6f, animationSpec = tween(150))
     ) {
-        val shape = CircleShape
-        val baseModifier = Modifier
-            .size(44.dp)
-            .then(
-                if (glassActive && backdrop != null) {
-                    // highlight=null（库默认边缘光 = 灰线，同底栏）；
-                    // onDrawSurface 画材质罩（不画罩时玻璃太透、白图标在浅内容上看不清）；
-                    // 效果配方收敛到 `GlassBackdrop` 模块（唯一处）——
-                    //   小半径模糊 + 轻折射（折射带 3dp / 位移 8dp，比底栏小一档）。
-                    Modifier.drawBackdrop(
-                        backdrop = backdrop,
-                        shape = { shape },
-                        highlight = null,
-                        // 库默认注入 `Shadow.Default`（radius 24dp / offset (0, 4dp)，画在形状之外）。
-                        //   这个 44dp 的小圆钮底下挂着 24dp 大投影不是设计要的（自绘圆钮本来就去掉了 M3 shadow）。
-                        shadow = null,
-                        effects = { glassPillEffects() },
-                        onDrawSurface = { drawRect(color = material.fill) }
-                    )
-                } else {
-                    Modifier.clip(shape).background(material.fill)
-                }
-            )
-        Box(
-            modifier = baseModifier
-                // 不描边 —— 半透明表面一概不画外圈线（与底栏同一口径，已按反馈去除）；
-                //   玻璃自带边界感，非玻璃档靠 fill 与图标对比度即可分清轮廓。
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onClickLabel = tr("回到顶部", "Back to top")
-                ) { onClick() },
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                Icons.Filled.KeyboardArrowUp,
-                contentDescription = tr("回到顶部", "Back to top"),
-                tint = iconTint,
-                modifier = Modifier.size(28.dp)
-            )
-        }
+        GlassRoundButton(
+            icon = Icons.Filled.KeyboardArrowUp,
+            contentDescription = tr("回到顶部", "Back to top"),
+            onClick = onClick,
+            backdrop = backdrop,
+            iconSize = 28.dp
+        )
     }
 }
 

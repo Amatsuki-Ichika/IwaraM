@@ -7,6 +7,8 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,6 +32,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
@@ -43,7 +48,9 @@ import io.github.amatsukiichika.iwaram.ui.components.PillSegment
 import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.ui.components.horizontalSlideSpec
 import io.github.amatsukiichika.iwaram.ui.components.PillSelector
+import io.github.amatsukiichika.iwaram.ui.components.SearchPhase
 import io.github.amatsukiichika.iwaram.ui.components.TagSuggestionRow
+import io.github.amatsukiichika.iwaram.ui.components.shouldCommitOnDefocus
 import kotlinx.coroutines.delay
 
 /** 探索页（底栏「视频」tab）：订阅/视频/图片/帖子 四段内容 + 排序/分级/搜索/tag 检索/作者筛选。 */
@@ -62,25 +69,51 @@ fun IwaraExploreScreen(
      * 本页不再自行测量，只把该高度喂给各网格。
      * 值 = 页面条自身高度 + [TOP_BAR_CONTENT_HEIGHT]（App 顶栏那一格）。
      */
-    topPadding: Dp = 0.dp
+    topPadding: Dp = 0.dp,
+    /** 主页面在最上层（没有二级页 / 播放页压着）时，返回键才先收搜索。 */
+    backEnabled: Boolean = true
 ) {
     // 分段提升到 VM：切 tab 不丢、顶栏刷新与播放页作者筛选可感知。
     val segment = cvm.videoSegment
-    // 搜索框的展开态与输入文字由 VM 持有 —— 页面级 remember 会在切 tab / 重进页面时重置。
-    val searchMode = cvm.searchExpanded
-    val searchText = cvm.searchInput
+    // 搜索状态由 VM 持有（SearchPhase + 输入文字 + query/tag）—— 页面级 remember 会在切 tab / 重进页面时重置。
     val searchQuery by cvm.searchQuery.collectAsStateWithLifecycle()
     val tagSuggestions by cvm.tagSuggestions.collectAsStateWithLifecycle()
     // 当前 tag 筛选是一组（多标签，全都含）
     val activeTags by cvm.searchTags.collectAsStateWithLifecycle()
-    // tag 筛选从外部应用时不再自动回填输入框 —— 输入框只承载键盘输入，
-    // 筛选状态由下方 TagFilterRow 表达；仅在展开搜索框时回填一次生效中的 `#a #b` 作引导。
-    LaunchedEffect(searchMode) { if (searchMode) cvm.syncSearchInput() }
+    // 回填只在 VM.expandSearch() 里做（从收起态展开时一次）；这里不再监听展开态 ——
+    //   监听会在旋转/切 tab 重建时冲掉用户还没提交的输入。
+    val focusManager = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    // 返回键：搜索展开 / 结果在屏时先收搜索，收回小球并清结果，再让下一次返回走主界面层级返回。
+    //   键盘在屏时系统先吃掉第一次返回（只收键盘）→ IME 下降沿落到「展开无焦点」，再按一次才走到这里。
+    BackHandler(
+        enabled = backEnabled &&
+            (cvm.searchExpanded || searchQuery.isNotBlank() || activeTags.isNotEmpty())
+    ) {
+        focusManager.clearFocus()
+        keyboard?.hide()
+        cvm.clearSearch("返回键")
+        cvm.collapseSearch()
+    }
 
     // 顶栏已提升到 MainActivity 的主 Scaffold（固定不随页面滑动），这里只负责内容。
     // 内容区铺满整页，网格顶部 contentPadding 预留顶栏高度，卡片因此从顶栏底下穿过。
     // 见 GlassBackdrop.kt 里 GlassTopBar 的结构约束。
-    Box(Modifier.fillMaxSize()) {
+    Box(
+        Modifier
+            .fillMaxSize()
+            // 点内容区空白（卡片之间的空隙）算「点输入框外」：交还焦点、收键盘，落到「展开无焦点」。
+            //   卡片自己的点击会先消费按下事件（Compose 主遍历子节点优先），所以点卡片照常打开，
+            //   滚动拖动也会因手势被消费而取消本次 tap，不会误触。
+            .pointerInput(Unit) {
+                detectTapGestures {
+                    if (cvm.searchPhase == SearchPhase.EDITING) {
+                        focusManager.clearFocus()
+                        keyboard?.hide()
+                    }
+                }
+            }
+    ) {
         // 页面条的实测高度不再由本页测量：悬浮顶栏已移入 MainActivity 那条静态材质条
         //   （见 [IwaraExploreScreen] 的 topPadding 参数说明），高度由它实测后下发。
 
@@ -90,8 +123,8 @@ fun IwaraExploreScreen(
         // 内容区：按方向左右滑动切换（与本地页 modeContent 同规格：300ms 滑动 + 220ms 淡入淡出）。
         // 搜索/筛选结果视为最左的独立一档（index = -1），方向按内容序判定；query 一并进 key，
         // 让"再搜一次"也能带走方向动画，而不是硬切。
-        val showSearchResults = activeTags.isNotEmpty() ||
-            (searchMode && searchQuery.isNotBlank())
+        // 结果态由 query/tag 决定，与"搜索框是否持有焦点"无关：收键盘、切 tab 回来结果都还在。
+        val showSearchResults = activeTags.isNotEmpty() || searchQuery.isNotBlank()
         val tab = if (showSearchResults) ExploreTab(-1, searchQuery) else ExploreTab(segment.ordinal, null)
         // 内层分段（关注/视频/图片/帖子/搜索）各自保存状态：切走再切回时恢复滚动位置，
         //   而不是回到顶部重来。key 取分段身份；搜索档额外带上 query（换词转场时新旧两档会
@@ -141,8 +174,21 @@ fun IwaraTopBar(cvm: IwaraClientViewModel) {
     val segment = cvm.videoSegment
     val searchMode = cvm.searchExpanded
     val searchText = cvm.searchInput
+    val searchPhase = cvm.searchPhase
+    val searchQuery by cvm.searchQuery.collectAsStateWithLifecycle()
     val tagSuggestions by cvm.tagSuggestions.collectAsStateWithLifecycle()
     val activeTags by cvm.searchTags.collectAsStateWithLifecycle()
+    val focusManager = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    // 失焦 / 关键盘时把"没提交过的输入"提交掉再收敛：空输入不提交（不闪空态），
+    //   已提交过的 query（如键盘搜索键刚提交）也不重复请求。
+    //   判断读 VM 的实时值而不是组合期捕获的 searchPhase/searchQuery：去焦点可能发生在
+    //   "提交 + 状态写入"之间的同一事件里，捕获值会晚一帧，导致同一 query 被提交两次。
+    fun commitIfEditing() {
+        if (shouldCommitOnDefocus(cvm.searchPhase, cvm.searchInput, cvm.searchQuery.value)) {
+            cvm.search(cvm.searchInput)
+        }
+    }
 
     Column(Modifier.fillMaxWidth()) {
         // 内容分段：管理器 ModeSelector 同款滑块，四段（订阅最左）均分撑满宽度
@@ -189,7 +235,24 @@ fun IwaraTopBar(cvm: IwaraClientViewModel) {
                             cvm.collapseSearch()
                             cvm.clearSearch("搜索框✕")
                         },
-                        onSearch = { cvm.search(searchText) },
+                        onSearch = {
+                            // 提交是显式动作：先提交（决定结果），再收键盘、去焦点。
+                            //   失焦回调此时看到的 query 已相等，不会重复请求。
+                            if (searchText.isNotBlank()) cvm.search(searchText)
+                            focusManager.clearFocus()
+                            keyboard?.hide()
+                            cvm.submitSearch()
+                        },
+                        onFocused = { cvm.onSearchFocused() },
+                        onLostFocus = {
+                            commitIfEditing()
+                            cvm.defocusSearch()
+                        },
+                        onImeClosed = {
+                            commitIfEditing()
+                            focusManager.clearFocus()
+                            cvm.defocusSearch()
+                        },
                         modifier = Modifier.weight(1f)
                     )
                     if (!searchMode) {
@@ -200,9 +263,22 @@ fun IwaraTopBar(cvm: IwaraClientViewModel) {
                     }
                 }
 
+                // 结果态自解释：键盘收起后仍能看出「现在看的是搜索结果」，点 ✕ 清词回信息流。
+                //   只清搜索、保持展开（ExpandedIdle），不收回小球。
+                if (searchQuery.isNotBlank() && activeTags.isEmpty()) {
+                    SearchResultChip(
+                        label = tr("搜索结果：", "Results for: ") + searchQuery,
+                        onClear = {
+                            cvm.clearSearch("结果chip")
+                            cvm.updateSearchInput("")
+                        },
+                        modifier = Modifier.padding(horizontal = 12.dp).zIndex(1f)
+                    )
+                }
+
                 // tag 联想（网页版同款）：展开输入时防抖拉取，点选即按 tag 过滤（`/videos?tags=`，全都含）。
                 // 出现/收起带本地同款过渡，不再让下方内容跳动。
-                val suggestable = searchMode && searchText.isNotBlank() &&
+                val suggestable = searchPhase == SearchPhase.EDITING && searchText.isNotBlank() &&
                     !searchText.startsWith("#") && !searchText.startsWith("@")
                 // 防抖 effect 常驻组合位（不放进 if(suggestable) 条件块）：条件块写法会在条件翻转时
                 // 销毁重建 effect，350ms 内的联想请求被中断而丢失；
@@ -222,6 +298,10 @@ fun IwaraTopBar(cvm: IwaraClientViewModel) {
                     onPick = { id ->
                         cvm.searchByTag(id)
                         cvm.updateSearchInput("")
+                        // 结果已按 tag 刷新：收键盘让结果露出来（仍保持展开）。
+                        focusManager.clearFocus()
+                        keyboard?.hide()
+                        cvm.onSearchTagPick()
                     },
                     // 联想行同样压在 tag 行之上（同上）。
                     modifier = Modifier.padding(horizontal = 12.dp).zIndex(1f)

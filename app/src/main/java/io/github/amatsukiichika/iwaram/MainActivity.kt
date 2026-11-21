@@ -67,6 +67,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
@@ -82,6 +83,8 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
@@ -116,6 +119,8 @@ import io.github.amatsukiichika.iwaram.ui.COVER_SHIFT_DP
 import io.github.amatsukiichika.iwaram.ui.BackMomentum
 import io.github.amatsukiichika.iwaram.ui.LibraryScreen
 import io.github.amatsukiichika.iwaram.ui.LibraryTopBar
+import io.github.amatsukiichika.iwaram.ui.IntegrityCheckController
+import io.github.amatsukiichika.iwaram.ui.IntegrityCheckTarget
 import io.github.amatsukiichika.iwaram.ui.OnlineNetState
 import io.github.amatsukiichika.iwaram.ui.OnlineVideoExtras
 import io.github.amatsukiichika.iwaram.ui.OnboardingScreen
@@ -147,6 +152,7 @@ import io.github.amatsukiichika.iwaram.ui.browse.LocalShowR18Tag
 import io.github.amatsukiichika.iwaram.data.friendlyIwaraError
 import io.github.amatsukiichika.iwaram.data.importFolder
 import io.github.amatsukiichika.iwaram.ui.components.AppTopBar
+import io.github.amatsukiichika.iwaram.ui.components.IntegrityCheckDialog
 import io.github.amatsukiichika.iwaram.ui.components.GlassMode
 import io.github.amatsukiichika.iwaram.ui.components.GlassSettings
 import io.github.amatsukiichika.iwaram.ui.components.GlassTopBar
@@ -158,11 +164,16 @@ import io.github.amatsukiichika.iwaram.ui.components.rememberGlassContentBackdro
 import io.github.amatsukiichika.iwaram.ui.components.LocalDebugDetails
 import io.github.amatsukiichika.iwaram.ui.components.horizontalSlideSpec
 import io.github.amatsukiichika.iwaram.ui.components.SheetScrimState
+import io.github.amatsukiichika.iwaram.ui.components.SearchFocusEvent
+import io.github.amatsukiichika.iwaram.ui.components.SearchPhase
 import io.github.amatsukiichika.iwaram.ui.components.TOP_BAR_CONTENT_HEIGHT
+import io.github.amatsukiichika.iwaram.ui.components.reduceSearchPhase
 import io.github.amatsukiichika.iwaram.ui.browse.isActionSheet
 import io.github.amatsukiichika.iwaram.ui.browse.resetEntrancePlayed
 import io.github.amatsukiichika.iwaram.ui.browse.IwaraMeScreen
 import io.github.amatsukiichika.iwaram.ui.browse.profileRevertIndex
+import io.github.amatsukiichika.iwaram.ui.browse.authorNavPlan
+import io.github.amatsukiichika.iwaram.ui.browse.AuthorNavPlan
 import io.github.amatsukiichika.iwaram.ui.browse.Segment
 import io.github.amatsukiichika.iwaram.ui.browse.IwaraNavActions
 import io.github.amatsukiichika.iwaram.ui.browse.IwaraOverlay
@@ -581,6 +592,16 @@ class MainActivity : ComponentActivity() {
         // 注意：这里提前 return，主界面那批 remember 在引导完成后才首次创建（Compose 按分支处理，安全）。
         val repository = LocalAppRepository.current
         val onboardingDone by repository.onboardingDone.collectAsStateWithLifecycle()
+        // 完整性检查弹窗：播放页长按「已下载」/ 主页卡片动作面板 / 本地库长按菜单共用同一状态，
+        // 挂在主界面根部；弹窗自带独立窗口，与覆盖层栈和播放页层级无关。
+        val integrityScope = rememberCoroutineScope()
+        val integrityController = remember {
+            IntegrityCheckController(
+                scope = integrityScope,
+                check = { videoId -> repository.checkDownloadedIntegrity(videoId) },
+                requestRedownload = { videoId -> DownloadService.requestRedownload(context, videoId) }
+            )
+        }
         // 界面语言：引导页与设置页共用；切换时先让 AppLanguage 生效（驱动重组）再落盘。
         val languagePref by repository.language.collectAsStateWithLifecycle()
         if (!onboardingDone) {
@@ -669,6 +690,20 @@ class MainActivity : ComponentActivity() {
 
         // 底栏当前 tab；默认管理器（保持既有主界面）。
         var currentTab by remember { mutableStateOf(HomeTab.MANAGER) }
+        // 本地页搜索框的三态提升到这里（MainContent 切 tab 不重建）：顶栏子树在切 tab 时会被
+        //   AnimatedContent 销毁重建，页面级 remember 保不住「展开到哪儿」。rememberSaveable 让
+        //   旋转屏幕后恢复成「展开无焦点」，不会一回来就弹键盘。
+        var librarySearchPhase by rememberSaveable { mutableStateOf(SearchPhase.COLLAPSED) }
+        val searchFocusManager = LocalFocusManager.current
+        val searchKeyboard = LocalSoftwareKeyboardController.current
+        // 切 tab 一律去焦点 + 收键盘（不收回搜索框、不清词、不清结果）：
+        //   Iwara 页搜一半切到「我的」再切回来，不会再自动拉起输入法。
+        LaunchedEffect(currentTab) {
+            cvm.onSearchTabSwitch()
+            librarySearchPhase = reduceSearchPhase(librarySearchPhase, SearchFocusEvent.TabSwitch)
+            searchFocusManager.clearFocus()
+            searchKeyboard?.hide()
+        }
         // 顶栏「共 N 个视频」由 TopAppBar 里的 VideoCountText 自己订阅（见该函数注释）；
         // 若在这里收集整个 vm.uiState，每次 DB 变化 / 筛选 / 搜索都要重跑整棵树。
         // 会话状态：播放页在线互动的「关注」门控（登录态变化极少，整流收集无碍）。
@@ -1032,6 +1067,18 @@ class MainActivity : ComponentActivity() {
             playerOnScreen = playerOnScreen
         )
 
+        // 主页面被二级页盖住（作者页 / 播放页 / 设置页 / 面板）时交还搜索焦点并收键盘：
+        //   从二级页返回主页面后不会再自动弹输入法（与切 tab 同一条收敛路径）。
+        // 只读 backTarget 做触发，不参与层级判定；回到 ROOT 时不做任何"重新聚焦"。
+        val mainCovered = backTarget != BackOwner.ROOT
+        LaunchedEffect(mainCovered) {
+            if (!mainCovered) return@LaunchedEffect
+            cvm.defocusSearch()
+            librarySearchPhase = reduceSearchPhase(librarySearchPhase, SearchFocusEvent.TabSwitch)
+            searchFocusManager.clearFocus()
+            searchKeyboard?.hide()
+        }
+
         /** 被更新的一层盖住 → 与栈内被盖页一样让位（左移 15% + 压暗 + 收圆角）。
          *  让位进度由**各页自己**用 animateFloatAsState 补间（声明式：目标值唯一决定终态，
          *  不可能停在半路）—— 语义与覆盖层栈内被盖页完全一致，时长同 COVER_MOTION_MS。 */
@@ -1049,6 +1096,26 @@ class MainActivity : ComponentActivity() {
             prs.clearPlayback()
         }
 
+        /**
+         * 打开作者页的**唯一入口**（主页卡片 / 播放页作者名 / 评论作者 / 关系列表 / 本地库作者）。
+         *
+         * 与 [pushOverlay] 的差别只有一条：播放页不在覆盖层栈 [overlays] 里，回退到栈内作者页时
+         * 若播放页正盖着它（播放页序号更大 = 画在上面），必须先关播放页 —— 否则"点作者"看起来
+         * 毫无反应。规则抽在纯函数 [authorNavPlan]（单测 AuthorPageStackTest）。
+         *
+         * 栈里没有该作者页时**不关播放页**：作者页压在播放页之上，返回后还能接着看（被盖住时已暂停）。
+         */
+        fun openAuthorProfile(incoming: IwaraOverlay.Profile) {
+            when (val plan = authorNavPlan(overlays, playerSeq, showingPlayer, incoming)) {
+                is AuthorNavPlan.PopTo -> {
+                    // 回退到栈内那一层：不改写已有作者页（复用原条目），也不重复压同一作者页。
+                    while (overlays.size > plan.targetIndex + 1) overlays.removeAt(overlays.lastIndex)
+                    if (plan.closesPlayer) closePlayer()
+                }
+                AuthorNavPlan.PushOnTop -> pushOverlay(incoming)
+            }
+        }
+
         val navActions = IwaraNavActions(
             playVideo = { item ->
                 val top = overlays.lastOrNull()?.overlay
@@ -1061,7 +1128,7 @@ class MainActivity : ComponentActivity() {
                 // 账号对象偶尔 username 为空（关注边/缓存账号）：归一成「只有 UUID」，
                 // 作者页因此不做无效的 /profile/ 请求，也不会把空 handle 拼进地址。
                 val target = iwaraProfileTargetOf(account.username, account.id)
-                pushOverlay(
+                openAuthorProfile(
                     IwaraOverlay.Profile(
                         username = target.handle.orEmpty(),
                         userId = target.uid,
@@ -1237,6 +1304,11 @@ class MainActivity : ComponentActivity() {
                             //   上层压着二级页/播放页/设置页/抽屉时，返回属于那一层
                             //   （否则从作者页返回的那一按会把本地页的筛选药丸顺手清掉）。
                             backEnabled = backTarget == BackOwner.ROOT,
+                            // 搜索框三态与事件出口：转移规则集中在 SearchInteraction，本处只存跨 tab 的一份。
+                            searchPhase = librarySearchPhase,
+                            onSearchEvent = { event ->
+                                librarySearchPhase = reduceSearchPhase(librarySearchPhase, event)
+                            },
                             onOpenVideo = { video ->
                                 prs.currentVideo = video
                                 prs.currentOnline = null
@@ -1253,7 +1325,7 @@ class MainActivity : ComponentActivity() {
                                 // 解析出 UUID 再拉内容；本地栏仍靠 localAuthorKey（handle）照常渲染。
                                 val unknown = authorKey == VideoViewModel.UNKNOWN_AUTHOR_KEY
                                 val target = iwaraProfileTargetOf(authorKey.takeIf { !unknown }, null)
-                                pushOverlay(
+                                openAuthorProfile(
                                     IwaraOverlay.Profile(
                                         username = target.handle.orEmpty(),
                                         userId = target.uid,
@@ -1262,12 +1334,20 @@ class MainActivity : ComponentActivity() {
                                         localAuthorName = authorName
                                     )
                                 )
+                            },
+                            // 本地库长按菜单的「检查文件完整性」（未匹配 iwaraId 的本地视频不启用）。
+                            onCheckIntegrity = { entity ->
+                                entity.iwaraId?.takeIf { it.isNotBlank() }?.let { id ->
+                                    integrityController.open(IntegrityCheckTarget(id, entity.title))
+                                }
                             }
                         )
                         HomeTab.VIDEO -> IwaraExploreScreen(
                             cvm, navActions,
                             bottomPadding = bottomBarHeight,
-                            topPadding = topBarPadDp
+                            topPadding = topBarPadDp,
+                            // 主页面在最上层时返回键先收搜索；压着二级页时返回属于那一层。
+                            backEnabled = backTarget == BackOwner.ROOT
                         )
                         HomeTab.ME -> IwaraMeScreen(cvm, navActions, bottomPadding = bottomBarHeight)
                     }
@@ -1312,7 +1392,13 @@ class MainActivity : ComponentActivity() {
                             label = "topBarContent"
                         ) { tab ->
                             when (tab) {
-                                HomeTab.MANAGER -> LibraryTopBar(vm)
+                                HomeTab.MANAGER -> LibraryTopBar(
+                                    vm,
+                                    searchPhase = librarySearchPhase,
+                                    onSearchEvent = { event ->
+                                        librarySearchPhase = reduceSearchPhase(librarySearchPhase, event)
+                                    }
+                                )
                                 HomeTab.VIDEO -> IwaraTopBar(cvm)
                                 HomeTab.ME -> Unit
                             }
@@ -1408,7 +1494,13 @@ class MainActivity : ComponentActivity() {
             onBackProgress = { overlayGesture = it },
             modifier = Modifier.zIndex(layerZ(overlayTopSeq)),
             coveredByOther = overlayCovered,
-            backEnabled = backTarget == BackOwner.OVERLAY
+            backEnabled = backTarget == BackOwner.OVERLAY,
+            // 在线卡片长按面板里的「检查文件完整性」（只有已下载的视频才显示该行）。
+            onCheckIntegrity = { item ->
+                item.id?.let { id ->
+                    integrityController.open(IntegrityCheckTarget(id, item.title ?: tr("视频", "Video")))
+                }
+            }
         )
 
         // ---- 设置覆盖层：与播放页同层级（全屏盖住顶栏与底栏），自带「设置」顶栏 ----
@@ -1707,6 +1799,11 @@ class MainActivity : ComponentActivity() {
                 // 评论 tab 目标 id：在线 = 视频 id；本地 = 匹配到的 iwaraId；
                 // 都没有（纯本地未匹配）= null → tab 内占位提示，不发请求。
                 val commentTargetId = curOnline?.id ?: localIwaraId
+                // 顶部「更多」的目标：在线用现成 DTO；本地构造最小载荷（动作面板只用 id/title）。
+                // 纯本地且没有 iwaraId → null，不显示这枚圆钮（面板里的操作大半无处落地）。
+                val moreItem = curOnline
+                    ?: localIwaraId?.takeIf { it.isNotBlank() }
+                        ?.let { IwaraVideoItem(id = it, title = video.title) }
                 PlayerScreen(
                     video = video,
                     localSources = localSourceList,
@@ -1743,8 +1840,10 @@ class MainActivity : ComponentActivity() {
                             u?.username ?: id.takeIf { !uuid },
                             u?.id ?: id.takeIf { uuid }
                         )
-                        closePlayer()
-                        pushOverlay(
+                        // **不在这里关播放页**：作者页要压在播放页之上，返回后还能接着看。
+                        // 只有"栈内已有该作者页、且播放页正盖着它"（作者页 → 进视频 → 再点作者）
+                        // 才会由 openAuthorProfile 关掉播放页 —— 规则见 authorNavPlan。
+                        openAuthorProfile(
                             IwaraOverlay.Profile(
                                 username = target.handle.orEmpty(),
                                 userId = target.uid,
@@ -1795,6 +1894,14 @@ class MainActivity : ComponentActivity() {
                         val item = curOnline ?: IwaraVideoItem(id = localIwaraId, title = video.title)
                         pushOverlay(IwaraOverlay.VideoActions(item, pickPlaylistDirectly = true))
                     },
+                    // 顶部「更多」= 视频动作面板（收藏 / 加入播放列表 / 下载 / 评论 / 作者主页）。
+                    onOpenMore = moreItem?.let { item ->
+                        { pushOverlay(IwaraOverlay.VideoActions(item)) }
+                    },
+                    // 长按「已下载」= 检查本地文件完整性（只有本地匹配到 iwaraId 时启用）。
+                    onCheckIntegrity = localIwaraId?.let { id ->
+                        { integrityController.open(IntegrityCheckTarget(id, video.title)) }
+                    },
                     // 评论收进详情区药丸条 tab（在线 = 视频 id；本地 = 匹配到的 iwaraId；
                     // 本地未匹配 → null = tab 内占位提示）。面板与独立评论页共用同一实现。
                     commentsTargetId = commentTargetId,
@@ -1810,6 +1917,14 @@ class MainActivity : ComponentActivity() {
         // 应用内更新弹窗：挂在主界面根部（弹窗自带独立 Dialog 窗口，与层序无关）；
         // 显示与否完全由 UpdateViewModel.state 驱动，手动/自动检查共用同一状态机。
         UpdateDialogs(updateVm = updateVm, onDismiss = {})
+
+        // 完整性检查弹窗（确认 → 不确定进度 → 结果）：Broken 时控制器已自动请求重新下载。
+        IntegrityCheckDialog(
+            state = integrityController.state,
+            onConfirm = { integrityController.confirm() },
+            onCancel = { integrityController.cancel() },
+            onDismissResult = { integrityController.dismissResult() }
+        )
 
         // 抽屉背景遮罩：全 app 唯一一层，Activity 全屏单层黑。抽屉浮窗全透明、只托面板；
         // alpha 由 SheetScrimState 逐帧镜像（AppBottomSheet 的 scrim Animatable 驱动）。

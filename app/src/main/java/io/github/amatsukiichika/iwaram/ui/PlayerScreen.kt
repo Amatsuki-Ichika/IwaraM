@@ -50,6 +50,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.HttpDataSource
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -87,6 +88,20 @@ private val AUTO_RETRY_HTTP_CODES = setOf(403, 404, 410)
  * 太小会把解码器压垮（画面反而跟不上手指），太大则画面切换不够连续；45ms 约 22 次/秒。
  */
 private const val SCRUB_SEEK_INTERVAL_MS = 45L
+
+/**
+ * 播放缓冲水位（毫秒）。media3 默认是 50s 最小 / 50s 最大 / 起播 2.5s / 卡顿恢复 5s：
+ * 健康网络上也要"等够 2.5s 才出画"，卡顿后要等 5s 才恢复。改成 15s/60s/1s/2s 后，
+ * 起播等待减半、恢复更快；代价是多缓存约 10s 的数据与更高的移动数据流量。
+ * 理由与权衡见 docs/decisions/0038-online-playback-latency.md。
+ */
+private const val PLAYBACK_MIN_BUFFER_MS = 15_000
+private const val PLAYBACK_MAX_BUFFER_MS = 60_000
+private const val PLAYBACK_BUFFER_FOR_PLAYBACK_MS = 1_000
+private const val PLAYBACK_BUFFER_FOR_REBUFFER_MS = 2_000
+
+/** 回看缓冲：后退/重看刚播过的片段不重新拉流，只保留最近 15s。 */
+private const val PLAYBACK_BACK_BUFFER_MS = 15_000
 
 /**
  * 在线视频（Iwara 客户端）播放时的附加入口与播放地址；本地视频播放传 null。
@@ -176,7 +191,14 @@ fun PlayerScreen(
      * 「收藏」按钮（网站"添加到"）→ 打开加入播放列表面板；
      * null = 不显示按钮（本地视频未匹配 iwaraId）。
      */
-    onAddToPlaylist: (() -> Unit)? = null
+    onAddToPlaylist: (() -> Unit)? = null,
+    /**
+     * 顶部「更多」：打开视频动作面板（收藏 / 加入播放列表 / 下载 / 评论 / 作者主页）。
+     * null = 不显示这枚圆钮（本地视频没有 iwara id，面板里大半操作无处落地）。
+     */
+    onOpenMore: (() -> Unit)? = null,
+    /** 长按「已下载」检查本地文件完整性；null = 不启用该手势。 */
+    onCheckIntegrity: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val activity = remember { context.findActivity() }
@@ -204,8 +226,21 @@ fun PlayerScreen(
         val renderersFactory = DefaultRenderersFactory(context)
             .setEnableDecoderFallback(true)
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
+        // 缓冲水位显式化：默认按"弱网优先"调得很保守（起播等 2.5s、卡顿恢复 5s），
+        // 这里按首帧优先（1s / 2s），仍保留 15~60s 的播放器内缓冲给弱网兜底。
+        // 只改变取数与缓冲策略，解码器 / SR 通路不变（见 docs/decisions/0038-online-playback-latency.md）。
+        val loadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(
+                PLAYBACK_MIN_BUFFER_MS,
+                PLAYBACK_MAX_BUFFER_MS,
+                PLAYBACK_BUFFER_FOR_PLAYBACK_MS,
+                PLAYBACK_BUFFER_FOR_REBUFFER_MS
+            )
+            .setBackBuffer(PLAYBACK_BACK_BUFFER_MS, false)
+            .build()
         ExoPlayer.Builder(context)
             .setRenderersFactory(renderersFactory)
+            .setLoadControl(loadControl)
             // 数据源工厂由 data 层提供（网络栈细节不进 UI）。
             .setMediaSourceFactory(DefaultMediaSourceFactory(playerDataSourceFactory(context)))
             .build()
@@ -214,6 +249,11 @@ fun PlayerScreen(
     //   拖动起点、错误重试、返回暂停、播放暂停切换）一律经它读最新实例——切模型换代重建后，
     //   旧实例已释放，直接捕获 `player` 会读到冻结位置/静默失效（seek 起点回跳的根因）。
     val currentPlayer by rememberUpdatedState(player)
+    // 被**更新的**一层盖住（作者页等二级页压在播放页上）时主动暂停：声音不该从下层继续漏出来。
+    // 只暂停、不自动恢复 —— 返回播放页后保持暂停，由用户决定继续（与顶栏返回"暂停并退出"同一意图）。
+    LaunchedEffect(covered) {
+        if (covered) currentPlayer.pause()
+    }
     // 性能时间线——「点击」→「组合完成」→「prepare」→「首帧」，四点连起来定位卡在哪。
     var composeLogged by remember(playerEpoch) { mutableStateOf(false) }
     SideEffect {
@@ -953,6 +993,8 @@ fun PlayerScreen(
         commentsTargetId = commentsTargetId,
         commentsPane = commentsPane,
         onAddToPlaylist = onAddToPlaylist,
+        onOpenMore = onOpenMore,
+        onCheckIntegrity = onCheckIntegrity,
         onSelectAuthor = onSelectAuthor,
         onSelectTag = onSelectTag,
         onSelectFolder = onSelectFolder,

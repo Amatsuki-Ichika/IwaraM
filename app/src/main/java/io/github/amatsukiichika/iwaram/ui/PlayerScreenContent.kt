@@ -65,6 +65,8 @@ internal fun PlayerContent(
     commentsTargetId: String?,
     commentsPane: @Composable () -> Unit,
     onAddToPlaylist: (() -> Unit)?,
+    /** 顶部「更多」：打开视频动作面板；null = 不显示这枚圆钮。 */
+    onOpenMore: (() -> Unit)?,
     onSelectAuthor: (String) -> Unit,
     onSelectTag: (String) -> Unit,
     onSelectFolder: (String) -> Unit,
@@ -139,7 +141,9 @@ internal fun PlayerContent(
     /** 同一支视频的全部本地源文件（已按推荐顺序排好）；只有一份时为空也不显示管理入口。 */
     localSources: List<VideoEntity> = emptyList(),
     /** 删除选中的源；deleteFiles 默认由面板控制（默认 false）。 */
-    onDeleteLocalSources: (List<VideoEntity>, Boolean) -> Unit = { _, _ -> }
+    onDeleteLocalSources: (List<VideoEntity>, Boolean) -> Unit = { _, _ -> },
+    /** 长按「已下载」检查本地文件完整性；null = 不启用该手势。 */
+    onCheckIntegrity: (() -> Unit)? = null
 ) {
     // 源文件管理面板的开关：只在用户点菜单里的「管理源文件…」时打开。
     var showSources by remember { mutableStateOf(false) }
@@ -319,6 +323,7 @@ internal fun PlayerContent(
                     onBack = onTopBarBack,
                     isFullscreen = isFullscreen,
                     onOpenDiagnostics = onOpenDiagnostics,
+                    onMore = onOpenMore,
                     modifier = Modifier
                         .align(Alignment.TopCenter)
                         .zIndex(1f)
@@ -375,7 +380,9 @@ internal fun PlayerContent(
                     commentsTargetId = commentsTargetId,
                     commentsPane = commentsPane,
                     // 「收藏」= 网站"添加到"（宿主打开加入播放列表面板）。
-                    onAddToPlaylist = onAddToPlaylist
+                    onAddToPlaylist = onAddToPlaylist,
+                    // 长按「已下载」→ 宿主打开完整性检查弹窗。
+                    onCheckIntegrity = onCheckIntegrity
                 )
             }
         }

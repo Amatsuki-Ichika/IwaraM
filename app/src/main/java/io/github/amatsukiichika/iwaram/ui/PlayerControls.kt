@@ -11,6 +11,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
@@ -30,6 +31,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
@@ -56,10 +58,13 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.dp
+import io.github.amatsukiichika.iwaram.ui.components.GlassRoundButton
 import androidx.compose.ui.unit.sp
 import androidx.media3.common.C
 import io.github.amatsukiichika.iwaram.i18n.tr
@@ -375,7 +380,15 @@ private fun SeekBar(
 }
 
 
-/** 顶部控制条：返回 + 标题，带淡入淡出与上滑动画。 */
+/**
+ * 顶部控制条：返回 / 标题 / 更多。
+ *
+ * 返回与更多是**各自独立的悬浮玻璃圆钮**（[GlassRoundButton]，材质与回顶按钮同一份），
+ * 不再是一整条黑色渐变垫底 + 透明 IconButton：视频画面被压得越亮，渐变越显脏；
+ * 圆钮只占住自己那一块，标题用白色 + 投影保证可读。
+ *
+ * @param onMore 「更多」（视频动作面板）；null = 不显示这枚圆钮（本地视频没有 iwara id）。
+ */
 @Composable
 internal fun PlayerTopBar(
     visible: Boolean,
@@ -383,6 +396,7 @@ internal fun PlayerTopBar(
     onBack: () -> Unit,
     isFullscreen: Boolean = false,
     onOpenDiagnostics: () -> Unit = {},
+    onMore: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     // 同底栏：稳态不建合成图层，避免压在视频 SurfaceView 上的 1px 接缝。
@@ -393,51 +407,68 @@ internal fun PlayerTopBar(
     )
     // 全屏时控制条内容的安全内缩（刘海/导航栏/系统手势区取较大者，见 fullscreenControlBarInsets）。
     val fullscreenInsets = rememberFullscreenControlBarInsets()
+    // 淡入同时轻微上浮：直接由同一个 alpha 派生，不额外起一条动画（两条动画会有先后差）。
+    val risePx = with(LocalDensity.current) { 10.dp.toPx() }
     if (barAlpha > 0.01f) {
         Row(
             modifier = modifier
                 .fillMaxWidth()
                 .then(
-                    if (barAlpha < 0.999f) Modifier.graphicsLayer { alpha = barAlpha } else Modifier
+                    if (barAlpha < 0.999f) {
+                        Modifier.graphicsLayer {
+                            alpha = barAlpha
+                            translationY = (barAlpha - 1f) * risePx
+                        }
+                    } else {
+                        Modifier
+                    }
                 )
-                .background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.5f), Color.Transparent)))
-                // 渐变背景铺满整条（被屏幕圆角遮挡是正常观感），只把可交互内容内缩出安全边距。
                 // 全屏时按"刘海/导航栏/手势条取较大者 + 固定下限"内缩（见 fullscreenControlBarInsets）；
-                // 非全屏保持原来的极小内边距。视频画面本身不消费这些 insets，画面不缩。
+                // 非全屏保持极小内边距。视频画面本身不消费这些 insets，画面不缩。
                 .padding(
-                    start = if (isFullscreen) fullscreenInsets.start.dp else 4.dp,
-                    end = if (isFullscreen) fullscreenInsets.end.dp else 4.dp,
-                    top = if (isFullscreen) fullscreenInsets.top.dp else 2.dp,
+                    start = if (isFullscreen) fullscreenInsets.start.dp else 8.dp,
+                    end = if (isFullscreen) fullscreenInsets.end.dp else 8.dp,
+                    top = if (isFullscreen) fullscreenInsets.top.dp else 6.dp,
                     bottom = 2.dp
                 ),
-            verticalAlignment = Alignment.CenterVertically
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // 触控目标 48dp（M3 图标本身仍是 24dp，视觉不大变），防误触。
-            IconButton(onClick = onBack, modifier = Modifier.size(48.dp)) {
-                Icon(
-                    Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = tr("返回", "Back"),
-                    tint = Color.White
-                )
-            }
+            GlassRoundButton(
+                icon = Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = tr("返回", "Back"),
+                onClick = onBack,
+                darkSurface = true
+            )
             Text(
                 text = title,
                 color = Color.White,
-                style = MaterialTheme.typography.bodyMedium,
+                // 压在任意视频画面上都要可读：白字 + 黑色投影。
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    shadow = Shadow(color = Color.Black.copy(alpha = 0.6f), blurRadius = 8f)
+                ),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f)
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = 2.dp)
             )
-            // 右上角三个点 → 播放诊断面板（状态 / 日志 + 一键复制），排障不再依赖 logcat。
-            // 诊断入口只在 Debug 开关打开时可见，日常界面不出现。
+            // 「播放诊断」入口只在 Debug 开关打开时可见，日常界面不出现。
             if (LocalDebugDetails.current) {
-                IconButton(onClick = onOpenDiagnostics, modifier = Modifier.size(48.dp)) {
-                    Icon(
-                        Icons.Filled.MoreVert,
-                        contentDescription = tr("播放诊断", "Playback diagnostics"),
-                        tint = Color.White
-                    )
-                }
+                GlassRoundButton(
+                    icon = Icons.Filled.BugReport,
+                    contentDescription = tr("播放诊断", "Playback diagnostics"),
+                    onClick = onOpenDiagnostics,
+                    darkSurface = true
+                )
+            }
+            if (onMore != null) {
+                GlassRoundButton(
+                    icon = Icons.Filled.MoreVert,
+                    contentDescription = tr("更多", "More"),
+                    onClick = onMore,
+                    darkSurface = true
+                )
             }
         }
     }

@@ -12,6 +12,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
@@ -54,7 +55,9 @@ fun VideoActionsSheet(
     actions: IwaraNavActions,
     onClose: () -> Unit,
     /** true = 跳过主菜单直达"加入播放列表"（播放页「收藏」按钮 = 网站"添加到"）。 */
-    pickPlaylistDirectly: Boolean = false
+    pickPlaylistDirectly: Boolean = false,
+    /** 「检查文件完整性」；null = 不显示该行（只有已下载的视频才显示）。 */
+    onCheckIntegrity: ((IwaraVideoItem) -> Unit)? = null
 ) {
     val pageScope = rememberCoroutineScope()
     val session by cvm.session.collectAsStateWithLifecycle()
@@ -114,6 +117,14 @@ fun VideoActionsSheet(
                         cvm.downloadVideo(video) { err -> feedback = err }
                     }
                 )
+                // 只有已下载的视频才有本地文件可查；未下载时整行不出现。
+                if (onCheckIntegrity != null && video.id != null && LocalDownloadedIwaraIds.current.contains(video.id)) {
+                    ActionRow(
+                        icon = Icons.Filled.CheckCircle,
+                        label = tr("检查文件完整性", "Check file integrity"),
+                        onClick = { onCheckIntegrity.invoke(video) }
+                    )
+                }
                 ActionRow(
                     icon = Icons.Filled.PlayArrow,
                     label = tr("播放", "Play"),
