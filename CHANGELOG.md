@@ -9,11 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Downloads that were queued or running when the app closed resume on the next launch. Settings > Storage > Auto-resume downloads turns this off.
+- Downloads that were queued or running when the app closed resume on the next launch; Settings > Storage > Auto-resume downloads turns this off.
 
 - Settings > About > Updates checks GitHub Releases for stable or beta updates, manually or automatically, verifies the APK's SHA-256 and installs it, with a frequency and an ignore-version option.
 
-- An 18+ declaration on the last first-run page keeps "Get started" disabled until "I am 18 or older" is checked; Skip shows the same notice. It is asked once.
+- An 18+ declaration on the last first-run page keeps "Get started" disabled until "I am 18 or older" is checked; Skip shows the same notice, and it is asked once.
 
 - A "Protect screenshots" switch under Settings > General > Privacy (default off) blanks screenshots, recordings and the recent-apps preview.
 
