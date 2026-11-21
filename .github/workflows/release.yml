@@ -95,10 +95,10 @@ jobs:
             exit 1
           fi
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
-          # Base for the generated release notes: the newest stable tag before this one, so a
-          # stable release's notes cover everything since the previous stable (RC tags skipped,
-          # a pre-release's notes cover the full delta since the last stable).
-          # `|| true` guards against grep's no-match exit under pipefail on the first release.
+          # Base for the compare link: the newest stable tag before this one, so a stable release's
+          # link covers everything since the previous stable (RC tags skipped; an RC's link covers
+          # the full delta since the last stable).
+          # || true guards against grep's no-match exit under pipefail on the first release.
           PREVIOUS_TAG="$(git tag --list 'v*' --sort=-creatordate | grep -ve '-' | grep -Fvx "v$VERSION" | head -n1 || true)"
           echo "PREVIOUS_TAG=$PREVIOUS_TAG" >> "$GITHUB_ENV"
 
@@ -153,12 +153,9 @@ jobs:
           cp app/build/outputs/apk/release/app-release.apk "IwaraM-$VERSION-arm64-v8a.apk"
           sha256sum "IwaraM-$VERSION-arm64-v8a.apk" > "IwaraM-$VERSION-arm64-v8a.apk.sha256"
 
-      # Curated release body: the CHANGELOG section for this version, falling back to the
-      # [Unreleased] section while a pre-release has no versioned section yet, followed by the
-      # subjects of the non-merge commits since the previous stable tag. Built locally instead of
-      # generate_release_notes so entries stay author-free (single-maintainer repo; matches the
-      # curated CHANGELOG style). The repository merges with merge commits and never squashes, so
-      # --no-merges drops "Merge pull request #N" and keeps the authored subjects.
+      # Curated release body: the CHANGELOG section for this version (or [Unreleased] while an RC
+      # has no versioned section), the APK name and checksum, and a compare link to the previous
+      # stable tag. No commit list: the CHANGELOG is the list.
       - name: Build release body
         run: |
           section() {
@@ -171,18 +168,15 @@ jobs:
           if [ -z "$BODY" ]; then
             BODY="See [CHANGELOG.md](https://github.com/Amatsuki-Ichika/IwaraM/blob/main/CHANGELOG.md) for what is new in this release."
           fi
-          RANGE="${PREVIOUS_TAG:+$PREVIOUS_TAG..}HEAD"
-          LIST="$(git log "$RANGE" --reverse --no-merges --pretty=format:'- %s')"
           {
             echo "RELEASE_BODY<<EOF"
-            echo "$BODY"
-            echo ""
-            echo "## What's Changed"
-            echo ""
-            echo "$LIST"
+            printf '%s\n\n' "$BODY"
+            printf '**Download:** `IwaraM-%s-arm64-v8a.apk` and its `.sha256` (Android 8.0+, arm64).\n\n' "$VERSION"
             if [ -n "$PREVIOUS_TAG" ]; then
-              echo ""
-              echo "**Full Changelog**: https://github.com/Amatsuki-Ichika/IwaraM/compare/$PREVIOUS_TAG...v$VERSION"
+              printf '**Full Changelog**: https://github.com/Amatsuki-Ichika/IwaraM/compare/%s...v%s\n\n' "$PREVIOUS_TAG" "$VERSION"
+            fi
+            if [[ "$GITHUB_REF_NAME" == *-* ]]; then
+              printf '> This is a pre-release build.\n'
             fi
             echo "EOF"
           } >> "$GITHUB_ENV"
