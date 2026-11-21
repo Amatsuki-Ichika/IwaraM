@@ -151,10 +151,10 @@ derived from `versionName` automatically (major\*1,000,000 + minor\*1,000 + patc
 pre-release suffix ignored). The workflow runs the unit tests, builds the signed APK on the tag, verifies
 the signature with `apksigner` and uploads the APK plus its `.sha256` checksum to a GitHub
 Release. The release body is the version's CHANGELOG section (the `[Unreleased]` section for an
-RC), followed by the APK name and its `.sha256` file and a compare link to the previous stable tag; it does
-not list commits, and an RC body carries a one-line pre-release note. It needs these repository
-secrets: `KEYSTORE_BASE64` (the keystore file, base64-encoded), `STORE_PASSWORD`, `KEY_ALIAS` and
-`KEY_PASSWORD`.
+RC), followed by the APK name, its `.sha256` file, and a compare link to the previous stable tag;
+it does not list commits, and an RC body carries a one-line pre-release note. It needs these
+repository secrets: `KEYSTORE_BASE64` (the keystore file, base64-encoded), `STORE_PASSWORD`,
+`KEY_ALIAS` and `KEY_PASSWORD`.
 
 **Before tagging a stable release**, check that the repository gates pass on the tagged commit
 (`node scripts/check.mjs`), and that a persisted-data change has both a decision record and a

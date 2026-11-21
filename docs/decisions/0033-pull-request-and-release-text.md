@@ -4,7 +4,7 @@ Status: accepted
 
 ## Problem
 
-The pull request template asks for 451 words across five sections, including a five-stage AI usage table and a seven-item checklist that repeats the definition of done in AGENTS.md; the last two substantial pull request bodies run 90 and 93 lines. The release body appends every non-merge commit subject to the CHANGELOG section, so a release page repeats its own changes and mixes in `chore:`, `docs:` and `ci:` lines. CHANGELOG entries under [Unreleased] average 46 words and reach 105, and explain implementation rather than what a user sees.
+The pull request template asks for 451 words across five sections, including a five-stage AI usage table and a seven-item checklist that repeats the definition of done in AGENTS.md; for example, the bodies of pull requests #63 and #64 run 90 and 93 lines. The release body appends every non-merge commit subject to the CHANGELOG section, so a release page repeats its own changes and mixes in `chore:`, `docs:` and `ci:` lines. CHANGELOG entries under [Unreleased] average 46 words and reach 105, and explain implementation rather than what a user sees.
 
 ## Decision
 
