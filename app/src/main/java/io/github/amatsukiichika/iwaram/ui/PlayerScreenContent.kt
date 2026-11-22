@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -42,7 +43,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import io.github.amatsukiichika.iwaram.data.VideoEntity
-import io.github.amatsukiichika.iwaram.ui.components.rememberPosterBackdrop
+import io.github.amatsukiichika.iwaram.ui.components.rememberPlayerLiveBackdrop
 import java.lang.ref.WeakReference
 
 /**
@@ -145,6 +146,16 @@ internal fun PlayerContent(
 ) {
     // 源文件管理面板的开关：只在用户点菜单里的「管理源文件…」时打开。
     var showSources by remember { mutableStateOf(false) }
+
+    // 播放器视图实例：PlayerView 由 [VideoSurfaceBox] 的 AndroidView 创建，父级要拿它做
+    //   PixelCopy 抓帧（视频画在 SurfaceView 上，Compose 自身录不到像素）。
+    val playerViewState = remember { mutableStateOf<PlayerView?>(null) }
+    // 顶栏两枚圆钮的实时玻璃背景源：抓当前视频帧 → 按圆钮位置映射进按钮录制层。
+    //   只在液态玻璃档 + API 31+ 创建；抓帧不可用时由圆钮退回色罩路径。
+    val playerTopBarBackdrop = rememberPlayerLiveBackdrop(
+        playerView = { playerViewState.value },
+        active = controlsVisible
+    )
     // 根容器透明，背景放在内层 Column 上并随内容一起右滑，
     // 预测式返回时露出下方主页内容，避免左半边出现空白背景。
     Box(
@@ -211,6 +222,7 @@ internal fun PlayerContent(
                 playerEnabled = videoSurfaceEnabled,
                 isFullscreen = isFullscreen,
                 screenHeightDp = screenHeightDp,
+                playerViewState = playerViewState,
                 durationMs = durationMs,
                 onVideoTap = onVideoTap,
                 pokeControls = pokeControls,
@@ -297,12 +309,9 @@ internal fun PlayerContent(
                     )
                 }
 
-                // 顶栏两枚圆钮的磨砂背景源：视频是 SurfaceView 录不到，用封面近似画面
-                // （只在磨砂档加载；半透明/关档返回 null → 走色罩）。
-                val playerTopBarBackdrop = rememberPosterBackdrop(
-                    video.localThumbnailPath ?: video.thumbnailUrl
-                )
                 // 顶部短条渐变遮罩：返回 + 标题（淡入淡出 + 上滑动画）。
+                // 圆钮背后是刚才那一帧真实视频（见 rememberPlayerLiveBackdrop），
+                // 不再用封面近似；抓帧不可用时 backdrop=null，自动退回色罩。
                 PlayerTopBar(
                     visible = controlsVisible,
                     title = video.title,
@@ -390,6 +399,8 @@ private fun VideoSurfaceBox(
     playerEnabled: Boolean,
     isFullscreen: Boolean,
     screenHeightDp: Dp,
+    /** 播放器视图实例（交给父级做 PixelCopy 抓帧）；创建时写入、释放时清空。 */
+    playerViewState: MutableState<PlayerView?>,
     durationMs: Long,
     onVideoTap: () -> Unit,
     pokeControls: () -> Unit,
@@ -453,9 +464,15 @@ private fun VideoSurfaceBox(
         if (playerEnabled) {
             AndroidView(
                 // 走复用池（省一次整棵 PlayerView inflate）；边界见 [PlayerViewPool]。
-                factory = { ctx -> PlayerViewPool.acquire(ctx) },
+                factory = { ctx ->
+                    PlayerViewPool.acquire(ctx).also { playerViewState.value = it }
+                },
                 update = { it.player = player },
-                onRelease = { PlayerViewPool.release(it) },
+                onRelease = { view ->
+                    PlayerViewPool.release(view)
+                    // 视图已脱离，抓帧循环下一轮就会拿不到 SurfaceView；这里顺手清引用。
+                    if (playerViewState.value === view) playerViewState.value = null
+                },
                 modifier = Modifier.fillMaxSize()
             )
         }

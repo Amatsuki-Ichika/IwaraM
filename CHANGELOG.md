@@ -27,15 +27,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Dialogs and long-press action sheets open in their own windows, so a dialog or sheet is always drawn above the player, the floating navigation bar and the drawer scrim; the local-card sheet is now modal with a visible scrim.
 
+- Single-column sheets size themselves to their content up to the filter sheet's height, instead of always reserving 88% of the screen and leaving empty space under a short action list.
+
 - The default glass opacity is 70% instead of 80%.
 
-- The player's back and overflow buttons are separate floating glass buttons that follow the theme instead of a forced dark circle: white with dark icons on the light theme, dark with light icons on the dark theme. They shrink to 38 dp, and in frosted mode they blur the video's cover behind themselves instead of only tinting.
+- The player's back and overflow buttons are separate floating glass buttons that follow the theme instead of a forced dark circle: white with dark icons on the light theme, dark with light icons on the dark theme. They shrink to 38 dp, and in frosted mode they use the same glass recipe as the floating navigation bar and sample the current video frame instead of a still cover.
 
 - The player top bar no longer shows the debug diagnostics button; the diagnostics sheet is still under Settings.
 
 - Opening an author from the player pushes the author page above the player instead of closing it: back returns to the still-loaded video, an already open author page is reused rather than duplicated, and playback pauses while the page covers it.
 
-- The player's back and overflow buttons are separate floating glass buttons that share the scroll-to-top material; the title fades out with the controls.
+- The player title fades out with the controls.
 
 - The search field keeps its query and expanded results across tabs without focusing itself or opening the keyboard, and leaving the field while editing commits the search instead of dropping it.
 

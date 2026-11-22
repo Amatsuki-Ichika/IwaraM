@@ -35,11 +35,13 @@ import com.kyant.backdrop.drawBackdrop
  * 会在圆角处画出"八边形边框"；这里与 [GlassPill] 同一套画法（底色 + 可选玻璃效果，无 M3 机制），
  * 涟漪关闭 —— 玻璃上"扩散噪点"与底栏同判。
  *
- * @param backdrop 视图级液态玻璃背景层；null = 半透明路径（二级页未接，播放页压在视频上恒 null）。
- * @param darkSurface 覆盖「深/浅」判定：null = 跟随主题（回顶按钮）；
- *   true = 恒用深色雾面 + 白图标 —— 播放页的按钮压在任何视频画面上，浅色主题下
- *   浅雾面 + 深图标会看不清，所以那里不能跟主题走。
+ * @param backdrop 视图级液态玻璃背景层；null = 半透明路径（二级页未接，播放页压在视频上时由
+ *   实时抓帧的 [PlayerLiveBackdrop] 提供）。
+ * @param darkSurface 覆盖「深/浅」判定：null = 跟随主题（回顶按钮、播放页圆钮都在用它）；
+ *   true = 恒用深色雾面 + 白图标（留给压在亮画面上的少数位置，目前没有调用方）。
  * @param tint 图标色覆盖（默认按深/浅自动：浅色 onSurface 0.9 / 深色白 0.92）。
+ * @param barRecipe true = 与底栏同一套配方（BAR 角色 + 只模糊、无折射）：播放页顶栏的两枚
+ *   按钮用它，材质与底栏/全局不透明度实时联动；默认 false 走小圆钮配方（模糊 + 边缘折射）。
  */
 @Composable
 fun GlassRoundButton(
@@ -51,7 +53,8 @@ fun GlassRoundButton(
     size: Dp = 44.dp,
     iconSize: Dp = 24.dp,
     darkSurface: Boolean? = null,
-    tint: Color? = null
+    tint: Color? = null,
+    barRecipe: Boolean = false
 ) {
     val cs = MaterialTheme.colorScheme
     val settings = LocalGlassSettings.current
@@ -64,7 +67,7 @@ fun GlassRoundButton(
         null -> cs.surface.luminance() > 0.5f
     }
     val material = glassMaterialFor(
-        role = GlassRole.PILL,
+        role = if (barRecipe) GlassRole.BAR else GlassRole.PILL,
         settings = settings,
         surface = cs.surface,
         dark = !isLight,
@@ -84,7 +87,12 @@ fun GlassRoundButton(
                     shape = { shape },
                     highlight = null,
                     shadow = null,
-                    effects = { glassPillEffects() },
+                    // 播放页顶栏 = 底栏同款配方（只模糊，半径同样取自 GlassMaterial）；
+                    // 其余圆钮仍是小半径模糊 + 轻折射。
+                    effects = {
+                        if (barRecipe) glassBarEffects(material.blurRadius.toPx())
+                        else glassPillEffects()
+                    },
                     onDrawSurface = { drawRect(color = material.fill) }
                 )
             } else {

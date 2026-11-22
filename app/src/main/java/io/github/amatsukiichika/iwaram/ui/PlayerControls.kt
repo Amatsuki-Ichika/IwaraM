@@ -396,9 +396,10 @@ private val PLAYER_ROUND_BUTTON_ICON_SIZE = 20.dp
  * 深浅色**跟主题反色**：浅色主题白底黑图标、深色主题黑底白图标。以前这里写死
  * `darkSurface = true`（深色雾面 + 白图标），浅色主题下就成了白底上的浅灰圆钮。
  *
- * 磨砂档需要可采样的背景源：视频是 SurfaceView，Compose 录制不到，父级用**封面**构造
- * [backdrop]（见 `rememberPosterBackdrop`）传进来，圆钮背后才是真模糊而不是半透明。
- * 封面加载失败/半透明档时传 null，退回色罩路径。
+ * 磨砂档的配方与底栏**完全同源**（`barRecipe = true`：BAR 角色 + `glassBarEffects`），
+ * 底色浓度、模糊半径都跟着全局材质与不透明度实时变。视频是 SurfaceView，Compose 录制不到，
+ * 父级用 `rememberPlayerLiveBackdrop` 逐帧抓画面后传进来，圆钮背后是**当前视频帧**的真模糊；
+ * 抓帧不可用（半透明/关档、API < 31）时传 null，退回色罩路径。
  *
  * @param onMore 「更多」（视频动作面板）；null = 不显示这枚圆钮（本地视频没有 iwara id）。
  * @param backdrop 磨砂档的背景源；null = 半透明路径。
@@ -454,7 +455,8 @@ internal fun PlayerTopBar(
                 onClick = onBack,
                 backdrop = backdrop,
                 size = PLAYER_ROUND_BUTTON_SIZE,
-                iconSize = PLAYER_ROUND_BUTTON_ICON_SIZE
+                iconSize = PLAYER_ROUND_BUTTON_ICON_SIZE,
+                barRecipe = true
             )
             Text(
                 text = title,
@@ -476,7 +478,8 @@ internal fun PlayerTopBar(
                     onClick = onMore,
                     backdrop = backdrop,
                     size = PLAYER_ROUND_BUTTON_SIZE,
-                    iconSize = PLAYER_ROUND_BUTTON_ICON_SIZE
+                    iconSize = PLAYER_ROUND_BUTTON_ICON_SIZE,
+                    barRecipe = true
                 )
             }
         }
