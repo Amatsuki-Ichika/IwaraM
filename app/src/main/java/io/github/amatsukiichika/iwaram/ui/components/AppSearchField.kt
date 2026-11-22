@@ -60,6 +60,11 @@ fun SearchPill(
     focusRequester: FocusRequester? = null,
     /** 获得焦点时回调 —— 调用方拿它把正在输入的那一块滚进可视区。 */
     onFocused: (() -> Unit)? = null,
+    /**
+     * 失去焦点时回调 —— 主页搜索栏拿它把"编辑中"收敛成"展开但无焦点"（收键盘、保留文字与结果）。
+     * 只传 [onFocused] 的调用方（筛选面板）行为不变：不挂失焦监听。
+     */
+    onLostFocus: (() -> Unit)? = null,
     /** 底色透明度：主页展开态 0.10、收起态 0.06（保持一致观感）。 */
     containerAlpha: Float = 0.10f
 ) {
@@ -95,8 +100,10 @@ fun SearchPill(
                         .padding(horizontal = 8.dp)
                         .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
                         .then(
-                            if (onFocused != null) {
-                                Modifier.onFocusChanged { if (it.isFocused) onFocused() }
+                            if (onFocused != null || onLostFocus != null) {
+                                Modifier.onFocusChanged { state ->
+                                    if (state.isFocused) onFocused?.invoke() else onLostFocus?.invoke()
+                                }
                             } else {
                                 Modifier
                             }

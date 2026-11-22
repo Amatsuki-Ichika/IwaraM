@@ -1,7 +1,7 @@
 {
   "toleranceRatio": 0.01,
   "artifacts": {
-    "debug": 26848962,
-    "release": 19127106
+    "debug": 27128418,
+    "release": 19324606
   }
 }

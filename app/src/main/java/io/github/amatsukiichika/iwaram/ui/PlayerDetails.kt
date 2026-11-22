@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
@@ -50,6 +52,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -64,7 +67,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -119,9 +124,18 @@ internal fun DetailsSection(
      * 「收藏」按钮（网站"添加到"）→ 打开加入播放列表面板；
      * null = 不显示（本地视频未匹配 iwaraId，无目标）。
      */
-    onAddToPlaylist: (() -> Unit)? = null
+    onAddToPlaylist: (() -> Unit)? = null,
+    /** 长按「已下载」按钮检查本地文件完整性；null = 不启用该手势。 */
+    onCheckIntegrity: (() -> Unit)? = null
 ) {
     var tab by rememberSaveable { mutableStateOf(DetailsTab.INTRO) }
+
+    // 登记"播放页当前挂着哪份本地文件"：删除路径据此拒绝删正在播放的那一份。
+    // 详情区是播放页打开期间本层稳定存在的入口（全屏时页面隐藏详情区，登记随之清空）。
+    DisposableEffect(video.localUri) {
+        LocalPlayback.currentUri = video.localUri.takeIf { it.isNotBlank() }
+        onDispose { LocalPlayback.currentUri = null }
+    }
 
     // 药丸条是悬浮的玻璃条，简介列表从它底下穿过。
     // 结构与本地页 / Iwara 页一致（见 GlassBackdrop.GlassTopBar）：底 = 内容（挂背景源），
@@ -149,6 +163,7 @@ internal fun DetailsSection(
                     onSelectFolder = onSelectFolder,
                     onOpenRelated = onOpenRelated,
                     onAddToPlaylist = onAddToPlaylist,
+                    onCheckIntegrity = onCheckIntegrity,
                     // 让出悬浮药丸条的高度（走 contentPadding，内容仍从条底下穿过）。
                     topPadding = barDp
                 )
@@ -202,6 +217,8 @@ private fun IntroColumn(
     onSelectFolder: (String) -> Unit,
     onOpenRelated: (RelatedVideo) -> Unit,
     onAddToPlaylist: (() -> Unit)? = null,
+    /** 长按「已下载」按钮检查本地文件完整性；null = 不启用。 */
+    onCheckIntegrity: (() -> Unit)? = null,
     /** 悬浮药丸条的高度 → 顶部 contentPadding（内容从条底下穿过）。 */
     topPadding: Dp = 0.dp
 ) {
@@ -286,7 +303,7 @@ private fun IntroColumn(
         // 操作区（评论入口 = 药丸条 tab）。本地视频（含未匹配 iwaraId 的）也显示这一行
         // （行内「下载」= 已下载完成态；有 iwaraId 时再带「原视频」）。
         if (online != null || !video.iwaraId.isNullOrBlank() || video.localUri.isNotBlank()) {
-            item("actions") { ActionButtonsRow(video, online, onAddToPlaylist) }
+            item("actions") { ActionButtonsRow(video, online, onAddToPlaylist, onCheckIntegrity) }
         }
         if (tags.isNotEmpty()) {
             item("tags") {
@@ -374,7 +391,9 @@ private fun ActionButtonsRow(
     video: VideoEntity,
     online: OnlineVideoExtras?,
     /** 「收藏」（网站"添加到"）回调；null = 不显示该按钮。 */
-    onAddToPlaylist: (() -> Unit)? = null
+    onAddToPlaylist: (() -> Unit)? = null,
+    /** 长按「已下载」按钮检查本地文件完整性；null = 不启用。 */
+    onCheckIntegrity: (() -> Unit)? = null
 ) {
     val cs = MaterialTheme.colorScheme
     val context = LocalContext.current
@@ -434,7 +453,9 @@ private fun ActionButtonsRow(
                 onClick = { if (!downloaded) online?.onDownload?.invoke() },
                 modifier = Modifier.weight(1f),
                 enabled = !downloaded && isActionable,
-                tone = if (downloaded) ActionTone.DONE else ActionTone.NORMAL
+                tone = if (downloaded) ActionTone.DONE else ActionTone.NORMAL,
+                // 只有「已下载」且匹配到 iwaraId 时才可长按检查本地文件完整性。
+                onLongClick = if (downloaded && !video.iwaraId.isNullOrBlank()) onCheckIntegrity else null
             )
         }
         video.iwaraId?.takeIf { it.isNotBlank() }?.let { id ->
@@ -463,6 +484,7 @@ private enum class ActionTone {
     DONE
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun DetailActionButton(
     icon: ImageVector,
@@ -472,7 +494,12 @@ private fun DetailActionButton(
     enabled: Boolean = true,
     iconTint: Color? = null,
     tone: ActionTone = ActionTone.NORMAL,
-    iconModifier: Modifier = Modifier
+    iconModifier: Modifier = Modifier,
+    /**
+     * 长按动作（目前只有「已下载」按钮用：长按检查文件完整性）。
+     * 非 null 时长按恒可用，即使 [enabled]=false（完成态点不动，但长按仍要能查）。
+     */
+    onLongClick: (() -> Unit)? = null
 ) {
     val cs = MaterialTheme.colorScheme
     val fg = when {
@@ -481,10 +508,21 @@ private fun DetailActionButton(
         enabled -> cs.primary
         else -> cs.onSurfaceVariant.copy(alpha = 0.38f)
     }
+    // 带长按时用 combinedClickable：完成态按钮点击仍是空操作，长按照常触发。
+    val haptic = LocalHapticFeedback.current
+    val interaction = if (onLongClick != null) {
+        Modifier.combinedClickable(
+            onClick = { if (enabled) onClick() },
+            onLongClick = {
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                onLongClick()
+            }
+        )
+    } else {
+        Modifier.clickable(enabled = enabled, onClick = onClick)
+    }
     Surface(
-        onClick = onClick,
-        enabled = enabled,
-        modifier = modifier,
+        modifier = modifier.then(interaction),
         shape = RoundedCornerShape(12.dp),
         color = cs.primary.copy(alpha = 0.14f),
         contentColor = fg

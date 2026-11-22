@@ -127,9 +127,9 @@ class GlassMaterialTest {
     }
 
     @Test
-    fun `默认不透明度是 80`() {
-        // 80% 是新版默认（旧 78% 的"对应旧 55 档观感"约束已随迁移期结束移除）。
-        assertEquals(0.80f, GlassSettings().opacity, 1e-4f)
+    fun `默认不透明度是 70`() {
+        // 70% 是新版默认（用户反馈 80% 偏实；旧 78% 的"对应旧 55 档观感"约束已随迁移期结束移除）。
+        assertEquals(0.70f, GlassSettings().opacity, 1e-4f)
     }
 
     @Test

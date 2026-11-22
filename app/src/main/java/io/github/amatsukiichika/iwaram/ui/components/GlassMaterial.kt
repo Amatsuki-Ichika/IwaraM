@@ -72,10 +72,10 @@ data class GlassSettings(
 )
 
 /**
- * 不透明度是 0%..100% 的线性值，默认 80%。
+ * 不透明度是 0%..100% 的线性值，默认 70%。
  * 落在 SharedPreferences 里的旧值由 IwaraRepository 一次性迁移（键 `glass_opacity_v2`）。
  */
-const val DEFAULT_GLASS_OPACITY = 0.80f
+const val DEFAULT_GLASS_OPACITY = 0.70f
 
 /**
  * 把"半透明材质设置"下发到整棵树。

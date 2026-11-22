@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -42,6 +43,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import io.github.amatsukiichika.iwaram.data.VideoEntity
+import io.github.amatsukiichika.iwaram.ui.components.rememberPlayerLiveBackdrop
 import java.lang.ref.WeakReference
 
 /**
@@ -65,6 +67,8 @@ internal fun PlayerContent(
     commentsTargetId: String?,
     commentsPane: @Composable () -> Unit,
     onAddToPlaylist: (() -> Unit)?,
+    /** 顶部「更多」：打开视频动作面板；null = 不显示这枚圆钮。 */
+    onOpenMore: (() -> Unit)?,
     onSelectAuthor: (String) -> Unit,
     onSelectTag: (String) -> Unit,
     onSelectFolder: (String) -> Unit,
@@ -104,7 +108,6 @@ internal fun PlayerContent(
     qualityLabel: String?,
     srEnabled: Boolean,
     srModel: String,
-    showDiagnostics: Boolean,
     playError: PlayerErrorUi?,
     resolveError: String?,
     debugDetails: Boolean,
@@ -125,8 +128,6 @@ internal fun PlayerContent(
     onBack: () -> Unit,
     /** 解析失败面板的「重试」。 */
     onRetryResolve: (() -> Unit)?,
-    onOpenDiagnostics: () -> Unit,
-    onDismissDiagnostics: () -> Unit,
     onToggleFullscreen: () -> Unit,
     onSelectSr: (String?) -> Unit,
     onSelectQuality: (QualityOption) -> Unit,
@@ -139,10 +140,22 @@ internal fun PlayerContent(
     /** 同一支视频的全部本地源文件（已按推荐顺序排好）；只有一份时为空也不显示管理入口。 */
     localSources: List<VideoEntity> = emptyList(),
     /** 删除选中的源；deleteFiles 默认由面板控制（默认 false）。 */
-    onDeleteLocalSources: (List<VideoEntity>, Boolean) -> Unit = { _, _ -> }
+    onDeleteLocalSources: (List<VideoEntity>, Boolean) -> Unit = { _, _ -> },
+    /** 长按「已下载」检查本地文件完整性；null = 不启用该手势。 */
+    onCheckIntegrity: (() -> Unit)? = null
 ) {
     // 源文件管理面板的开关：只在用户点菜单里的「管理源文件…」时打开。
     var showSources by remember { mutableStateOf(false) }
+
+    // 播放器视图实例：PlayerView 由 [VideoSurfaceBox] 的 AndroidView 创建，父级要拿它做
+    //   PixelCopy 抓帧（视频画在 SurfaceView 上，Compose 自身录不到像素）。
+    val playerViewState = remember { mutableStateOf<PlayerView?>(null) }
+    // 顶栏两枚圆钮的实时玻璃背景源：抓当前视频帧 → 按圆钮位置映射进按钮录制层。
+    //   只在液态玻璃档 + API 31+ 创建；抓帧不可用时由圆钮退回色罩路径。
+    val playerTopBarBackdrop = rememberPlayerLiveBackdrop(
+        playerView = { playerViewState.value },
+        active = controlsVisible
+    )
     // 根容器透明，背景放在内层 Column 上并随内容一起右滑，
     // 预测式返回时露出下方主页内容，避免左半边出现空白背景。
     Box(
@@ -209,6 +222,7 @@ internal fun PlayerContent(
                 playerEnabled = videoSurfaceEnabled,
                 isFullscreen = isFullscreen,
                 screenHeightDp = screenHeightDp,
+                playerViewState = playerViewState,
                 durationMs = durationMs,
                 onVideoTap = onVideoTap,
                 pokeControls = pokeControls,
@@ -282,24 +296,7 @@ internal fun PlayerContent(
                     modifier = Modifier.align(Alignment.Center)
                 )
 
-                // 播放诊断面板（右上角 ⋮ 打开）：状态 / 日志 双 tab + 一键复制。
-                if (showDiagnostics) {
-                    DiagnosticsSheet(
-                        onDismiss = onDismissDiagnostics,
-                        isLocal = isLocal,
-                        qualityLabel = qualityLabel,
-                        videoWidth = videoWidth,
-                        videoHeight = videoHeight,
-                        localWidth = localVideoWidth,
-                        localHeight = localVideoHeight,
-                        positionMs = positionMs,
-                        durationMs = durationMs,
-                        // 诊断面板里始终看完整技术串（detail 轨）
-                        playError = playError?.detail
-                    )
-                }
-
-                // 源文件管理（本地多源）：与诊断面板同层，盖在播放页之上。
+                // 源文件管理（本地多源）：盖在播放页之上。
                 if (showSources && localSources.size > 1) {
                     PlayerSourcesSheet(
                         sources = localSources,
@@ -313,12 +310,15 @@ internal fun PlayerContent(
                 }
 
                 // 顶部短条渐变遮罩：返回 + 标题（淡入淡出 + 上滑动画）。
+                // 圆钮背后是刚才那一帧真实视频（见 rememberPlayerLiveBackdrop），
+                // 不再用封面近似；抓帧不可用时 backdrop=null，自动退回色罩。
                 PlayerTopBar(
                     visible = controlsVisible,
                     title = video.title,
                     onBack = onTopBarBack,
                     isFullscreen = isFullscreen,
-                    onOpenDiagnostics = onOpenDiagnostics,
+                    onMore = onOpenMore,
+                    backdrop = playerTopBarBackdrop,
                     modifier = Modifier
                         .align(Alignment.TopCenter)
                         .zIndex(1f)
@@ -375,7 +375,9 @@ internal fun PlayerContent(
                     commentsTargetId = commentsTargetId,
                     commentsPane = commentsPane,
                     // 「收藏」= 网站"添加到"（宿主打开加入播放列表面板）。
-                    onAddToPlaylist = onAddToPlaylist
+                    onAddToPlaylist = onAddToPlaylist,
+                    // 长按「已下载」→ 宿主打开完整性检查弹窗。
+                    onCheckIntegrity = onCheckIntegrity
                 )
             }
         }
@@ -397,6 +399,8 @@ private fun VideoSurfaceBox(
     playerEnabled: Boolean,
     isFullscreen: Boolean,
     screenHeightDp: Dp,
+    /** 播放器视图实例（交给父级做 PixelCopy 抓帧）；创建时写入、释放时清空。 */
+    playerViewState: MutableState<PlayerView?>,
     durationMs: Long,
     onVideoTap: () -> Unit,
     pokeControls: () -> Unit,
@@ -460,9 +464,15 @@ private fun VideoSurfaceBox(
         if (playerEnabled) {
             AndroidView(
                 // 走复用池（省一次整棵 PlayerView inflate）；边界见 [PlayerViewPool]。
-                factory = { ctx -> PlayerViewPool.acquire(ctx) },
+                factory = { ctx ->
+                    PlayerViewPool.acquire(ctx).also { playerViewState.value = it }
+                },
                 update = { it.player = player },
-                onRelease = { PlayerViewPool.release(it) },
+                onRelease = { view ->
+                    PlayerViewPool.release(view)
+                    // 视图已脱离，抓帧循环下一轮就会拿不到 SurfaceView；这里顺手清引用。
+                    if (playerViewState.value === view) playerViewState.value = null
+                },
                 modifier = Modifier.fillMaxSize()
             )
         }

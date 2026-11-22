@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A finished download is verified silently: the file's length and MP4 box structure are checked, a damaged file asks for one automatic re-download, and the second failure only notifies.
+
+- Long-press the downloaded button on the player, a local library card or a home card action sheet to check a file on demand: a confirmation explains the read-only check, an indeterminate progress dialog stays up while it runs, and the result names the problem in plain language.
+
+- Local library cards list a red "Permanently delete" next to "Remove from library"; it asks for a second confirmation and deletes the file together with its record.
+
 - Downloads that were queued or running when the app closed resume on the next launch; Settings > Storage > Auto-resume downloads turns this off.
 
 - Settings > About > Updates checks GitHub Releases for stable or beta updates, manually or automatically, verifies the APK's SHA-256 and installs it, with a frequency and an ignore-version option.
@@ -18,6 +24,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A "Protect screenshots" switch under Settings > General > Privacy (default off) blanks screenshots, recordings and the recent-apps preview.
 
 ### Changed
+
+- Dialogs and long-press action sheets open in their own windows, so a dialog or sheet is always drawn above the player, the floating navigation bar and the drawer scrim; the local-card sheet is now modal with a visible scrim.
+
+- Single-column sheets size themselves to their content up to the filter sheet's height, instead of always reserving 88% of the screen and leaving empty space under a short action list.
+
+- The default glass opacity is 70% instead of 80%.
+
+- The player's back and overflow buttons are separate floating glass buttons that follow the theme instead of a forced dark circle: white with dark icons on the light theme, dark with light icons on the dark theme. They shrink to 38 dp, and in frosted mode they use the same glass recipe as the floating navigation bar and sample the current video frame instead of a still cover.
+
+- The player top bar no longer shows the debug diagnostics button; the diagnostics sheet is still under Settings.
+
+- Opening an author from the player pushes the author page above the player instead of closing it: back returns to the still-loaded video, an already open author page is reused rather than duplicated, and playback pauses while the page covers it.
+
+- The player title fades out with the controls.
+
+- The search field keeps its query and expanded results across tabs without focusing itself or opening the keyboard, and leaving the field while editing commits the search instead of dropping it.
+
+- Up to two downloads run in parallel, falling back to one with a backoff when the server answers 429/403; each transfer uses a 256 KB buffer.
+
+- Online playback buffers 15 s before starting and up to 60 s ahead, keeps up to 16 connections and reuses signed URLs prefetched while the player opens.
+
+- Local library cards open an action sheet (set iwara ID, check integrity, remove from library, permanently delete) instead of the ID dialog directly.
 
 - Author pages now have a continuous scrollbar with the author's name in the drag bubble, like other feeds.
 
@@ -48,6 +76,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Opening a page from a long-press sheet now slides it in over the sheet, matching every other overlay push.
 
 ### Fixed
+
+- The integrity check dialog can no longer be covered by the player or the floating navigation bar, and it keeps the check private while running: the scrim and back press do not dismiss it, and a damaged result offers a "View downloads" shortcut.
+
+- The local library long-press sheet is no longer translucent, click-through and cut off by the floating navigation bar; it uses the shared bottom sheet host and the mockup's row style, and its confirmation dialogs use the shared dialog window.
+
+- Removing a local video from the library no longer deletes its record when the file itself cannot be deleted; the row stays and an error is shown.
 
 - A download counts as complete only when the received bytes match the server's total; truncated transfers keep their partial file and retry.
 

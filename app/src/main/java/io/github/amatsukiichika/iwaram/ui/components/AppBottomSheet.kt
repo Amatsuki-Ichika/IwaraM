@@ -24,7 +24,7 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.offset
@@ -42,6 +42,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCompositionContext
@@ -54,6 +55,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.AbstractComposeView
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
@@ -65,12 +67,12 @@ import io.github.amatsukiichika.iwaram.R
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
-/** 抽屉整体高度 = 屏高的 88%（把手也在这 88% 里），四个抽屉同一个值。 */
+/** 抽屉的**最大**高度 = 屏高的 88%（把手也在这 88% 里），四个单列抽屉共用这个上限。 */
 private const val SHEET_HEIGHT_FRACTION = 0.88f
 
 /**
- * 在 [SHEET_HEIGHT_FRACTION] 的基础上再减掉两行（2 × 56dp = 112dp）。
- * 用固定 dp 而不是再降比例，"少两行"这个意图才不随屏高漂移。
+ * 在 [SHEET_HEIGHT_FRACTION] 的基础上再减掉两行（2 × 56dp = 112dp），作为内容自适应时的上限。
+ * 用固定 dp 而不是再降比例，"少两行"这个意图才不随屏高漂移；内容比它高时仍顶到筛选抽屉那份高度。
  */
 private val SHEET_HEIGHT_REDUCTION = 112.dp
 
@@ -216,7 +218,9 @@ private class SheetDialogWrapper(
  * - 宿主窗口（见 [SheetDialogWrapper]）：非浮窗全屏窗口，窗口尺寸自己断言（不用
  *   androidx.compose.ui.window.Dialog，它的 DialogLayout 会把窗口覆写回"整屏−系统栏"）；
  * - 把手：自己画的固定区，永远不参与键盘让位；
- * - 高度：打开那一刻按屏高算好并锁死（只在屏幕尺寸变化时重算），键盘/内容/切 tab 都不改变它；
+ * - 高度：**按内容自适应**，上限 = 打开那一刻按屏高算好的基准高度（与筛选抽屉同高）；
+ *   内容短就只占内容那么高（不再留一大片空白），内容长则顶到上限后内部滚动；
+ *   键盘/切 tab 不改变这个上限，键盘高度只加在内容区底部；
  * - 键盘：自己读 `WindowInsets.ime`，只把它加在内容区底部，外框与把手纹丝不动，
  *   内容区被压缩、可滚动（聚焦的输入框会被 Compose 自动滚进可视区）；
  * - 背景遮罩：画在 Activity（全屏单层黑，alpha 由 [SheetScrimState] 逐帧镜像）；
@@ -244,6 +248,13 @@ fun AppBottomSheet(
         (screenHeightDp * SHEET_HEIGHT_FRACTION).dp - SHEET_HEIGHT_REDUCTION
     }
     val sheetHeightPx = with(density) { sheetHeight.toPx() }
+
+    // 内容自适应高度：Surface 只给上限，实际高度由内容决定（见下方 heightIn）。
+    //   测到实际高度之前用上限兜底：入场/退场都从「内容高度」滑，首帧就是正确位置的等值换算
+    //   （offsetY=1 时位移 = 高度，两种高度都恰好在屏幕下方），不会看到一次高度跳变。
+    var measuredHeightPx by remember { mutableIntStateOf(0) }
+    fun currentHeightPx(): Float =
+        if (measuredHeightPx > 0) measuredHeightPx.toFloat() else sheetHeightPx
 
     // 进场/退场：0 = 完全就位，1 = 整块在屏幕下方。
     // scrim 不在本窗口绘制任何东西（遮罩归一到了 Activity），只作为 SheetScrimState 的动画驱动源。
@@ -332,13 +343,15 @@ fun AppBottomSheet(
                 modifier = modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
-                    .height(sheetHeight)
-                    .offset { IntOffset(0, (offsetY.value * sheetHeightPx).roundToInt()) },
+                    // 不给死高度：内容多高抽屉就多高，最多到 sheetHeight（筛选抽屉那份高度）。
+                    .heightIn(max = sheetHeight)
+                    .onSizeChanged { measuredHeightPx = it.height }
+                    .offset { IntOffset(0, (offsetY.value * currentHeightPx()).roundToInt()) },
                 shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
                 color = MaterialTheme.colorScheme.surfaceContainerLow,
                 tonalElevation = 0.dp
             ) {
-                Column(Modifier.fillMaxSize()) {
+                Column(Modifier.fillMaxWidth()) {
                     // ---- 固定区：把手（这里也是"向下拖关闭"的手柄）----
                     Box(
                         Modifier
@@ -347,7 +360,7 @@ fun AppBottomSheet(
                                 state = rememberDraggableState { delta ->
                                     scope.launch {
                                         offsetY.snapTo(
-                                            (offsetY.value + delta / sheetHeightPx).coerceIn(0f, 1f)
+                                            (offsetY.value + delta / currentHeightPx()).coerceIn(0f, 1f)
                                         )
                                     }
                                 },
@@ -377,7 +390,8 @@ fun AppBottomSheet(
                     Column(
                         Modifier
                             .fillMaxWidth()
-                            .weight(1f)
+                            // fill=false：内容短时不再撑满抽屉；长到上限时才由 scroll 接管。
+                            .weight(1f, fill = false)
                             .padding(bottom = bottomInset)
                             .verticalScroll(inner)
                     ) {

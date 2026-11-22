@@ -6,6 +6,8 @@ import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.amatsukiichika.iwaram.IwaraApp
+import io.github.amatsukiichika.iwaram.DownloadService
+import io.github.amatsukiichika.iwaram.DownloadState
 import io.github.amatsukiichika.iwaram.ScanService
 import io.github.amatsukiichika.iwaram.ScanState
 import io.github.amatsukiichika.iwaram.data.GlobalFilterHolder
@@ -18,6 +20,8 @@ import io.github.amatsukiichika.iwaram.data.observeVideos
 import io.github.amatsukiichika.iwaram.data.filterBy
 import io.github.amatsukiichika.iwaram.data.localVideoKeys
 import io.github.amatsukiichika.iwaram.data.linkIwaraId
+import io.github.amatsukiichika.iwaram.data.loadPendingDownloads
+import io.github.amatsukiichika.iwaram.data.removePendingDownload
 import io.github.amatsukiichika.iwaram.i18n.AppLanguage
 import io.github.amatsukiichika.iwaram.i18n.LanguageMode
 import io.github.amatsukiichika.iwaram.i18n.tr
@@ -132,6 +136,9 @@ class VideoViewModel(private val app: IwaraApp) : ViewModel() {
      *
      * [deleteFiles] **默认必须是 false**：只移除库条目，磁盘文件原样保留。真删文件是用户的
      * 显式选择，SAF 拒绝时要把原因报回去（[onDone] 非 null），不能静默吞掉。
+     *
+     * 删文件失败即中止：该行以及后面还没处理的源都保留。顺序必须是先删文件、后删行
+     * （见 [executeLocalDeletion]）—— 反过来的话用户以为已经删掉，重新扫描又把文件收回来。
      */
     fun removeLocalSources(
         sources: List<VideoEntity>,
@@ -140,15 +147,15 @@ class VideoViewModel(private val app: IwaraApp) : ViewModel() {
     ) {
         if (sources.isEmpty()) { onDone(null); return }
         viewModelScope.launch {
-            var error: String? = null
-            withContext(Dispatchers.IO) {
-                for (source in sources) {
-                    if (deleteFiles) {
-                        repo.deleteLocalFile(source.localUri)?.let { if (error == null) error = it }
-                    }
-                    // 行一定要删：文件删不掉却留着行，用户会以为删成功了。
-                    repo.deleteVideo(source)
-                }
+            val error = withContext(Dispatchers.IO) {
+                executeLocalDeletionBatch(
+                    videos = sources,
+                    deleteFiles = deleteFiles,
+                    // 正在播放的那一份不能删：播放器还握着它的文件句柄。
+                    playingLocalUri = LocalPlayback.currentUri,
+                    deleteFile = { repo.deleteLocalFile(it.localUri) },
+                    deleteRow = { repo.deleteVideo(it) }
+                )
             }
             onDone(error)
         }
@@ -380,13 +387,69 @@ class VideoViewModel(private val app: IwaraApp) : ViewModel() {
         }
     }
 
-    /** 仅从本地库移除该条目（不删除视频文件）；重新扫描会把文件重新入库。 */
-    fun removeFromLibrary(video: VideoEntity) {
+    /**
+     * 仅从本地库移除该条目（不删除视频文件与封面）；重新扫描会把文件重新入库。
+     * 与 [permanentlyDelete] 的唯一区别是碰不碰磁盘文件，确认弹窗也据此分两份文案。
+     */
+    fun removeFromLibrary(video: VideoEntity, onDone: (String?) -> Unit = {}) {
         viewModelScope.launch {
-            // 清关联 + 删记录收进单个 Room 事务，原子生效。
-            repo.deleteVideo(video)
+            val error = withContext(Dispatchers.IO) {
+                // 清关联 + 删记录收进单个 Room 事务，原子生效。
+                runCatching { repo.deleteVideo(video) }.exceptionOrNull()?.let(::deleteFailureMessage)
+            }
+            onDone(error)
         }
     }
+
+    /**
+     * 彻底删除一支本地视频：取消这条视频的待下载任务 → 删文件与封面 → 删库记录。
+     *
+     * 只删 [video] 这一份源文件，同组其它版本不受影响（版本列表见 [localSourcesOf]）。
+     * 任一步失败都保留数据并把原因回报给 [onDone]（非 null 时给用户看）；
+     * 成功后 [localSources] 随 observeVideos 自动刷新，不需要手动更新。
+     *
+     * 待下载任务的取消必须排在删行之前：先删记录的话，下载 worker 出队时会重新登记一条
+     * "正在下载"，列表里就多出一条指向已删视频的僵尸任务。
+     */
+    fun permanentlyDelete(video: VideoEntity, onDone: (String?) -> Unit) {
+        viewModelScope.launch {
+            var error: String? = null
+            withContext(Dispatchers.IO) {
+                val plan = planLocalDeletion(
+                    video = video,
+                    deleteFiles = true,
+                    playingLocalUri = LocalPlayback.currentUri
+                )
+                // 先判能否执行，再动下载任务：被播放守卫拒绝时不应该顺手取消别人的下载。
+                if (plan is LocalDeletionPlan.Abort) {
+                    error = plan.reason
+                } else {
+                    cancelPendingDownloadFor(video.iwaraId)
+                    error = executeLocalDeletion(
+                        plan = plan,
+                        deleteFile = { repo.deleteLocalFile(it.localUri) },
+                        deleteRow = { repo.deleteVideo(it) }
+                    )
+                }
+            }
+            onDone(error)
+        }
+    }
+
+    /** 取消同一支视频的待下载任务，并清掉它可能留下的半成品。没有任务时也是幂等的。 */
+    private suspend fun cancelPendingDownloadFor(iwaraId: String?) {
+        val id = iwaraId?.takeIf { it.isNotBlank() } ?: return
+        val pending = runCatching { repo.loadPendingDownloads() }.getOrDefault(emptyList())
+            .firstOrNull { it.videoId == id }
+        // 顺序不能反：先删下载记录的话，worker 出队会重新登记一条 running。
+        DownloadService.cancel(id)
+        pending?.docUri?.let { repo.deleteLocalFile(it) }
+        repo.removePendingDownload(id)
+        DownloadState.remove(id)
+    }
+
+    private fun deleteFailureMessage(t: Throwable): String =
+        t.message ?: tr("删除失败，请重试", "Delete failed; please try again")
 
     fun setMode(m: LibraryMode) {
         mode = m

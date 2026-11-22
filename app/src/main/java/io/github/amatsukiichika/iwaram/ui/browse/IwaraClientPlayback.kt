@@ -20,16 +20,20 @@ import io.github.amatsukiichika.iwaram.data.IwaraPlaylist
 import io.github.amatsukiichika.iwaram.data.IwaraPlaylistBody
 import io.github.amatsukiichika.iwaram.data.IwaraPostItem
 import io.github.amatsukiichika.iwaram.data.IwaraProfileData
+import io.github.amatsukiichika.iwaram.data.IwaraQualitySource
 import io.github.amatsukiichika.iwaram.data.IwaraSession
 import io.github.amatsukiichika.iwaram.data.IwaraSign
 import io.github.amatsukiichika.iwaram.data.IwaraTag
 import io.github.amatsukiichika.iwaram.data.IwaraVideoItem
+import io.github.amatsukiichika.iwaram.data.SignedQuality
 import io.github.amatsukiichika.iwaram.data.VideoEntity
 import io.github.amatsukiichika.iwaram.data.describeIwaraError
 import io.github.amatsukiichika.iwaram.data.ensureIwaraSuccess
 import io.github.amatsukiichika.iwaram.data.GlobalFilterHolder
 import io.github.amatsukiichika.iwaram.data.parseIwaraDate
+import io.github.amatsukiichika.iwaram.data.playbackSignedUrlCache
 import io.github.amatsukiichika.iwaram.data.resolveDownloadTarget
+import io.github.amatsukiichika.iwaram.data.selectPlaybackQuality
 import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.ui.DiagLog
 import io.github.amatsukiichika.iwaram.ui.QualityOption
@@ -88,12 +92,18 @@ fun IwaraClientViewModel.loadRelatedVideos(
         scope: CoroutineScope? = null,
         onDone: (List<IwaraVideoItem>) -> Unit
     ) {
-        (scope ?: viewModelScope).launch {
-            onDone(
-                runCatching {
-                    IwaraClient.call { it.relatedVideos(id, 0, RELATED_VIDEOS_LIMIT) }.results.orEmpty()
-                }.getOrNull().orEmpty()
-            )
+        val jobScope = scope ?: viewModelScope
+        jobScope.launch {
+            val related = runCatching {
+                IwaraClient.call { it.relatedVideos(id, 0, RELATED_VIDEOS_LIMIT) }.results.orEmpty()
+            }.getOrNull().orEmpty()
+            onDone(related)
+            // 列表一到就顺手预取「下一集」的签名地址（只挑 1 个；回调已经发过、不等它）：
+            // 点下一集时只剩「详情」一跳，清晰度那一跳由缓存省掉；预取失败也只是回到现取，
+            // 不影响播放，见 docs/decisions/0038-online-playback-latency.md。
+            related.firstOrNull { it.id != null && it.id != id }?.let { next ->
+                jobScope.launch { prefetchSignedUrls(next) }
+            }
         }
     }
 
@@ -122,6 +132,36 @@ fun IwaraClientViewModel.buildEntity(item: IwaraVideoItem): VideoEntity {
             metaFetched = true,
             addedAt = System.currentTimeMillis()
         )
+    }
+
+    /**
+     * 服务端清晰度 → 缓存用的签名档。档名保持服务端原样（清晰度偏好按它匹配、缓存键也按它）；
+     * 地址统一归一化成 https，`//host/path` 这类协议相对地址播放器与网络栈都不接受。
+     */
+private fun signedQualitiesOf(qualities: List<IwaraQualitySource>): List<SignedQuality> =
+        qualities.mapNotNull { q ->
+            val view = q.src?.view?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            SignedQuality(q.name.orEmpty(), IwaraSign.httpsUrl(view))
+        }
+
+    /**
+     * 预取某个未播视频的签名清晰度地址（详情 → 清晰度 → 写缓存）。只用于高概率播放的「下一集」，
+     * 限 1 个；失败静默 —— 预取只省一跳，未命中时 [resolveOnlineUrl] 照常现取，不能影响播放。
+     */
+private suspend fun IwaraClientViewModel.prefetchSignedUrls(video: IwaraVideoItem) {
+        val id = video.id?.takeIf { it.isNotBlank() } ?: return
+        // 已在缓存（刚解析过 / 另一次预取已完成）就不再打网络。
+        if (playbackSignedUrlCache.cachedQualities(id).isNotEmpty()) return
+        try {
+            val fileUrl = IwaraClient.call { it.video(id) }.fileUrl?.takeIf { it.isNotBlank() } ?: return
+            withContext(Dispatchers.IO) {
+                playbackSignedUrlCache.loadQualities(id) { signedQualitiesOf(IwaraSign.fetchQualities(fileUrl)) }
+            }
+            DiagLog.log("Iwara", "已预取下一集签名地址")
+        } catch (t: Throwable) {
+            if (t is CancellationException) throw t
+            DiagLog.log("Iwara", "预取下一集签名地址失败: " + t.javaClass.simpleName)
+        }
     }
 
     /**
@@ -164,20 +204,32 @@ fun IwaraClientViewModel.resolveOnlineUrl(
                     )
                     return@launch
                 }
-                val qualities = withContext(Dispatchers.IO) { IwaraSign.fetchQualities(fileUrl) }
-                // 档名打进诊断日志：在播放器诊断面板即可看到服务端给出的档位，
-                // 用于分辨"清晰度只剩 Source/Preview"是个例数据还是普遍问题。
-                DiagLog.log("Iwara", "清晰度档位: [" + qualities.joinToString(", ") { it.name.orEmpty().ifBlank { "未命名" } } + "]")
-                val options = qualities.mapNotNull { q ->
-                    val view = q.src?.view?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
-                    QualityOption(q.name.orEmpty().ifBlank { tr("未知", "Unknown") }, IwaraSign.httpsUrl(view))
+                // 签名地址缓存优先：预取（开播 / 下一集）或上一次解析留下的地址直接可用，
+                // 省掉「详情之后再取一次清晰度」的串行网络往返；未命中才现取，且与正在进行的
+                // 预取按视频合并成一次请求（见 SignedUrlCache.loadQualities）。
+                val cachedQualities = playbackSignedUrlCache.cachedQualities(id)
+                val qualities: List<SignedQuality> = if (cachedQualities.isNotEmpty()) {
+                    DiagLog.log("Iwara", "签名地址命中缓存，跳过清晰度解析")
+                    cachedQualities
+                } else {
+                    withContext(Dispatchers.IO) {
+                        playbackSignedUrlCache.loadQualities(id) {
+                            val fetched = IwaraSign.fetchQualities(fileUrl)
+                            // 档名打进诊断日志：在播放器诊断面板即可看到服务端给出的档位，
+                            // 用于分辨"清晰度只剩 Source/Preview"是个例数据还是普遍问题。
+                            DiagLog.log("Iwara", "清晰度档位: [" + fetched.joinToString(", ") { it.name.orEmpty().ifBlank { "未命名" } } + "]")
+                            signedQualitiesOf(fetched)
+                        }
+                    }
                 }
-                if (options.isEmpty()) throw IwaraSession.IwaraApiException(tr("没有可用的播放地址", "No playable stream available"))
+                if (qualities.isEmpty()) throw IwaraSession.IwaraApiException(tr("没有可用的播放地址", "No playable stream available"))
                 // 默认分辨率是偏好而非强制：该档缺失时回退最高可用档，但不改写设置。
-                val preferred = repo.getQualityPref()
-                val chosen = options.firstOrNull { it.name == preferred } ?: options.first()
+                val chosen = selectPlaybackQuality(repo.getQualityPref(), qualities)
+                    ?: throw IwaraSession.IwaraApiException(tr("没有可用的播放地址", "No playable stream available"))
+                val chosenName = chosen.name.ifBlank { tr("未知", "Unknown") }
+                val options = qualities.map { q -> QualityOption(q.name.ifBlank { tr("未知", "Unknown") }, q.url) }
                 reportView(id)
-                onResult(OnlinePlayData(chosen.url, detail.liked == true, options, chosen.name), null)
+                onResult(OnlinePlayData(chosen.url, detail.liked == true, options, chosenName), null)
             } catch (t: Throwable) {
                 if (t is CancellationException) throw t
                 onResult(null, describeIwaraError(t))
