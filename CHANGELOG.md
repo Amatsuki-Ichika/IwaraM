@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-11-22
+
+Downloads are verified, resumable and checkable, the app can update itself, and the player, scrollbars and overlays get their finishing pass.
+
 ### Added
 
 - A finished download is verified silently: the file's length and MP4 box structure are checked, a damaged file asks for one automatic re-download, and the second failure only notifies.
@@ -343,7 +347,8 @@ First public release.
   frosted-glass treatment for the bars.
 - **Crash log capture** — uncaught exceptions are written to a file for troubleshooting.
 
-[Unreleased]: https://github.com/Amatsuki-Ichika/IwaraM/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/Amatsuki-Ichika/IwaraM/compare/v0.2.3...HEAD
+[0.2.3]: https://github.com/Amatsuki-Ichika/IwaraM/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/Amatsuki-Ichika/IwaraM/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/Amatsuki-Ichika/IwaraM/compare/v0.2.1-rc.2...v0.2.1
 [0.2.1-rc.2]: https://github.com/Amatsuki-Ichika/IwaraM/compare/v0.2.0...v0.2.1-rc.2
