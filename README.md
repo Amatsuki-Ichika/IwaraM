@@ -64,7 +64,7 @@
 Download the latest APK from the [releases page](https://github.com/Amatsuki-Ichika/IwaraM/releases/latest)
 and install it. Release candidates are published on the same releases page and marked as
 pre-releases; the link above always points at the latest stable build. The current stable release
-is **0.2.2**.
+is **0.2.3**.
 
 The build targets **arm64-v8a** devices running **Android 8.0 (API 26)** or newer.
 
@@ -92,7 +92,7 @@ echo "sdk.dir=$ANDROID_HOME" > local.properties
 ```
 
 The version name has a single source of truth in `gradle.properties` (`app.versionName`) and can be
-overridden per build with `-Papp.versionName=0.2.2`; `versionCode` is derived from it in
+overridden per build with `-Papp.versionName=0.2.3`; `versionCode` is derived from it in
 `app/build.gradle.kts` (`major * 1,000,000 + minor * 1,000 + patch`, pre-release suffix ignored).
 
 ## Architecture
