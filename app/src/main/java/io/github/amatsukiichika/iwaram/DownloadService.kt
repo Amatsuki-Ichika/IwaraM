@@ -690,7 +690,13 @@ class DownloadService : Service() {
         val libraryDoc = documentOf(libraryRow?.localUri)
         if (libraryDoc != null && libraryFileIsComplete(libraryDoc.length(), pending?.total ?: -1L)) {
             DiagLog.log("Download", "已在本地库，跳过重复下载：${job.title}")
-            finishDownload(job, repo, libraryDoc, note = tr("本地库已有，未重复下载", "Already in your library; skipped"))
+            // 这份文件不是本次下载的产物（可能是扫描导入、手动关联 iwaraId 的 mkv/webm），
+            // 不能按 MP4 结构判坏，更不能自动删掉用户文件再重下。
+            finishDownload(
+                job, repo, libraryDoc,
+                note = tr("本地库已有，未重复下载", "Already in your library; skipped"),
+                verifyIntegrity = false
+            )
             return@withContext
         }
 
@@ -1066,13 +1072,17 @@ class DownloadService : Service() {
 
     /** 下载成功共用收尾：入库 + 本地缩略图 + 元数据补全 + 历史/待续记录清理 + 完整性校验。
      *  [note] 非空时替换完成文案（例如"本地库已有，未重复下载"）。
-     *  [expectedBytes] 服务端声明的文件长度（未知为 null），写进下载历史供之后的完整性校验比对。 */
+     *  [expectedBytes] 服务端声明的文件长度（未知为 null），写进下载历史供之后的完整性校验比对。
+     *  [verifyIntegrity] 是否做"下载后静默校验 + 坏文件自动重下"。只有本次真的下载/续传过的文件
+     *   才传 true；"本地库已有，跳过下载"的快捷路径必须传 false —— 那份文件可能是用户自己导入
+     *   或手动关联的任意格式（mkv/webm 等），按 MP4 结构判坏会误报，自动重下还会先删掉用户文件。 */
     private suspend fun finishDownload(
         job: Job,
         repo: io.github.amatsukiichika.iwaram.data.IwaraRepository,
         doc: DocumentFile,
         note: String? = null,
-        expectedBytes: Long? = null
+        expectedBytes: Long? = null,
+        verifyIntegrity: Boolean = true
     ) {
         // **若这支视频已经在库里**（同一个 localUri，典型是"文件先被扫描入库、
         // 之后又下载/续传它一次"），就以已有记录为底、只更新下载相关字段。
@@ -1157,13 +1167,18 @@ class DownloadService : Service() {
         )
         // 下载完成后静默校验一次容器结构（L2）：坏文件自动重下一次，第二次只通知。
         // 挂在"入库之后、STATE_DONE 之前"：文件已经落盘入库是事实，校验只影响完成文案与是否自动重下。
-        val verdict = runCatching { repo.checkDownloadedIntegrity(job.videoId) }
-            .getOrDefault(IntegrityVerdict.Unknown)
-        repo.markDownloadVerified(job.videoId, verdict)
+        // verifyIntegrity = false 的快捷路径不校验：文件不是本次下载的产物，见 finishDownload 的参数说明。
+        val verdict = if (verifyIntegrity) {
+            runCatching { repo.checkDownloadedIntegrity(job.videoId) }
+                .getOrDefault(IntegrityVerdict.Unknown)
+                .also { repo.markDownloadVerified(job.videoId, it) }
+        } else {
+            null
+        }
         // 每个 videoId 每进程最多自动修一次：第二次仍坏说明重下解决不了（服务端/存储），
         // 再重下只会死循环，改为只通知用户手动处理。
-        val alreadyRetried = !integrityRetriedVideoIds.add(job.videoId)
-        val autoRedownload = shouldAutoRedownload(verdict, alreadyRetried)
+        val alreadyRetried = verdict != null && !integrityRetriedVideoIds.add(job.videoId)
+        val autoRedownload = verdict != null && shouldAutoRedownload(verdict, alreadyRetried)
         if (verdict is IntegrityVerdict.Broken) {
             DiagLog.log(
                 "Download",
