@@ -1923,7 +1923,12 @@ class MainActivity : ComponentActivity() {
             state = integrityController.state,
             onConfirm = { integrityController.confirm() },
             onCancel = { integrityController.cancel() },
-            onDismissResult = { integrityController.dismissResult() }
+            onDismissResult = { integrityController.dismissResult() },
+            // 损坏时自动重下已入队；「查看下载」先关结果框再切页，避免弹窗压在新页面上。
+            onOpenDownloads = {
+                integrityController.dismissResult()
+                pushOverlay(IwaraOverlay.Downloads)
+            }
         )
 
         // 抽屉背景遮罩：全 app 唯一一层，Activity 全屏单层黑。抽屉浮窗全透明、只托面板；
@@ -1934,6 +1939,9 @@ class MainActivity : ComponentActivity() {
         Box(
             Modifier
                 .fillMaxSize()
+                // zIndex 把 Activity 这层遮罩抬到播放页等正 zIndex 内容之上：
+                // 抽屉窗口本身在所有窗口之上，只有遮罩画在 Activity 里，不抬高就会被播放页盖住。
+                .zIndex(1_000f)
                 .graphicsLayer { alpha = 0.32f * SheetScrimState.alpha }
                 .background(Color.Black)
         )

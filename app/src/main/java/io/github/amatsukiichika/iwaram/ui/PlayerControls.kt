@@ -31,7 +31,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
@@ -67,6 +66,7 @@ import androidx.compose.ui.unit.dp
 import io.github.amatsukiichika.iwaram.ui.components.GlassRoundButton
 import androidx.compose.ui.unit.sp
 import androidx.media3.common.C
+import com.kyant.backdrop.Backdrop
 import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.ui.components.AnchorMenu
 import io.github.amatsukiichika.iwaram.ui.components.AnchorMenuGeometry
@@ -380,6 +380,12 @@ private fun SeekBar(
 }
 
 
+/** 播放页顶栏圆钮：比全局 44dp 小一档（压在画面上不抢画面；用户反馈原来太大）。 */
+private val PLAYER_ROUND_BUTTON_SIZE = 38.dp
+
+/** 顶栏圆钮图标：20dp（圆钮 38dp 的常规比例）。 */
+private val PLAYER_ROUND_BUTTON_ICON_SIZE = 20.dp
+
 /**
  * 顶部控制条：返回 / 标题 / 更多。
  *
@@ -387,7 +393,15 @@ private fun SeekBar(
  * 不再是一整条黑色渐变垫底 + 透明 IconButton：视频画面被压得越亮，渐变越显脏；
  * 圆钮只占住自己那一块，标题用白色 + 投影保证可读。
  *
+ * 深浅色**跟主题反色**：浅色主题白底黑图标、深色主题黑底白图标。以前这里写死
+ * `darkSurface = true`（深色雾面 + 白图标），浅色主题下就成了白底上的浅灰圆钮。
+ *
+ * 磨砂档需要可采样的背景源：视频是 SurfaceView，Compose 录制不到，父级用**封面**构造
+ * [backdrop]（见 `rememberPosterBackdrop`）传进来，圆钮背后才是真模糊而不是半透明。
+ * 封面加载失败/半透明档时传 null，退回色罩路径。
+ *
  * @param onMore 「更多」（视频动作面板）；null = 不显示这枚圆钮（本地视频没有 iwara id）。
+ * @param backdrop 磨砂档的背景源；null = 半透明路径。
  */
 @Composable
 internal fun PlayerTopBar(
@@ -395,8 +409,8 @@ internal fun PlayerTopBar(
     title: String,
     onBack: () -> Unit,
     isFullscreen: Boolean = false,
-    onOpenDiagnostics: () -> Unit = {},
     onMore: (() -> Unit)? = null,
+    backdrop: Backdrop? = null,
     modifier: Modifier = Modifier
 ) {
     // 同底栏：稳态不建合成图层，避免压在视频 SurfaceView 上的 1px 接缝。
@@ -438,7 +452,9 @@ internal fun PlayerTopBar(
                 icon = Icons.AutoMirrored.Filled.ArrowBack,
                 contentDescription = tr("返回", "Back"),
                 onClick = onBack,
-                darkSurface = true
+                backdrop = backdrop,
+                size = PLAYER_ROUND_BUTTON_SIZE,
+                iconSize = PLAYER_ROUND_BUTTON_ICON_SIZE
             )
             Text(
                 text = title,
@@ -453,21 +469,14 @@ internal fun PlayerTopBar(
                     .weight(1f)
                     .padding(horizontal = 2.dp)
             )
-            // 「播放诊断」入口只在 Debug 开关打开时可见，日常界面不出现。
-            if (LocalDebugDetails.current) {
-                GlassRoundButton(
-                    icon = Icons.Filled.BugReport,
-                    contentDescription = tr("播放诊断", "Playback diagnostics"),
-                    onClick = onOpenDiagnostics,
-                    darkSurface = true
-                )
-            }
             if (onMore != null) {
                 GlassRoundButton(
                     icon = Icons.Filled.MoreVert,
                     contentDescription = tr("更多", "More"),
                     onClick = onMore,
-                    darkSurface = true
+                    backdrop = backdrop,
+                    size = PLAYER_ROUND_BUTTON_SIZE,
+                    iconSize = PLAYER_ROUND_BUTTON_ICON_SIZE
                 )
             }
         }

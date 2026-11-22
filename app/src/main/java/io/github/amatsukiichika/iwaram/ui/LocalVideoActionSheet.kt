@@ -28,15 +28,19 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import io.github.amatsukiichika.iwaram.data.VideoEntity
 import io.github.amatsukiichika.iwaram.i18n.tr
-import io.github.amatsukiichika.iwaram.ui.components.AppBottomSheet
 
 /**
- * 本地库卡片长按后的动作面板（视觉参照 .zcode/plans/ui-mockups.html 图 2）。
+ * 本地库卡片长按后的动作面板（视觉参照 .zcode/plans/ui-mockups.html 图 2-①）。
  *
  * 只负责"选哪件事"，不在这里做任何删除：确认弹窗与执行都在 [LibraryScreen]，
  * 避免面板自身持有会随关闭丢失的删除状态。
+ *
+ * 外面必须由 [io.github.amatsukiichika.iwaram.ui.components.AppBottomSheet] 承载：
+ * 那个宿主提供独立窗口、把手、滚动和遮罩；本函数只画内容，所以左右留 10dp、底部留 6dp
+ * （宿主内容区自己带系统栏 padding，自己再加大 padding 会把取消行顶到手势条上面）。
  *
  * 分组：关联/检查类操作在上，会动数据的操作在下（分隔线隔开），最后一组是红色不可恢复项 ——
  * 颜色是这一项唯一的危险提示，不能和其它行共用主色。
@@ -54,8 +58,8 @@ internal fun LocalVideoActionsSheet(
     Column(
         Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp)
-            .padding(bottom = 16.dp)
+            .padding(horizontal = 10.dp)
+            .padding(bottom = 6.dp)
     ) {
         ActionSheetEntry(
             icon = Icons.Outlined.Link,
@@ -68,6 +72,7 @@ internal fun LocalVideoActionsSheet(
             onClick = onManualLink
         )
         // 只有匹配到 iwaraId（能定位到下载记录）才提供完整性检查。
+        // 副标题不写文件大小：本地库实体里没有 size 字段，拿不到真实值就不编（mockup 示例值是假的）。
         if (onCheckIntegrity != null && !video.iwaraId.isNullOrBlank()) {
             ActionSheetEntry(
                 icon = Icons.Filled.CheckCircle,
@@ -79,7 +84,7 @@ internal fun LocalVideoActionsSheet(
         // 分组线：上面是"不删东西"的操作，下面是会改库/删文件的。
         HorizontalDivider(
             color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
         )
         ActionSheetEntry(
             icon = Icons.Outlined.RemoveCircleOutline,
@@ -90,15 +95,15 @@ internal fun LocalVideoActionsSheet(
         ActionSheetEntry(
             icon = Icons.Filled.DeleteForever,
             title = tr("彻底删除…", "Delete permanently…"),
-            subtitle = tr("同时删除本地文件和封面，不可恢复", "Deletes the local file and cover; irreversible"),
+            subtitle = tr("删除文件与记录，不可恢复", "Deletes the file and record; irreversible"),
             danger = true,
             onClick = onPermanentDelete
         )
-        Spacer(Modifier.height(12.dp))
-        // 取消行：居中、浅底，和上面的操作行区分开（图 2 的最后一行）。
+        // 取消行：居中、浅底，和上面的操作行区分开（图 2-① 的最后一行）。
         Box(
             modifier = Modifier
                 .fillMaxWidth()
+                .padding(start = 6.dp, end = 6.dp, top = 8.dp)
                 .clip(RoundedCornerShape(16.dp))
                 .background(MaterialTheme.colorScheme.surfaceContainer)
                 .clickable(onClick = onDismiss)
@@ -107,14 +112,14 @@ internal fun LocalVideoActionsSheet(
         ) {
             Text(
                 text = tr("取消", "Cancel"),
-                style = MaterialTheme.typography.labelLarge,
+                fontSize = 14.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }
 }
 
-/** 一行动作：40dp 圆形图标底 + 标题/说明两行；[danger] 时图标与标题都用错误色。 */
+/** 一行动作：40dp 圆形图标底 + 标题/说明两行；[danger] 时图标底 14% error、图标与标题都用 error。 */
 @Composable
 private fun ActionSheetEntry(
     icon: ImageVector,
@@ -123,7 +128,7 @@ private fun ActionSheetEntry(
     danger: Boolean = false,
     onClick: () -> Unit
 ) {
-    val accent = if (danger) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+    val iconTint = if (danger) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
     val iconBackground = if (danger) {
         MaterialTheme.colorScheme.error.copy(alpha = 0.14f)
     } else {
@@ -135,7 +140,7 @@ private fun ActionSheetEntry(
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
             .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 10.dp)
+            .padding(horizontal = 12.dp, vertical = 12.dp)
     ) {
         Box(
             modifier = Modifier
@@ -147,7 +152,7 @@ private fun ActionSheetEntry(
             Icon(
                 imageVector = icon,
                 contentDescription = null,
-                tint = accent,
+                tint = iconTint,
                 modifier = Modifier.size(20.dp)
             )
         }
@@ -155,13 +160,15 @@ private fun ActionSheetEntry(
         Column(Modifier.weight(1f)) {
             Text(
                 text = title,
-                style = MaterialTheme.typography.bodyLarge,
+                fontSize = 14.5.sp,
+                lineHeight = 19.5.sp,
                 color = if (danger) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
             )
-            Spacer(Modifier.height(2.dp))
+            Spacer(Modifier.height(1.dp))
             Text(
                 text = subtitle,
-                style = MaterialTheme.typography.bodySmall,
+                fontSize = 11.5.sp,
+                lineHeight = 16.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }

@@ -37,7 +37,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.outlined.RemoveCircleOutline
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.DropdownMenu
@@ -60,6 +62,7 @@ import io.github.amatsukiichika.iwaram.ui.browse.CompactSearchSlot
 import io.github.amatsukiichika.iwaram.ui.browse.SearchResultChip
 import io.github.amatsukiichika.iwaram.ui.browse.RATING_OPTIONS
 import io.github.amatsukiichika.iwaram.ui.browse.SEARCH_ROW_HEIGHT
+import io.github.amatsukiichika.iwaram.ui.components.AppBottomSheet
 import io.github.amatsukiichika.iwaram.ui.components.AppDialog
 import io.github.amatsukiichika.iwaram.ui.components.ScrollToTopButton
 import io.github.amatsukiichika.iwaram.ui.components.SearchFocusEvent
@@ -417,24 +420,34 @@ fun LibraryScreen(
 
     // 本地卡片长按：先出动作面板；面板里的删除类动作再各开一个二级确认。
     // 面板与确认框用不同的目标状态，切换时同一帧只保留一层浮层。
+    // 面板必须由 AppBottomSheet 托管：独立窗口负责把手、滚动、遮罩和系统栏 padding，
+    // 直接铺在页面里就是"没有背景、能点穿到后面、被悬浮底栏盖住"的透明层（rc3 用户反馈）。
     actionTarget?.let { target ->
-        LocalVideoActionsSheet(
-            video = target,
-            onManualLink = {
-                actionTarget = null
-                linkTarget = target
-            },
-            onRemoveFromLibrary = {
-                actionTarget = null
-                pendingRemove = target
-            },
-            onPermanentDelete = {
-                actionTarget = null
-                pendingDelete = target
-            },
-            onCheckIntegrity = onCheckIntegrity?.let { check -> { check(target) } },
-            onDismiss = { actionTarget = null }
-        )
+        AppBottomSheet(onDismiss = { actionTarget = null }) {
+            LocalVideoActionsSheet(
+                video = target,
+                onManualLink = {
+                    actionTarget = null
+                    linkTarget = target
+                },
+                onRemoveFromLibrary = {
+                    actionTarget = null
+                    pendingRemove = target
+                },
+                onPermanentDelete = {
+                    actionTarget = null
+                    pendingDelete = target
+                },
+                // 先收面板再开完整性确认框：两层浮层不同时在场，避免确认框压在面板上。
+                onCheckIntegrity = onCheckIntegrity?.let { check ->
+                    {
+                        actionTarget = null
+                        check(target)
+                    }
+                },
+                onDismiss = { actionTarget = null }
+            )
+        }
     }
 
     pendingRemove?.let { target ->
@@ -442,20 +455,20 @@ fun LibraryScreen(
             visible = true,
             onDismiss = { pendingRemove = null },
             title = tr("从库中移除？", "Remove from library?"),
-            text = target.fileName + "\n\n" +
-                tr(
-                    "仅从本地库移除该条目，不删除视频文件；重新扫描可找回。",
-                    "Removes this entry from the local library only; the video file is kept and rescanning restores it."
-                ),
-            confirmText = tr("确认移除", "Remove"),
+            text = tr(
+                "将从本地库移除《${target.title}》，视频文件保留；重新扫描可找回。",
+                "Removes \"${target.title}\" from the library; the video file is kept and a rescan restores it."
+            ),
+            icon = Icons.Outlined.RemoveCircleOutline,
+            // 只是移除记录、文件还在，算可恢复操作：确认按钮保持主色，不用危险红。
+            confirmText = tr("移除", "Remove"),
             onConfirm = {
                 pendingRemove = null
                 vm.removeFromLibrary(target) { error ->
                     if (error != null) Toast.makeText(context, error, Toast.LENGTH_LONG).show()
                 }
             },
-            dismissText = tr("取消", "Cancel"),
-            confirmDestructive = true
+            dismissText = tr("取消", "Cancel")
         )
     }
 
@@ -474,14 +487,14 @@ fun LibraryScreen(
             visible = true,
             onDismiss = { pendingDelete = null },
             title = tr("彻底删除？", "Delete permanently?"),
+            // 正文三件事：删哪条、不可撤销、其它版本不受影响（mockup 图 2-② 的顺序）。
             text = tr(
-                "将删除《${target.title}》的本地文件与封面。此操作不可撤销，重新扫描也找不回来。",
-                "Deletes the local file and cover of \"${target.title}\". This cannot be undone, and a rescan cannot bring it back."
-            ) + otherVersionsNote + "\n\n" +
-                tr(
-                    "如果该视频正在下载，下载任务会一并取消。",
-                    "If this video is downloading, the download task is cancelled too."
-                ),
+                "将删除《${target.title}》的本地文件与记录。此操作不可撤销，重新扫描也找不回来。",
+                "Deletes the local file and record of \"${target.title}\". This cannot be undone, and a rescan cannot bring it back."
+            ) + otherVersionsNote,
+            icon = Icons.Filled.DeleteOutline,
+            iconTint = MaterialTheme.colorScheme.error,
+            // 危险动作只做红色文字按钮，不做实心大按钮。
             confirmText = tr("彻底删除", "Delete permanently"),
             onConfirm = {
                 pendingDelete = null

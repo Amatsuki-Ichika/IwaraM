@@ -105,8 +105,9 @@ internal fun integrityConfirmMessage(target: IntegrityCheckTarget): String = tr(
 internal fun integrityRunningTitle(): String = tr("正在检查…", "Checking…")
 
 internal fun integrityRunningMessage(target: IntegrityCheckTarget): String = tr(
-    "正在读取《${target.title}》的文件结构并核对大小，不会修改或删除文件。",
-    "Reading the structure of \"${target.title}\" and checking its size; the file is left untouched."
+    // 对齐 mockup 图 4-② 的副标题：检查中的弹窗标题是「正在检查…」，这一行只说明"在核对什么"。
+    "《${target.title}》· 正在核对文件结构与大小",
+    "\"${target.title}\" · Checking file structure and size"
 )
 
 internal fun integrityResultTitle(verdict: IntegrityVerdict): String = when (verdict) {

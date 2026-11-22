@@ -435,9 +435,6 @@ fun PlayerScreen(
         DiagLog.log(TAG, "$reason → 重建播放器实例（第 ${playerEpoch + 1} 代）")
         playerEpoch++
     }
-    // 播放诊断面板（右上角 ⋮ 打开）。
-    var showDiagnostics by remember { mutableStateOf(false) }
-
     DisposableEffect(player) {
         // 使用规范的媒体音频通道并接管音频焦点：可打断后台音乐，失去焦点时自动暂停。
         player.setAudioAttributes(
@@ -1023,7 +1020,6 @@ fun PlayerScreen(
         qualityLabel = qualityLabel,
         srEnabled = srEnabled,
         srModel = srModel,
-        showDiagnostics = showDiagnostics,
         playError = playError,
         resolveError = resolveError,
         debugDetails = debugDetails,
@@ -1046,8 +1042,6 @@ fun PlayerScreen(
         onTopBarBack = topBarBack,
         onBack = onBack,
         onRetryResolve = onRetryResolve,
-        onOpenDiagnostics = { showDiagnostics = true },
-        onDismissDiagnostics = { showDiagnostics = false },
         onToggleFullscreen = { isFullscreen = !isFullscreen },
         onSelectSr = { model ->
             if (model == null) {

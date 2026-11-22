@@ -42,6 +42,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import io.github.amatsukiichika.iwaram.data.VideoEntity
+import io.github.amatsukiichika.iwaram.ui.components.rememberPosterBackdrop
 import java.lang.ref.WeakReference
 
 /**
@@ -106,7 +107,6 @@ internal fun PlayerContent(
     qualityLabel: String?,
     srEnabled: Boolean,
     srModel: String,
-    showDiagnostics: Boolean,
     playError: PlayerErrorUi?,
     resolveError: String?,
     debugDetails: Boolean,
@@ -127,8 +127,6 @@ internal fun PlayerContent(
     onBack: () -> Unit,
     /** 解析失败面板的「重试」。 */
     onRetryResolve: (() -> Unit)?,
-    onOpenDiagnostics: () -> Unit,
-    onDismissDiagnostics: () -> Unit,
     onToggleFullscreen: () -> Unit,
     onSelectSr: (String?) -> Unit,
     onSelectQuality: (QualityOption) -> Unit,
@@ -286,24 +284,7 @@ internal fun PlayerContent(
                     modifier = Modifier.align(Alignment.Center)
                 )
 
-                // 播放诊断面板（右上角 ⋮ 打开）：状态 / 日志 双 tab + 一键复制。
-                if (showDiagnostics) {
-                    DiagnosticsSheet(
-                        onDismiss = onDismissDiagnostics,
-                        isLocal = isLocal,
-                        qualityLabel = qualityLabel,
-                        videoWidth = videoWidth,
-                        videoHeight = videoHeight,
-                        localWidth = localVideoWidth,
-                        localHeight = localVideoHeight,
-                        positionMs = positionMs,
-                        durationMs = durationMs,
-                        // 诊断面板里始终看完整技术串（detail 轨）
-                        playError = playError?.detail
-                    )
-                }
-
-                // 源文件管理（本地多源）：与诊断面板同层，盖在播放页之上。
+                // 源文件管理（本地多源）：盖在播放页之上。
                 if (showSources && localSources.size > 1) {
                     PlayerSourcesSheet(
                         sources = localSources,
@@ -316,14 +297,19 @@ internal fun PlayerContent(
                     )
                 }
 
+                // 顶栏两枚圆钮的磨砂背景源：视频是 SurfaceView 录不到，用封面近似画面
+                // （只在磨砂档加载；半透明/关档返回 null → 走色罩）。
+                val playerTopBarBackdrop = rememberPosterBackdrop(
+                    video.localThumbnailPath ?: video.thumbnailUrl
+                )
                 // 顶部短条渐变遮罩：返回 + 标题（淡入淡出 + 上滑动画）。
                 PlayerTopBar(
                     visible = controlsVisible,
                     title = video.title,
                     onBack = onTopBarBack,
                     isFullscreen = isFullscreen,
-                    onOpenDiagnostics = onOpenDiagnostics,
                     onMore = onOpenMore,
+                    backdrop = playerTopBarBackdrop,
                     modifier = Modifier
                         .align(Alignment.TopCenter)
                         .zIndex(1f)

@@ -78,8 +78,8 @@ class IwaraRepository(
      * （那里是不提供设置时的兜底，这里是读不到 pref 时的兜底）。
      */
     private companion object {
-        /** 与 `GlassMaterial.DEFAULT_GLASS_OPACITY` 同值（0–100% 语义，默认 80%）。 */
-        const val DEFAULT_GLASS_OPACITY = 0.80f
+        /** 与 `GlassMaterial.DEFAULT_GLASS_OPACITY` 同值（0–100% 语义，默认 70%）。 */
+        const val DEFAULT_GLASS_OPACITY = 0.70f
 
         /** 与 `GlassMaterial` 的默认材质档位一致：2 = 液态玻璃（磨砂）。 */
         const val DEFAULT_GLASS_MODE = 2

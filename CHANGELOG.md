@@ -25,6 +25,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Dialogs and long-press action sheets open in their own windows, so a dialog or sheet is always drawn above the player, the floating navigation bar and the drawer scrim; the local-card sheet is now modal with a visible scrim.
+
+- The default glass opacity is 70% instead of 80%.
+
+- The player's back and overflow buttons are separate floating glass buttons that follow the theme instead of a forced dark circle: white with dark icons on the light theme, dark with light icons on the dark theme. They shrink to 38 dp, and in frosted mode they blur the video's cover behind themselves instead of only tinting.
+
+- The player top bar no longer shows the debug diagnostics button; the diagnostics sheet is still under Settings.
+
 - Opening an author from the player pushes the author page above the player instead of closing it: back returns to the still-loaded video, an already open author page is reused rather than duplicated, and playback pauses while the page covers it.
 
 - The player's back and overflow buttons are separate floating glass buttons that share the scroll-to-top material; the title fades out with the controls.
@@ -66,6 +74,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Opening a page from a long-press sheet now slides it in over the sheet, matching every other overlay push.
 
 ### Fixed
+
+- The integrity check dialog can no longer be covered by the player or the floating navigation bar, and it keeps the check private while running: the scrim and back press do not dismiss it, and a damaged result offers a "View downloads" shortcut.
+
+- The local library long-press sheet is no longer translucent, click-through and cut off by the floating navigation bar; it uses the shared bottom sheet host and the mockup's row style, and its confirmation dialogs use the shared dialog window.
 
 - Removing a local video from the library no longer deletes its record when the file itself cannot be deleted; the row stays and an error is shown.
 
