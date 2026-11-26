@@ -202,6 +202,12 @@ fun PlayerScreen(
 ) {
     val context = LocalContext.current
     val activity = remember { context.findActivity() }
+    // 登记"播放页当前挂着哪份本地文件"：删除路径据此拒绝删正在播放的那一份。
+    // 必须放在页面级：详情区在全屏时被移除，登记若跟着详情区销毁，全屏下就能删掉正在播放的文件。
+    DisposableEffect(video.localUri) {
+        LocalPlayback.currentUri = video.localUri.takeIf { it.isNotBlank() }
+        onDispose { LocalPlayback.currentUri = null }
+    }
     // HTTP 源走 OkHttp（IwaraClient.mediaHttp）：与播放地址解析同一网络栈与浏览器头，
     // 并对带 expires 的地址动态附加 X-Version 签名。Iwara 的 CDN/反爬对
     // DefaultHttpDataSource 底层的 HttpURLConnection 指纹不友好（设备端普遍 4004）；
@@ -369,7 +375,9 @@ fun PlayerScreen(
     // Debug 开关（组合期捕获一次；回调 lambda 里读不了 CompositionLocal）。
     val debugDetails = LocalDebugDetails.current
     // 在线播放自动重试标记：每个解析周期只自动重试一次，防止死循环。
-    var autoRetried by remember { mutableStateOf(false) }
+    var autoRetryCount by remember { mutableStateOf(0) }
+    // 预算按作品键复位，不按签名地址：重新解析必然换 URL，用 URL 当身份会无限重试。
+    var autoRetryBudgetKey by remember { mutableStateOf<String?>(null) }
     // 1003 "Detaching surface timed out" 的自动恢复计数（防死循环，连发 2 次仍失败才报错面板）。
     var detachRetries by remember { mutableStateOf(0) }
     // 切模型相关 1000 错误（dropFrame 空队列）的自动恢复计数（同上，限 2 次）。
@@ -569,10 +577,10 @@ fun PlayerScreen(
                 // 在线播放遇可重试状态码时自动重新解析一次（短时效地址可能刚好过期）。
                 val http = chain.filterIsInstance<HttpDataSource.InvalidResponseCodeException>().firstOrNull()
                 val httpCode = http?.responseCode
-                if (currentOnline != null && !autoRetried &&
+                if (currentOnline != null && mayRetryHttp(autoRetryCount) &&
                     httpCode != null && httpCode in AUTO_RETRY_HTTP_CODES
                 ) {
-                    autoRetried = true
+                    autoRetryCount++
                     playError = null
                     currentOnline?.onRetry()
                 } else {
@@ -665,7 +673,12 @@ fun PlayerScreen(
         preparedUrl = mediaUrl
         preparedVideoKey = watchKey
         playError = null
-        autoRetried = false
+        // 403/404/410 的自动重解析额度只在换作品时复位；同一个作品的签名地址每次重解析都会变，
+        // 按 URL 复位会让坏 CDN 地址无限 resolve→install→403。
+        if (shouldResetRetryBudget(autoRetryBudgetKey, watchKey)) {
+            autoRetryBudgetKey = watchKey
+            autoRetryCount = 0
+        }
         // 自动恢复的重试预算只在**换了片源**时清零。这里曾经无条件 `modelRetries = 0`，
         // 而 1000 的恢复路径正是"换代 → 新实例 → 标准装片"，于是每轮都把自己的额度还回去，
         // 上限形同不存在（同一部片可无限重建实例）。1003 的计数此前从不复位，
@@ -1055,6 +1068,8 @@ fun PlayerScreen(
         localSources = localSources,
         onDeleteLocalSources = onDeleteLocalSources,
         onRetryPlay = {
+            // 用户手动重试是新的意图：退还自动重解析额度，否则两次 CDN 拒绝后再点重试仍会被预算挡住。
+            autoRetryCount = 0
             if (online != null) online.onRetry() else {
                 playError = null
                 currentPlayer.prepare()

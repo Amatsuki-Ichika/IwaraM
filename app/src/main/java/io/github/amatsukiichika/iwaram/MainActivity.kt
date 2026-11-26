@@ -1162,24 +1162,23 @@ class MainActivity : ComponentActivity() {
             },
             openRelations = { uid, kind -> pushOverlay(IwaraOverlay.Relations(uid, kind)) },
             openSettings = { openSettings() },
-            openTagVideos = { tag ->
+            openTagVideos = { tag, online ->
                 val top = overlays.lastOrNull()?.overlay
                 when {
-                    // 已在该 tag 页：不重复压栈
-                    top is IwaraOverlay.TagVideos && top.tagId == tag -> {}
-                    // 顶层已是别的 tag：原位替换
-                    top is IwaraOverlay.TagVideos ->
+                    // 已在该 tag 页：不重复压栈（只有在线 tag 才有这个二级页）。
+                    online && top is IwaraOverlay.TagVideos && top.tagId == tag -> {}
+                    // 顶层已是别的 tag：原位替换。
+                    online && top is IwaraOverlay.TagVideos ->
                         overlays[overlays.lastIndex] = overlays.last().copy(overlay = IwaraOverlay.TagVideos(tag))
                     // 点 tag 一律回到底页 + 就地筛选，不再留在作者页，也不再新压一层 tag 二级页。
-                    // 两边都先清空二级页栈（回到底页）再筛选：
-                    //   - 在线 → 在线流按该 tag 筛选（在线卡片给的是 tag 标识，会写进搜索框 `#tag`）；
-                    //   - 本地 → 本地库按该 tag 筛选（本地卡片给的是 tag 名字，hasTag() 按名字比对），
-                    //           同时切回「管理器」tab。
-                    currentTab == HomeTab.VIDEO -> {
+                    // 来源由卡片传进来：在线卡片给的是 tag 标识（写进搜索框 `#tag`），
+                    // 本地卡片给的是 tag 名字（hasTag() 按名字比对）。以前按 currentTab 猜，
+                    // 从「我的」页打开播放列表或在播放页点 tag 时，在线 tag 会被当成地库筛选。
+                    online -> {
                         overlays.clear()
-                        // 必须先切回「视频」分段再筛：筛选结果只覆盖在视频分段之上，
-                        // 停在订阅/图片/帖子分段时点 tag 筛选不会生效。
+                        // 先切回「视频」tab 与视频分段，再筛：否则底部还停在「我的」/别的分段。
                         // 顺序不能反：`selectVideoSegment` 内部会 `clearSearch()`，先筛后切会被清掉。
+                        currentTab = HomeTab.VIDEO
                         cvm.selectVideoSegment(Segment.VIDEOS)
                         cvm.searchByTag(tag)
                     }
@@ -1855,7 +1854,7 @@ class MainActivity : ComponentActivity() {
                         // 在线视频的 tag：视频页内就地筛选（不弹页）；本地视频的 tag 保持管理器筛选。
                         if (prs.currentOnline != null) {
                             closePlayer()
-                            navActions.openTagVideos(tag)
+                            navActions.openTagVideos(tag, true)
                         } else {
                             vm.selectTag(tag)
                             closePlayer()

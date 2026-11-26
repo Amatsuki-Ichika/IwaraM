@@ -55,7 +55,7 @@ fun OnlineVideoCard(video: IwaraVideoItem, actions: IwaraNavActions) {
         onClick = { actions.playVideo(video) },
         onLongClick = { actions.openVideoActions(video) },
         onAuthorClick = { video.user?.let { u -> actions.openAccountProfile(u) } },
-        onTagClick = { actions.openTagVideos(it) }
+        onTagClick = { actions.openTagVideos(it, true) }
     )
 }
 

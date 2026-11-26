@@ -28,9 +28,8 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
@@ -301,9 +300,15 @@ fun ProfileOverlay(
         val next = if (force || !st.loaded) 0 else st.page + 1
         videos = st.copy(loading = true, error = null)
         cvm.loadUserVideos(id, next, sort, scope = scope) { list, end, err ->
+            val (merged, added) =
+                if (force) list to list.size
+                else appendDistinct(videos.items, list, OnlineIdentity::video)
             videos = videos.copy(
-                items = if (force) list else videos.items + list,
-                page = next, end = end, loading = false, loaded = true, error = err
+                items = merged,
+                page = next,
+                // 整页都是重复项 = 偏移分页在页边界重叠；按"到底"处理，避免空转请求。
+                end = end || (!force && added == 0),
+                loading = false, loaded = true, error = err
             )
         }
     }
@@ -317,9 +322,14 @@ fun ProfileOverlay(
         val next = if (force || !st.loaded) 0 else st.page + 1
         images = st.copy(loading = true, error = null)
         cvm.loadUserImages(id, next, sort, scope = scope) { list, end, err ->
+            val (merged, added) =
+                if (force) list to list.size
+                else appendDistinct(images.items, list, OnlineIdentity::image)
             images = images.copy(
-                items = if (force) list else images.items + list,
-                page = next, end = end, loading = false, loaded = true, error = err
+                items = merged,
+                page = next,
+                end = end || (!force && added == 0),
+                loading = false, loaded = true, error = err
             )
         }
     }
@@ -333,9 +343,14 @@ fun ProfileOverlay(
         val next = if (force || !st.loaded) 0 else st.page + 1
         posts = st.copy(loading = true, error = null)
         cvm.loadUserPosts(id, next, sort, scope = scope) { list, end, err ->
+            val (merged, added) =
+                if (force) list to list.size
+                else appendDistinct(posts.items, list, OnlineIdentity::post)
             posts = posts.copy(
-                items = if (force) list else posts.items + list,
-                page = next, end = end, loading = false, loaded = true, error = err
+                items = merged,
+                page = next,
+                end = end || (!force && added == 0),
+                loading = false, loaded = true, error = err
             )
         }
     }
@@ -898,6 +913,9 @@ private fun AuthorVideosGrid(
     // 订阅列表消费端的防抖视图（打字期间不重算）。
     val filter by GlobalFilterHolder.listState.collectAsStateWithLifecycle()
     val shownRows = remember(rows, filter) { rows.filterBy(filter, ::authorRowKeys) }
+    // LazyGrid 的 key 必须全列表唯一：页拼接已用 appendDistinct 去重，这里再兜一层，
+    // 覆盖本地/在线合并后仍可能出现的内容重复；重复 key 会让整个网格抛异常。
+    val shownKeys = remember(shownRows) { uniqueLazyKeys(shownRows) { it.key } }
 
     // 在线还在路上、而本地已经铺满屏幕 → 底部挂一条过渡提示（仅"全部"模式）。
     val showOnlineHint = sourceFilter != "本地" && onlineReady && localVideos.isNotEmpty() &&
@@ -985,13 +1003,13 @@ private fun AuthorVideosGrid(
             } else {
                 // 单一 items 块：本地/在线混排，全部带 animateItem —— 在线到达时命中的本地行
                 //   以 placement 动画滑到自己的在线位置、在线行淡入补位。
-                items(shownRows, key = { it.key }) { row ->
+                itemsIndexed(shownRows, key = { index, _ -> shownKeys[index] }) { index, row ->
                     Box(Modifier.animateItem()) {
                         when (row) {
                             is AuthorVideoRow.LocalV -> VideoCard(
                                 video = row.video,
                                 onClick = { actions.playLocalVideo(row.video) },
-                                onTagClick = { actions.openTagVideos(it) },
+                                onTagClick = { actions.openTagVideos(it, false) },
                                 showTags = true,
                                 // 与在线条目共用同一个设置开关（组件内部还会再判 rating 是否真为 ecchi）。
                                 showR18Tag = LocalShowR18Tag.current,

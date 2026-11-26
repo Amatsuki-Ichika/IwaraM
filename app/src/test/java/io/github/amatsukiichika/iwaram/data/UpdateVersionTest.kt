@@ -122,9 +122,18 @@ class UpdateVersionTest {
 
     @Test
     fun prereleaseUpgradesToStableReleaseOfSameCoreVersion() {
-        // versionCode 忽略预发布：rc 与正式版同码，这是唯一允许原地换正式版的判据二。
+        // versionCode 忽略预发布：rc 与正式版同码，此时按语义化版本比较预发布段。
         assertTrue(needsUpdate("0.2.2-rc.1", "0.2.2", 2002, 2002))
         assertTrue(needsUpdate("v0.2.2-rc.2", "v0.2.2", 2002, 2002))
+    }
+
+    @Test
+    fun betaChannelUpgradesBetweenPrereleasesOfTheSameCoreVersion() {
+        // 测试版通道的核心用途：同一核心版本的后续 RC 必须能收到。
+        assertTrue(needsUpdate("0.2.3-rc.1", "0.2.3-rc.2", 2003, 2003))
+        assertTrue(needsUpdate("0.2.3-rc.2", "0.2.3-rc.3", 2003, 2003))
+        assertTrue(needsUpdate("0.2.3-beta.2", "0.2.3-beta.10", 2003, 2003))
+        assertFalse("旧 RC 不能覆盖新 RC", needsUpdate("0.2.3-rc.2", "0.2.3-rc.1", 2003, 2003))
     }
 
     @Test

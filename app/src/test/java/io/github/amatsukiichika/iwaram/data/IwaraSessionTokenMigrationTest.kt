@@ -95,6 +95,19 @@ class IwaraSessionTokenMigrationTest {
     }
 
     @Test
+    fun `an access token without a refresh token is not restored`() {
+        // 没有 refresh token 的 access token 不能独立构成会话；旧实现会把它读回内存，
+        // 登出后仍能从磁盘"复活"并注入到请求里。
+        prefs.edit().putString("iwara_access_token", "orphan-access-token").commit()
+
+        IwaraSession.restore(context)
+
+        assertFalse(IwaraSession.isLoggedIn)
+        assertNull(IwaraSession.accessTokenFlow())
+        assertFalse("孤立 access token 应从盘上清掉", prefs.contains("iwara_access_token"))
+    }
+
+    @Test
     fun `keystore unavailable stores explicit plaintext prefix and reports degraded`() {
         useUnavailableKeystore()
         prefs.edit().putString("iwara_refresh_token", "legacy-refresh-token").commit()

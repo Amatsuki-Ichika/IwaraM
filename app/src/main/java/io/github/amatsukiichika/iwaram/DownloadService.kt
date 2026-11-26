@@ -36,6 +36,7 @@ import io.github.amatsukiichika.iwaram.data.DownloadIncompleteException
 import io.github.amatsukiichika.iwaram.data.deleteReplacedVideoRow
 import io.github.amatsukiichika.iwaram.data.libraryFileIsComplete
 import io.github.amatsukiichika.iwaram.data.integrityCheckEntry
+import io.github.amatsukiichika.iwaram.data.reserveDownloadSlot
 import io.github.amatsukiichika.iwaram.data.upsertDownloadedVideo
 import io.github.amatsukiichika.iwaram.data.videoRowByIwaraId
 import io.github.amatsukiichika.iwaram.data.videoRowByUri
@@ -68,6 +69,7 @@ import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.ui.DiagLog
 import okhttp3.Request
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArraySet
 
 /**
@@ -415,6 +417,15 @@ class DownloadService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val queue = Channel<Job>(Channel.UNLIMITED)
 
+    /**
+     * 框架交付过的最大 startId。
+     *
+     * 被去重丢弃的 start 不会进入队列，worker 收尾时只有自己那条 job 的 startId；
+     * 若不记下最新值，`stopSelf(旧 startId)` 会被框架忽略（已有更新的 start），服务空转不退出。
+     */
+    @Volatile
+    private var latestStartId = 0
+
     data class Job(
         val videoId: String,
         val title: String,
@@ -460,12 +471,16 @@ class DownloadService : Service() {
                             }
                         } finally {
                             activeJobs.remove(job.videoId)
+                            enqueuedVideoIds.remove(job.videoId)
                         }
                     },
                     // 排队期间被取消的任务：出队即丢弃，绝不执行（旧的取消只清了记录与列表条目，
                     // Channel 里的 job 原封不动，worker 出队后又把任务写回「正在下载」并开下）。
                     isCancelled = { job -> control.consumeCancel(job.videoId) },
-                    onCancelled = { job -> discardCancelled(job) },
+                    onCancelled = { job ->
+                        enqueuedVideoIds.remove(job.videoId)
+                        discardCancelled(job)
+                    },
                     onIdle = { lastStartId -> stopIfIdle(lastStartId) }
                 )
             }
@@ -485,12 +500,14 @@ class DownloadService : Service() {
         // 确实是最后交付的 startId 时服务才真正停止。前提是任务在 onStartCommand
         // 内同步入队（入队序 = startId 交付序，见 onStartCommand 注释）。
         stopForeground(STOP_FOREGROUND_REMOVE)
-        stopSelf(lastStartId)
+        // 用见过的最新 startId：被去重丢弃的 start 也算一次交付，否则这里会被框架忽略。
+        stopSelf(maxOf(lastStartId, latestStartId))
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        latestStartId = maxOf(latestStartId, startId)
         val job = intent?.let {
             val id = it.getStringExtra(EXTRA_ID) ?: return@let null
             Job(
@@ -516,6 +533,12 @@ class DownloadService : Service() {
         // 必须在 onStartCommand 内立即 startForeground（worker 可能正忙于上一个任务，
         // 排队中的新任务等不到 5 秒约束）；后续通知由 runDownload 的进度回调接管。
         startForeground(PROGRESS_NOTIF_ID, progressNotification(tr("准备下载", "Preparing download"), 0, 0, true))
+        // 同一视频在排队或运行时只允许一个任务：两个 worker 同时写同一文件会把 mdat 交错，
+        // 且暂停/取消是一次性标记，只能被其中一个消费。重复 start 在这里静默丢弃。
+        if (!reserveDownloadSlot(job.videoId, enqueuedVideoIds)) {
+            DiagLog.log("Download", "忽略重复入队：${job.title}")
+            return START_NOT_STICKY
+        }
         // 排队任务必须立刻登记进「正在下载」列表并持久化：
         // 否则排队中的任务不可见，且杀后台后会凭空消失（只有 runDownload 出队才登记）。
         DownloadState.upsert(
@@ -528,7 +551,12 @@ class DownloadService : Service() {
         // trySend：UNLIMITED channel 下必然入队成功，channel 已随 onDestroy 关闭时返回失败
         // 结果而非抛出。必须在 onStartCommand 内同步入队（不能经 launch 异步跳一拍）：
         // startId 协议要求「入队序 = 框架交付序」，onIdle 才能凭最后消费的 startId 安全自停。
-        queue.trySend(job)
+        if (queue.trySend(job).isFailure) {
+            enqueuedVideoIds.remove(job.videoId)
+            DownloadState.remove(job.videoId)
+            DiagLog.log("Download", "入队失败（服务正在退出）：${job.title}")
+            return START_NOT_STICKY
+        }
         // `savePendingDownload` 是「prefs JSON 读 → Gson 反序列化 → 再序列化 → 写回」，
         // 不能直接在 onStartCommand（**主线程**）上跑：待续传记录越多越慢，连点多个下载时
         // 每次都要主线程做一遍整表 JSON 解析。挪进 IO 作用域，不等它。
@@ -587,6 +615,7 @@ class DownloadService : Service() {
     override fun onDestroy() {
         // close 让常驻 worker 的 for-in 正常退出；cancel 立即终止在跑的下载与 scope。
         queue.close()
+        enqueuedVideoIds.clear()
         scope.cancel()
         super.onDestroy()
     }
@@ -1444,6 +1473,9 @@ class DownloadService : Service() {
         /** 并发闸门：正常 2 路，命中风控自适应降到 1 路并在退避窗口后逐级恢复。 */
         private val concurrency = DownloadConcurrency(MAX_PARALLEL_DOWNLOADS)
 
+        /** 已排队或正在运行的 videoId；重复 start 据此丢弃，避免两个 worker 写同一文件。 */
+        private val enqueuedVideoIds: MutableSet<String> = ConcurrentHashMap.newKeySet()
+
         /**
          * 每个 videoId 每进程最多自动重下一次（不是"每次失败重下一次"）。
          * 第二次仍坏说明重下解决不了，只通知用户，避免坏文件 → 重下 → 秒完成 → 再校验坏的死循环。
@@ -1459,7 +1491,7 @@ class DownloadService : Service() {
         /** 在跑（已出队、尚未收尾）任务的 videoId 集合：onTimeout 据此批量转暂停。 */
         private val activeJobs = CopyOnWriteArraySet<String>()
 
-        fun start(context: Context, job: Job) {
+        fun start(context: Context, job: Job): Boolean {
             // 暂停/取消标记在「主动发起新任务」时清除：如果在 runDownload 出队后清，
             // 排队中的任务在入队前置入的标记会被出队时误清，导致"暂停/取消排队任务"失效。
             control.clear(job.videoId)
@@ -1472,7 +1504,16 @@ class DownloadService : Service() {
                 .putExtra(EXTRA_ATTEMPTS, job.attempt)
                 .putExtra(EXTRA_REPLACE_EXISTING, job.replaceExisting)
                 .putExtra(EXTRA_REPLACE_URI, job.replaceUri)
-            context.startForegroundService(i)
+            // 应用在后台时启动 dataSync 前台服务会被 Android 12+ 拒绝
+            // （ForegroundServiceStartNotAllowedException）。调用方必须能收到失败并给出提示，
+            // 不能让它从协程里逃逸成进程崩溃。
+            return try {
+                context.startForegroundService(i)
+                true
+            } catch (e: Exception) {
+                DiagLog.log("Download", "无法启动下载服务：${e.javaClass.simpleName}")
+                false
+            }
         }
 
         /**
@@ -1526,7 +1567,7 @@ class DownloadService : Service() {
                     )
                     return@launch
                 }
-                start(
+                val started = start(
                     app,
                     Job(
                         videoId = videoId,
@@ -1538,6 +1579,18 @@ class DownloadService : Service() {
                         replaceUri = uri
                     )
                 )
+                if (!started) {
+                    DownloadState.upsert(
+                        DownloadState.Task(
+                            videoId, target.title,
+                            state = DownloadState.STATE_FAILED,
+                            message = tr(
+                                "无法在后台开始下载，请打开应用后手动重新下载",
+                                "Could not start the download in the background. Open the app and download it again"
+                            )
+                        )
+                    )
+                }
             }
         }
 

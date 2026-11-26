@@ -135,9 +135,10 @@ private fun compareNumericText(left: String, right: String): Int {
  * 是否需要提示更新（纯函数，双判据）。
  *
  * 判据一（安装硬门槛）：远端 versionCode 更高 → 需要更新；更低 → 不需要。
- * 判据二（同号换正式版）：versionCode 相同代表同一个核心版本（公式忽略预发布），
- * 只有"本机是预发布、远端是正式版"算升级，例如 0.2.2-rc.1 → 0.2.2。
- * 正式版之间、预发布之间、正式版看到预发布（降级）都不提示。
+ * 判据二（同号比预发布）：versionCode 相同代表同一个核心版本（公式忽略预发布），
+ * 此时按语义化版本比较预发布段：0.2.3-rc.1 → 0.2.3-rc.2 与 0.2.3-rc.1 → 0.2.3 都算升级，
+ * 正式版看到 rc 或同版本不提示。只比 versionCode 会让测试版通道永远停在第一个 RC
+ * （ADR 0017 明确要避免的失败模式）。
  *
  * 远端名字解析失败时按不需要更新处理：只有 versionCode 判据成立才会提示，
  * 因为 code 才是安装器真正比较的依据。
@@ -152,5 +153,5 @@ fun needsUpdate(
     if (remoteVersionCode < localVersionCode) return false
     val local = parse(localVersionName) ?: return false
     val remote = parse(remoteVersionName) ?: return false
-    return local.pre != null && remote.pre == null
+    return remote > local
 }

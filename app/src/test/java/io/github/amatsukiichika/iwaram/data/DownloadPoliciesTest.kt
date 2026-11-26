@@ -135,4 +135,16 @@ class DownloadPoliciesTest {
         assertNull(downloadCardFailureReason(DownloadState.STATE_DONE, 0))
         assertNull(downloadCardFailureReason("legacy-unknown", 0))
     }
+
+    @Test
+    fun `reserving a download slot rejects a second task for the same video`() {
+        val reserved = mutableSetOf<String>()
+
+        assertTrue(reserveDownloadSlot("video-a", reserved))
+        assertFalse("同一视频重复入队必须被丢弃", reserveDownloadSlot("video-a", reserved))
+        assertTrue("其他视频不受影响", reserveDownloadSlot("video-b", reserved))
+
+        reserved.remove("video-a")
+        assertTrue("任务结束后可以重新入队", reserveDownloadSlot("video-a", reserved))
+    }
 }

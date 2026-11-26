@@ -29,7 +29,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -252,6 +252,8 @@ internal fun <T> PagedGrid(
     val showTop by remember {
         derivedStateOf { gridState.firstVisibleItemIndex > 0 || gridState.firstVisibleItemScrollOffset > 0 }
     }
+    // 图片/帖子同样可能在偏移分页的页边界重复；Lazy 容器不允许重复 key，先唯一化再渲染。
+    val itemKeys = remember(state.items, key) { uniqueLazyKeys(state.items) { key(it).toString() } }
     Box(Modifier.fillMaxSize()) {
         LazyVerticalGrid(
             state = gridState,
@@ -275,7 +277,9 @@ internal fun <T> PagedGrid(
                     }
                 }
             } else {
-                items(state.items, key = key) { itemContent(it) }
+                itemsIndexed(state.items, key = { index, _ -> itemKeys[index] }) { index, _ ->
+                    itemContent(state.items[index])
+                }
                 item(span = { GridItemSpan(maxLineSpan) }) {
                     PagedFooter(state, onLoadMore, onRetry)
                 }

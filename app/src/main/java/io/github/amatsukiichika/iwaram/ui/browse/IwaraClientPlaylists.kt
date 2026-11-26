@@ -53,16 +53,20 @@ fun IwaraClientViewModel.loadPlaylists(force: Boolean = false) {
         if (current.loading || (!force && current.loaded)) return
         // 请求与离线缓存都绑定"发起这次加载时的账号"：中途换号不会把 B 的结果写进 A 的缓存。
         val accountId = _session.value.userId
+        val epoch = sessionEpoch.get()
         _playlists.value = current.copy(loading = true, error = null)
         viewModelScope.launch {
             try {
                 val items = IwaraClient.call {
                     it.playlists(accountId, 0, 100).results.orEmpty()
                 }
+                // 期间登出/换号：结果属于上一个账号，不写缓存也不写 UI。
+                if (accountResultIsStale(epoch, sessionEpoch.get())) return@launch
                 repo.savePlaylistsCache(accountId, gson.toJson(items))
                 _playlists.value = IwaraClientViewModel.PlaylistsState(items = items, loaded = true)
             } catch (t: Throwable) {
                 if (t is CancellationException) throw t
+                if (accountResultIsStale(epoch, sessionEpoch.get())) return@launch
                 // 断网兜底：列表为空且本地有缓存时显示缓存内容，并明确提示。
                 // 缓存读取与 JSON 解析放在 IO 线程（缓存大时主线程会卡顿）。
                 val cached = if (_playlists.value.items.isEmpty()) {

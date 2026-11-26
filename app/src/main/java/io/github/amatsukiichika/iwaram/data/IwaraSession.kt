@@ -24,6 +24,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Iwara 账号会话：两段式 token。
@@ -65,6 +66,17 @@ object IwaraSession {
 
     @Volatile
     private var accessExpireAtMs: Long = 0L
+
+    /**
+     * 会话代际：登录、登出、会话失效都会自增。
+     *
+     * 异步换取 token 的流程在发起时记下代际，返回后只有代际与 refresh token 都未变才允许写回。
+     * 否则一次迟到的刷新会把已登出/已换号的会话重新写活（见 [obtainAccessToken]）。
+     */
+    private val sessionGeneration = AtomicLong(0)
+
+    /** 保护"检查代际 + 写 token"与 [clear] 的互斥；只覆盖内存赋值与 prefs 写，不包住网络。 */
+    private val sessionLock = Any()
 
     private val refreshMutex = Mutex()
     private lateinit var prefs: SharedPreferences
@@ -138,16 +150,31 @@ object IwaraSession {
     /** 真正的恢复逻辑：读落盘值、迁移旧值、更新内存态。必须在非主线程执行。 */
     private fun restoreStoredSession() {
         if (!::prefs.isInitialized) return
+        val generation = sessionGeneration.get()
         val storedRefresh = prefs.getString(KEY_REFRESH, null)?.takeIf { it.isNotBlank() }
         // 解密失败（Keystore 被系统重置）返回 null ⇒ 按未登录处理，绝不回退明文。
-        refreshToken = storedRefresh?.let { TokenCrypto.decrypt(it) }
-        accessToken = readStoredToken(KEY_ACCESS)
+        val restoredRefresh = storedRefresh?.let { TokenCrypto.decrypt(it) }
+        // 没有 refresh token 的 access token 不构成会话；留在盘上只会在下次恢复时被误注入。
+        val restoredAccess = if (restoredRefresh != null) readStoredToken(KEY_ACCESS) else null
+        val applied = synchronized(sessionLock) {
+            if (sessionGeneration.get() != generation) {
+                false
+            } else {
+                if (restoredRefresh == null && prefs.contains(KEY_ACCESS)) {
+                    prefs.edit().remove(KEY_ACCESS).apply()
+                }
+                refreshToken = restoredRefresh
+                accessToken = restoredAccess
+                accessExpireAtMs = jwtExp(restoredAccess ?: "") * 1000L
+                true
+            }
+        }
+        if (!applied) return
         // 旧版明文 / 上次降级写入的 plain: 值一次性迁移成密文（不可加密时保持可读并置降级）。
         migrateStoredToken(KEY_REFRESH)
-        migrateStoredToken(KEY_ACCESS)
-        accessExpireAtMs = jwtExp(accessToken ?: "") * 1000L
+        if (restoredRefresh != null) migrateStoredToken(KEY_ACCESS)
         removeLegacyManualToken()
-        if (refreshToken == null && storedRefresh != null) {
+        if (restoredRefresh == null && storedRefresh != null) {
             // 有落盘会话却解不开：让已在运行的 UI 立刻回到未登录（监听器可能尚未注册）。
             listener?.onSessionExpired()
         }
@@ -281,19 +308,39 @@ object IwaraSession {
                     tr("登录失败：服务器未返回令牌", "Login failed: the server did not return a token")
                 )
 
-            refreshToken = refresh
-            writeStoredToken(KEY_REFRESH, refresh)
+            val generation = sessionGeneration.incrementAndGet()
+            val accepted = synchronized(sessionLock) {
+                if (sessionGeneration.get() != generation) {
+                    false
+                } else {
+                    refreshToken = refresh
+                    writeStoredToken(KEY_REFRESH, refresh)
+                    true
+                }
+            }
+            if (!accepted) throw IwaraApiException(tr("登录已取消", "Sign-in was cancelled"))
 
             // 立即换取 access token 并拉取用户信息；任一步失败都视为登录失败（回滚）。
             try {
                 obtainAccessToken(force = true)
+                if (sessionGeneration.get() != generation) {
+                    throw IwaraApiException(tr("登录已取消", "Sign-in was cancelled"))
+                }
                 val me = fetchMe()
                 // 不把邮箱兜底存成用户名（会导致 profile(邮箱) 404 与界面显示邮箱）。
                 // 解析不到就留空，界面显示"已登录"，随后 refreshSession 会用 /user 补全。
-                saveUserInfo(me.displayName, me.userId, me.avatarUrl)
+                synchronized(sessionLock) {
+                    if (sessionGeneration.get() != generation) {
+                        throw IwaraApiException(tr("登录已取消", "Sign-in was cancelled"))
+                    }
+                    saveUserInfo(me.displayName, me.userId, me.avatarUrl)
+                }
                 me.displayName ?: me.userId ?: tr("已登录", "Signed in")
             } catch (t: Throwable) {
-                clear()
+                // 只有这次登录仍属于当前会话时才回滚；否则会把期间新登录的账号一起清掉。
+                synchronized(sessionLock) {
+                    if (sessionGeneration.get() == generation) clearLocked()
+                }
                 throw t
             }
         }
@@ -381,6 +428,12 @@ object IwaraSession {
      * 通知由 [notifyExpiredIfPending] 在出锁后补发。
      */
     private fun clear() {
+        synchronized(sessionLock) { clearLocked() }
+    }
+
+    /** [clear] 的锁内版本：调用方必须已持有 [sessionLock]。 */
+    private fun clearLocked() {
+        sessionGeneration.incrementAndGet()
         refreshToken = null
         accessToken = null
         accessExpireAtMs = 0L
@@ -421,6 +474,7 @@ object IwaraSession {
      *   `subscriptionBase`，保证"凭证来源"与"请求目标"同域。
      */
     private suspend fun obtainAccessToken(force: Boolean, base: String? = null): String? {
+        val generation = sessionGeneration.get()
         val refresh = refreshToken ?: return null
         val access = try {
             withContext(Dispatchers.IO) {
@@ -437,16 +491,32 @@ object IwaraSession {
             // 这里在锁内，所以只清状态 + 置标记，通知交给出锁后的
             // notifyExpiredIfPending()（避免持锁回调导致不可重入死锁）。
             if (e.isAuthError) {
-                clear()
-                pendingExpiredNotify.set(true)
+                synchronized(sessionLock) {
+                    // 迟到的 401 不能把期间已登录的新账号清掉。
+                    if (sessionTokenIsCurrent(generation, sessionGeneration.get(), refresh, refreshToken)) {
+                        clearLocked()
+                        pendingExpiredNotify.set(true)
+                    }
+                }
             }
             throw e
         }
-        accessToken = access
-        accessExpireAtMs = jwtExp(access) * 1000L
-        // 顺手缓存，加速下次启动（可能已过期，仅作初始值）。IwaraSession 是唯一 token 来源：
-        // 拦截器经 accessTokenFlow()/awaitAccessToken() 读取，不再同步到其它单例。
-        writeStoredToken(KEY_ACCESS, access)
+        val published = synchronized(sessionLock) {
+            if (!sessionTokenIsCurrent(generation, sessionGeneration.get(), refresh, refreshToken)) {
+                false
+            } else {
+                accessToken = access
+                accessExpireAtMs = jwtExp(access) * 1000L
+                // 顺手缓存，加速下次启动（可能已过期，仅作初始值）。IwaraSession 是唯一 token 来源：
+                // 拦截器经 accessTokenFlow()/awaitAccessToken() 读取，不再同步到其它单例。
+                writeStoredToken(KEY_ACCESS, access)
+                true
+            }
+        }
+        if (!published) {
+            DiagLog.log("Session", "会话已切换，丢弃迟到的 token 刷新结果")
+            return null
+        }
         return access
     }
 
@@ -570,6 +640,8 @@ object IwaraSession {
         refreshToken = null
         accessToken = null
         accessExpireAtMs = 0L
+        sessionGeneration.set(0)
+        pendingExpiredNotify.set(false)
         _tokenStorageDegraded.value = false
         degradedLogged.set(false)
     }
@@ -593,3 +665,18 @@ object IwaraSession {
 
     private const val FIVE_MINUTES_MS = 5 * 60 * 1000L
 }
+
+/**
+ * 迟到的 token 刷新结果是否仍属于当前会话。
+ *
+ * 代际变化（登出 / 换号登录 / 会话失效）或 refresh token 已变，都必须丢弃结果：
+ * 否则旧账号的 access token 会在登出后写回内存与磁盘，或被注入到新账号的请求里。
+ */
+internal fun sessionTokenIsCurrent(
+    capturedGeneration: Long,
+    currentGeneration: Long,
+    capturedRefresh: String?,
+    currentRefresh: String?
+): Boolean = capturedRefresh != null &&
+    capturedGeneration == currentGeneration &&
+    capturedRefresh == currentRefresh

@@ -77,7 +77,7 @@ fun CommentsOverlay(
 /**
  * 评论面板：列表 + 错误/重试 + 回复提示 + 输入行。
  * **独立评论页（图片/帖子/两个动作面板入口）与播放页「评论」tab 的唯一共用实现**，
- * `cvm.comments` 状态机零改动。
+ * 评论状态按 (type, targetId) 分槽，多个常驻面板互不覆盖。
  * [modifier] 由调用方给尺寸（独立页与播放页 tab 都是 fillMaxSize）。
  */
 @Composable
@@ -90,12 +90,13 @@ fun CommentsPanel(
     modifier: Modifier = Modifier
 ) {
     val pageScope = rememberCoroutineScope()
-    val state by cvm.comments.collectAsStateWithLifecycle()
+    // 每个面板只读自己目标的状态：多个面板常驻组合时不会互相覆盖列表或发送目标。
+    val state = cvm.commentsState(type, targetId)
     val session by cvm.session.collectAsStateWithLifecycle()
     var input by remember { mutableStateOf(TextFieldValue("")) }
     var actionError by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(targetId) { cvm.openComments(type, targetId, title) }
+    LaunchedEffect(type, targetId) { cvm.openComments(type, targetId, title) }
 
     // 底部导航条让位 —— 输入行不贴手势条、不被屏幕圆角压住
     // （键盘弹出时 imePadding 照常叠加；播放页评论 tab 与独立页共用本面板）。
@@ -113,14 +114,14 @@ fun CommentsPanel(
                     comment = comment,
                     isMine = comment.user?.id != null && comment.user?.id == session.userId,
                     onProfile = { comment.user?.let { u -> actions.openAccountProfile(u) } },
-                    onReply = { cvm.setReplyTo(comment) },
+                    onReply = { cvm.setReplyTo(type, targetId, comment) },
                     onDelete = {
                         comment.id?.let { cid ->
-                            cvm.deleteComment(cid, scope = pageScope) { err -> actionError = err }
+                            cvm.deleteComment(type, targetId, cid, scope = pageScope) { err -> actionError = err }
                         }
                     },
                     onLoadReplies = { onDone ->
-                        cvm.loadReplies(comment, scope = pageScope) { replies, err ->
+                        cvm.loadReplies(comment, type, targetId, scope = pageScope) { replies, err ->
                             actionError = err
                             onDone(replies)
                         }
@@ -142,7 +143,7 @@ fun CommentsPanel(
                             color = MaterialTheme.colorScheme.error,
                             style = MaterialTheme.typography.bodySmall
                         )
-                        TextButton(onClick = { cvm.loadMoreComments(force = true) }) { Text(tr("重试", "Retry")) }
+                        TextButton(onClick = { cvm.loadMoreComments(type, targetId, force = true) }) { Text(tr("重试", "Retry")) }
                     }
                 }
             }
@@ -182,7 +183,7 @@ fun CommentsPanel(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
                 )
-                IconButton(onClick = { cvm.setReplyTo(null) }, modifier = Modifier.size(24.dp)) {
+                IconButton(onClick = { cvm.setReplyTo(type, targetId, null) }, modifier = Modifier.size(24.dp)) {
                     Icon(Icons.Filled.Close, contentDescription = tr("取消回复", "Cancel reply"), modifier = Modifier.size(14.dp))
                 }
             }
@@ -240,7 +241,7 @@ fun CommentsPanel(
                     .clickable(enabled = canSend) {
                         val text = input.text
                         input = TextFieldValue("")
-                        cvm.sendComment(text, scope = pageScope) { err ->
+                        cvm.sendComment(type, targetId, text, scope = pageScope) { err ->
                             if (err != null) {
                                 actionError = err
                                 input = TextFieldValue(text) // 发送失败，恢复输入
@@ -318,7 +319,7 @@ private fun CommentItem(
                 val n = comment.numReplies ?: 0
                 if (n > 0) {
                     Text(
-                        if (replies == null) "View $n " + trCount(n, "条回复", "reply", "replies") else tr("收起回复", "Hide replies"),
+                        if (replies == null) tr("查看 $n 条回复", "View $n " + trCount(n, "条回复", "reply", "replies")) else tr("收起回复", "Hide replies"),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.clickable {

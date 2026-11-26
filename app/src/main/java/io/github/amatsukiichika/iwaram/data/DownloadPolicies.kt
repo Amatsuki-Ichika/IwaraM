@@ -201,3 +201,12 @@ internal fun downloadCardFailureReason(state: String, attempts: Int): Int? =
     } else {
         null
     }
+
+/**
+ * 入队去重：同一 videoId 在排队或运行时只允许一个任务。
+ *
+ * 两个 worker 同时写同一文件会让 mdat 交错；暂停/取消是一次性标记，也只能被其中一个消费。
+ * @return true = 本次拿到队列位；false = 已有任务排队/运行，调用方应丢弃这次请求。
+ */
+internal fun reserveDownloadSlot(videoId: String, reserved: MutableSet<String>): Boolean =
+    reserved.add(videoId)

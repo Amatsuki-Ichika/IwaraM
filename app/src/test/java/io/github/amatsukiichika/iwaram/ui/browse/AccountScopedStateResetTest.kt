@@ -35,7 +35,7 @@ class AccountScopedStateResetTest {
             items = listOf(IwaraPlaylist(id = "pl-1", title = "A 的播放列表")),
             loaded = true
         )
-        _comments.value = IwaraClientViewModel.CommentsState(
+        commentsByTarget[commentsKey("video", "video-1")] = IwaraClientViewModel.CommentsState(
             type = "video",
             targetId = "video-1",
             title = "A 正在看的作品",
@@ -43,6 +43,50 @@ class AccountScopedStateResetTest {
         )
         followStates["author-1"] = true
         likeStates["video:video-1"] = true
+    }
+
+    @Test
+    fun `logout moves the session epoch so in-flight account results are dropped`() {
+        val vm = newViewModel()
+        val before = vm.sessionEpoch.get()
+
+        vm.logout()
+
+        val after = vm.sessionEpoch.get()
+        assertTrue("登出必须推进账号代际", after != before)
+        assertTrue(accountResultIsStale(before, after))
+        assertFalse(accountResultIsStale(after, after))
+    }
+
+    @Test
+    fun `a session expiring moves the session epoch before the reset coroutine runs`() {
+        val vm = newViewModel()
+        val before = vm.sessionEpoch.get()
+
+        IwaraSession.listener?.onSessionExpired()
+
+        assertTrue("过期回调必须同步推进代际", vm.sessionEpoch.get() != before)
+    }
+
+    @Test
+    fun `comment state is keyed per target so two panels cannot overwrite each other`() {
+        val vm = newViewModel()
+        vm.commentsByTarget[commentsKey("video", "a")] = IwaraClientViewModel.CommentsState(
+            type = "video", targetId = "a", title = "A"
+        )
+        vm.commentsByTarget[commentsKey("image", "b")] = IwaraClientViewModel.CommentsState(
+            type = "image", targetId = "b", title = "B"
+        )
+
+        assertEquals("a", vm.commentsState("video", "a").targetId)
+        assertEquals("b", vm.commentsState("image", "b").targetId)
+        val missing = vm.commentsState("video", "missing")
+        assertEquals("缺少条目时返回带目标标识的空态", "missing", missing.targetId)
+        assertTrue("空态不应有内容", missing.items.isEmpty())
+        assertFalse(
+            "同一 id 的不同目标类型也必须是不同槽位",
+            commentsKey("video", "a") == commentsKey("image", "a")
+        )
     }
 
     @Test
@@ -56,7 +100,7 @@ class AccountScopedStateResetTest {
         assertFalse("loaded 必须复位，否则覆盖层不会重新拉取", vm.playlists.value.loaded)
         assertTrue("关注快照必须清空", vm.followStates.isEmpty())
         assertTrue("点赞快照必须清空", vm.likeStates.isEmpty())
-        assertEquals("评论面板必须回到初始态", "", vm.comments.value.targetId)
+        assertTrue("评论面板必须回到初始态", vm.commentsByTarget.isEmpty())
     }
 
     @Test
@@ -71,7 +115,7 @@ class AccountScopedStateResetTest {
 
         assertTrue("播放列表必须清空", vm.playlists.value.items.isEmpty())
         assertFalse("loaded 必须复位", vm.playlists.value.loaded)
-        assertEquals("评论面板必须回到初始态", "", vm.comments.value.targetId)
+        assertTrue("评论面板必须回到初始态", vm.commentsByTarget.isEmpty())
         assertTrue("关注快照必须清空", vm.followStates.isEmpty())
     }
 }
