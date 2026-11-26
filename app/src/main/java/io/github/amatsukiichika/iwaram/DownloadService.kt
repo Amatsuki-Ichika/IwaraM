@@ -35,6 +35,7 @@ import io.github.amatsukiichika.iwaram.data.DownloadControl
 import io.github.amatsukiichika.iwaram.data.DownloadIncompleteException
 import io.github.amatsukiichika.iwaram.data.deleteReplacedVideoRow
 import io.github.amatsukiichika.iwaram.data.libraryFileIsComplete
+import io.github.amatsukiichika.iwaram.data.integrityCheckEntry
 import io.github.amatsukiichika.iwaram.data.upsertDownloadedVideo
 import io.github.amatsukiichika.iwaram.data.videoRowByIwaraId
 import io.github.amatsukiichika.iwaram.data.videoRowByUri
@@ -428,7 +429,12 @@ class DownloadService : Service() {
          * 完整性校验失败后的"替换式重下"：开跑前先删旧文件、并跳过"已完整/已在库"快捷路径。
          * 见 [DownloadService.requestRedownload] —— 不这么做会以坏文件秒完成，形成重下死循环。
          */
-        val replaceExisting: Boolean = false
+        val replaceExisting: Boolean = false,
+        /**
+         * 替换式重下要删的那份旧文件（下载记录里的 localUri）。
+         * 只删这个地址，绝不按 iwaraId 再去库里找行：同一视频可能有用户导入的另一份源文件。
+         */
+        val replaceUri: String? = null
     )
 
     override fun onCreate() {
@@ -495,7 +501,8 @@ class DownloadService : Service() {
                 quality = it.getStringExtra(EXTRA_QUALITY) ?: "Source",
                 startId = startId,
                 attempt = it.getIntExtra(EXTRA_ATTEMPTS, 0),
-                replaceExisting = it.getBooleanExtra(EXTRA_REPLACE_EXISTING, false)
+                replaceExisting = it.getBooleanExtra(EXTRA_REPLACE_EXISTING, false),
+                replaceUri = it.getStringExtra(EXTRA_REPLACE_URI)
             )
         }
         if (job == null) {
@@ -683,7 +690,9 @@ class DownloadService : Service() {
         // 变成"校验坏 → 自动重下 → 秒完成 → 再校验坏"的死循环。
         if (job.replaceExisting) {
             DiagLog.log("Download", "自动重下前删除旧文件：${job.title}")
-            listOfNotNull(libraryRow?.localUri?.toString(), pending?.docUri)
+            // 只删本次任务自己的半成品与下载记录指向的旧文件。不能按 iwaraId 回查库行：
+            // 同一视频可能有用户导入的另一份源文件（多源），删错就是用户数据丢失。
+            listOfNotNull(job.replaceUri, pending?.docUri)
                 .distinct()
                 .forEach { oldUri -> runCatching { repo.deleteLocalFile(oldUri) } }
         }
@@ -1157,12 +1166,23 @@ class DownloadService : Service() {
         }
         repo.fetchAndApplyMetadata(entity)
 
+        // 快捷路径会把"本地库已有"写进历史；若记录本来证明这份文件由本应用写入，
+        // 且指向同一个 localUri，保留来源标记，别让一次重复点击把它降级成不可校验。
+        val previousHistory = runCatching {
+            repo.loadDownloadHistory().firstOrNull { it.videoId == job.videoId && it.success }
+        }.getOrNull()
+        val downloadedByApp = verifyIntegrity ||
+            (previousHistory?.downloadedByApp == true && previousHistory.localUri == doc.uri.toString())
         repo.addDownloadHistory(
             DownloadHistoryEntry(
                 job.videoId, job.title, job.quality, System.currentTimeMillis(), true,
                 localUri = doc.uri.toString(),
                 // 期望长度只信服务端声明的那个；没有就不写，校验时退化为"只查结构"。
-                totalBytes = expectedBytes?.takeIf { it > 0L }
+                totalBytes = expectedBytes?.takeIf { it > 0L },
+                // 只有本次真的下载/续传过，或记录本来就证明这份文件由本应用写入，
+                // 才记为"由本应用写入"。快捷路径拿到的可能是用户导入的任意格式，
+                // 不能成为自动重下的删除依据。
+                downloadedByApp = downloadedByApp
             )
         )
         // 下载完成后静默校验一次容器结构（L2）：坏文件自动重下一次，第二次只通知。
@@ -1407,6 +1427,7 @@ class DownloadService : Service() {
         private const val EXTRA_QUALITY = "quality"
         private const val EXTRA_ATTEMPTS = "attempts"
         private const val EXTRA_REPLACE_EXISTING = "replace_existing"
+        private const val EXTRA_REPLACE_URI = "replace_uri"
 
         /** 自动重试退避期间暂停/取消标记的轮询间隔（毫秒）。 */
         private const val RETRY_WAIT_POLL_MS = 250L
@@ -1450,6 +1471,7 @@ class DownloadService : Service() {
                 .putExtra(EXTRA_QUALITY, job.quality)
                 .putExtra(EXTRA_ATTEMPTS, job.attempt)
                 .putExtra(EXTRA_REPLACE_EXISTING, job.replaceExisting)
+                .putExtra(EXTRA_REPLACE_URI, job.replaceUri)
             context.startForegroundService(i)
         }
 
@@ -1460,26 +1482,41 @@ class DownloadService : Service() {
          * 的快捷路径会立刻以同一个坏文件收尾，于是"校验坏 → 重下 → 秒完成 → 再校验坏"成死循环。
          * 删除是幂等的，文件本来就不在也不会报错。
          *
-         * 解析下载地址失败时不入队，只在下载列表里留一条失败提示：自动修复没做到，要明确告诉用户。
+         * 只删下载记录指向的那份文件：没有成功下载记录时，文件不是本应用写的
+         * （扫描导入或手动关联），宁可放弃修复也不碰它；此时只在下载列表里留失败提示。
+         * 解析下载地址失败时同样不入队，明确告诉用户自动修复没做到。
          */
         fun requestRedownload(context: Context, videoId: String) {
             val app = context.applicationContext as? IwaraApp ?: return
             CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
                 val repo = app.repository
-                val entry = runCatching {
-                    repo.loadDownloadHistory().firstOrNull { it.videoId == videoId && it.success }
-                }.getOrNull()
-                val row = runCatching { repo.videoRowByIwaraId(videoId) }.getOrNull()
-                // 先把旧文件删掉；entry 的 localUri 与库行的 localUri 都可能是那份坏文件。
-                runCatching { repo.deleteLocalFile(entry?.localUri ?: row?.localUri?.toString()) }
+                val entry = runCatching { integrityCheckEntry(repo.loadDownloadHistory(), videoId) }
+                    .getOrNull()
+                val uri = entry?.localUri
+                if (entry == null || uri.isNullOrBlank()) {
+                    DiagLog.log("Download", "自动重下跳过：没有下载记录 $videoId")
+                    DownloadState.upsert(
+                        DownloadState.Task(
+                            videoId, videoId,
+                            state = DownloadState.STATE_FAILED,
+                            message = tr(
+                                "文件校验失败，请手动重新下载",
+                                "Integrity check failed. Please download it again"
+                            )
+                        )
+                    )
+                    return@launch
+                }
+                // 库行地址可能指向用户自己导入的文件，绝不能拿它当删除目标。
+                runCatching { repo.deleteLocalFile(uri) }
                 val target = runCatching {
-                    resolveDownloadTarget(repo, videoId, entry?.quality)
+                    resolveDownloadTarget(repo, videoId, entry.quality)
                 }.getOrNull()
                 if (target == null) {
                     DiagLog.log("Download", "自动重下解析地址失败：$videoId")
                     DownloadState.upsert(
                         DownloadState.Task(
-                            videoId, entry?.title ?: videoId,
+                            videoId, entry.title,
                             state = DownloadState.STATE_FAILED,
                             message = tr(
                                 "文件校验失败，请手动重新下载",
@@ -1497,7 +1534,8 @@ class DownloadService : Service() {
                         url = target.url,
                         fileName = target.fileName,
                         quality = target.quality,
-                        replaceExisting = true
+                        replaceExisting = true,
+                        replaceUri = uri
                     )
                 )
             }

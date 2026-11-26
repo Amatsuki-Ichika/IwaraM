@@ -2,6 +2,7 @@ package io.github.amatsukiichika.iwaram.data
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -201,6 +202,52 @@ class MediaIntegrityTest {
     }
 
     @Test
+    fun `does not redownload a file without a download record`() {
+        assertFalse(shouldAutoRedownload(IntegrityVerdict.NoDownloadRecord, false))
+    }
+
+    // ---- 核对对象：只认本应用下载的文件 ----
+
+    @Test
+    fun `integrity check has no target without a download record`() {
+        // 扫描导入或手动关联的文件没有下载记录：以前会回退到库行地址并做 MP4 检查，
+        // 结果把 mkv/webm 判成损坏并删除。没有记录就必须没有核对对象。
+        assertNull(integrityCheckEntry(emptyList(), "vid"))
+    }
+
+    @Test
+    fun `integrity check ignores failed download records`() {
+        assertNull(integrityCheckEntry(listOf(history(success = false, uri = "content://failed")), "vid"))
+    }
+
+    @Test
+    fun `integrity check ignores a successful record without a file address`() {
+        assertNull(integrityCheckEntry(listOf(history(success = true, uri = null)), "vid"))
+    }
+
+    @Test
+    fun `integrity check ignores a record the app did not write`() {
+        // 快捷路径会把"本地库已有"的文件写进下载记录；那份文件可能是用户导入的。
+        assertNull(
+            integrityCheckEntry(
+                listOf(history(success = true, uri = "content://imported", downloadedByApp = false)),
+                "vid"
+            )
+        )
+    }
+
+    @Test
+    fun `integrity check uses the file named by the successful download record`() {
+        val entry = history(success = true, uri = "content://downloaded")
+        assertEquals(entry, integrityCheckEntry(listOf(entry), "vid"))
+    }
+
+    @Test
+    fun `labels a missing download record for diagnostics`() {
+        assertEquals("no-download-record", integrityVerdictNote(IntegrityVerdict.NoDownloadRecord))
+    }
+
+    @Test
     fun `labels verdicts for download history diagnostics`() {
         assertEquals("ok", integrityVerdictNote(IntegrityVerdict.Ok))
         assertEquals("unknown", integrityVerdictNote(IntegrityVerdict.Unknown))
@@ -211,6 +258,20 @@ class MediaIntegrityTest {
     }
 
     // ---- 合成数据 ----
+
+    private fun history(
+        success: Boolean,
+        uri: String?,
+        downloadedByApp: Boolean = true
+    ) = DownloadHistoryEntry(
+        videoId = "vid",
+        title = "title",
+        quality = "source",
+        time = 0L,
+        success = success,
+        localUri = uri,
+        downloadedByApp = downloadedByApp
+    )
 
     private fun sampleMp4(): ByteArray =
         box("ftyp", ByteArray(16)) + box("moov", ByteArray(24)) + box("mdat", ByteArray(64))

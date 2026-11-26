@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The file-integrity check no longer deletes videos imported into the library. It verifies only files it can confirm this app downloaded; an imported file, or one whose download record cannot be confirmed, is reported as unverifiable and left untouched, while a damaged download is still replaced once.
+
 ## [0.2.3] - 2026-11-22
 
 Downloads are verified, resumable and checkable, the app can update itself, and the player, scrollbars and overlays get their finishing pass.

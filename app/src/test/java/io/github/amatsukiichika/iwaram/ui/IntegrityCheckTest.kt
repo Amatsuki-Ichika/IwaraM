@@ -80,6 +80,15 @@ class IntegrityCheckTest {
     }
 
     @Test
+    fun noDownloadRecordFinishesWithoutTouchingTheFile() {
+        val (next, effects) =
+            reduceIntegrityCheck(running(), IntegrityCheckEvent.Result(IntegrityVerdict.NoDownloadRecord))
+        assertEquals(IntegrityCheckPhase.Finished(IntegrityVerdict.NoDownloadRecord), next?.phase)
+        assertFalse(next!!.redownloadRequested)
+        assertTrue(effects.isEmpty())
+    }
+
+    @Test
     fun resultArrivingAfterCancelIsDropped() {
         val (afterCancel, _) = reduceIntegrityCheck(confirming(), IntegrityCheckEvent.Cancel)
         assertNull(afterCancel)
@@ -114,10 +123,19 @@ class IntegrityCheckTest {
     /* ---------- 文案 ---------- */
 
     @Test
-    fun confirmMessageNamesTheVideoAndPromisesNotToModifyFiles() {
+    fun confirmMessageNamesTheVideoAndSaysTheCheckItselfDoesNotModifyFiles() {
         val message = integrityConfirmMessage(target)
         assertTrue(message.contains(target.title))
-        assertTrue(message.contains("不会修改或删除文件"))
+        assertTrue(message.contains("检查本身不改动文件"))
+        // 坏下载的自动修复会删文件，确认框必须提前说明，不能笼统承诺"不会删除"。
+        assertTrue(message.contains("自动删除并重新下载"))
+    }
+
+    @Test
+    fun noDownloadRecordMessageExplainsNothingWasModified() {
+        val message = integrityResultMessage(IntegrityVerdict.NoDownloadRecord, redownloadRequested = false)
+        assertTrue(message.contains("没有该文件的下载记录"))
+        assertTrue(message.contains("不会被删除"))
     }
 
     @Test
@@ -139,12 +157,13 @@ class IntegrityCheckTest {
     }
 
     @Test
-    fun resultTitlesAreDistinctForTheThreeVerdicts() {
+    fun resultTitlesAreDistinctForEveryVerdict() {
         val titles = listOf(
             integrityResultTitle(IntegrityVerdict.Ok),
             integrityResultTitle(IntegrityVerdict.Broken(BrokenReason.Missing)),
-            integrityResultTitle(IntegrityVerdict.Unknown)
+            integrityResultTitle(IntegrityVerdict.Unknown),
+            integrityResultTitle(IntegrityVerdict.NoDownloadRecord)
         )
-        assertEquals(3, titles.toSet().size)
+        assertEquals(4, titles.toSet().size)
     }
 }

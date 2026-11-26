@@ -21,7 +21,31 @@ sealed interface IntegrityVerdict {
     data object Ok : IntegrityVerdict
     data class Broken(val reason: BrokenReason, val detail: String? = null) : IntegrityVerdict
     data object Unknown : IntegrityVerdict
+
+    /**
+     * 没有"由本应用下载"的记录：扫描导入、手动关联，或下载记录已被裁剪。
+     *
+     * 与 [Unknown]（有记录但读不出来）分开：这类文件没有可核对的来源，
+     * 检查不解包、不比对，更不允许据此删除文件。
+     */
+    data object NoDownloadRecord : IntegrityVerdict
 }
+
+/**
+ * 完整性检查的核对对象：只认下载服务自己写入的文件。
+ *
+ * 成功的下载记录是"这份文件由本应用下载"的唯一凭据；记录里的 [DownloadHistoryEntry.downloadedByApp]
+ * 还必须为 true（旧记录没有该字段，默认 false）。扫描导入、手动指定 iwara ID、旧记录或
+ * 记录已被裁剪的文件都没有这份凭据；[walkMp4] 只认 MP4，对 mkv/webm 必然判 Broken，
+ * 若把库行地址当作核对对象，自动修复会删掉用户的文件（见 ADR 0036）。
+ */
+internal fun integrityCheckEntry(
+    history: List<DownloadHistoryEntry>,
+    videoId: String
+): DownloadHistoryEntry? =
+    history.firstOrNull {
+        it.videoId == videoId && it.success && it.downloadedByApp && !it.localUri.isNullOrBlank()
+    }
 
 /** 顶层 box 的头：4 字节大端长度 + 4 字节类型。 */
 private const val BOX_HEADER_BYTES = 8
@@ -165,6 +189,7 @@ fun walkMp4(
  *
  * 只有确定坏了（[IntegrityVerdict.Broken]）且本进程还没自动修过才修：
  * - [IntegrityVerdict.Unknown] 不修：读失败不等于文件坏，重下会白费流量还可能删掉好文件；
+ * - [IntegrityVerdict.NoDownloadRecord] 不修：文件不是本应用下载的，没有修复依据；
  * - 已经自动修过一次仍坏，说明问题多半在服务端/签名/存储，再重下只会死循环 → 只通知用户。
  */
 fun shouldAutoRedownload(verdict: IntegrityVerdict, alreadyRetried: Boolean): Boolean =
@@ -177,6 +202,7 @@ fun shouldAutoRedownload(verdict: IntegrityVerdict, alreadyRetried: Boolean): Bo
 fun integrityVerdictNote(verdict: IntegrityVerdict): String = when (verdict) {
     IntegrityVerdict.Ok -> "ok"
     IntegrityVerdict.Unknown -> "unknown"
+    IntegrityVerdict.NoDownloadRecord -> "no-download-record"
     is IntegrityVerdict.Broken -> "broken:" + verdict.reason.name.lowercase(Locale.ROOT)
 }
 
