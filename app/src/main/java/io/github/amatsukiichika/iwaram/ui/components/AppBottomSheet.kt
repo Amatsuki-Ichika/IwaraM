@@ -63,7 +63,11 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.github.amatsukiichika.iwaram.LocalAppRepository
 import io.github.amatsukiichika.iwaram.R
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
@@ -202,6 +206,16 @@ private class SheetDialogWrapper(
         }
     }
 
+    /** 截图保护：FLAG_SECURE 是窗口级标记，独立抽屉窗口必须自己同步（关闭设置时清除）。 */
+    fun syncScreenshotProtection(enabled: Boolean) {
+        val window = window ?: return
+        if (enabled) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        }
+    }
+
     fun setContent(parent: CompositionContext, content: @Composable () -> Unit) {
         layout.setContent(parent, content)
     }
@@ -267,9 +281,20 @@ fun AppBottomSheet(
         if (closing) return
         closing = true
         scope.launch {
-            launch { scrim.animateTo(0f, tween(180)) }
-            offsetY.animateTo(1f, tween(260, easing = FastOutSlowInEasing))
-            currentOnDismiss()
+            var dismissed = false
+            try {
+                launch { scrim.animateTo(0f, tween(180)) }
+                offsetY.animateTo(1f, tween(260, easing = FastOutSlowInEasing))
+                currentOnDismiss()
+                dismissed = true
+            } catch (cancelled: CancellationException) {
+                // 退场动画一旦被取消（组合销毁，或手势 snapTo 抢占了动画），closing 不能留在 true：
+                // 否则抽屉卡在打开态、遮罩已归零，之后所有 requestClose() 都在开头提前返回。
+                // 组合销毁时回调已无意义（scope 不再活跃），其余取消必须把关闭补完再抛出。
+                if (!dismissed && scope.isActive) currentOnDismiss()
+                closing = false
+                throw cancelled
+            }
         }
     }
 
@@ -283,13 +308,17 @@ fun AppBottomSheet(
         SheetDialogWrapper(anchorView, onDismissRequest = { requestClose() })
     }
 
+    // 截图保护：抽屉是独立窗口，FLAG_SECURE 不会从 Activity 窗口继承 —— 按仓库设置同步到本窗口。
+    val screenshotProtection by LocalAppRepository.current.screenshotProtection.collectAsStateWithLifecycle()
+
     // 图标外观跟随主题（浅色主题 = 深色图标，暗色自动翻转）——组合期算值，SideEffect 里只下发窗口。
     val lightStatusBars = MaterialTheme.colorScheme.background.luminance() > 0.5f
 
     SideEffect {
-        // 每次重组重申窗口全屏（M3 同款）+ 下发系统栏透明/图标外观。
+        // 每次重组重申窗口全屏（M3 同款）+ 下发系统栏透明/图标外观 + 截图保护。
         dialog.updateWindowSize()
         dialog.syncSystemBars(lightStatusBars)
+        dialog.syncScreenshotProtection(screenshotProtection)
         // 预测返回跟手：面板是独立窗口，手势由**窗口自己**接（见 SheetDialogWrapper），
         //   这里把 progress 接到抽屉位移/遮罩上 —— 拖动逐帧跟手；越过阈值松手 = 直接关闭；
         //   没越过阈值（handleOnBackCancelled）→ 回弹到就位。
@@ -358,19 +387,25 @@ fun AppBottomSheet(
                             .fillMaxWidth()
                             .draggable(
                                 state = rememberDraggableState { delta ->
-                                    scope.launch {
-                                        offsetY.snapTo(
-                                            (offsetY.value + delta / currentHeightPx()).coerceIn(0f, 1f)
-                                        )
+                                    // 关闭动画进行中忽略拖动：snapTo 会取消退场动画，把关闭流程打断在半路。
+                                    if (!closing) {
+                                        scope.launch {
+                                            offsetY.snapTo(
+                                                (offsetY.value + delta / currentHeightPx()).coerceIn(0f, 1f)
+                                            )
+                                        }
                                     }
                                 },
                                 orientation = Orientation.Vertical,
                                 onDragStopped = {
-                                    if (offsetY.value > DRAG_DISMISS_FRACTION) {
-                                        requestClose()
-                                    } else {
-                                        scope.launch {
-                                            offsetY.animateTo(0f, tween(200, easing = FastOutSlowInEasing))
+                                    // 关闭中不再回弹 / 再次请求关闭。
+                                    if (!closing) {
+                                        if (offsetY.value > DRAG_DISMISS_FRACTION) {
+                                            requestClose()
+                                        } else {
+                                            scope.launch {
+                                                offsetY.animateTo(0f, tween(200, easing = FastOutSlowInEasing))
+                                            }
                                         }
                                     }
                                 }

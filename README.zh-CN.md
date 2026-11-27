@@ -90,9 +90,8 @@ echo "sdk.dir=$ANDROID_HOME" > local.properties
 
 ## 架构
 
-单 Activity 的 Compose 应用，配手写的覆盖层栈；数据层由 Repository 封装 Room 与 Retrofit。
-全仓只有两个应用级共享的 ViewModel：`VideoViewModel` 管本地库，`IwaraClientViewModel` 管
-在线浏览 —— 有意不引入 DI 框架与 Navigation 库。模块地图与代码约定见
+单 Activity 的 Compose 应用，配手写的覆盖层栈；数据层由 Repository 封装 Room 与 Retrofit，
+有意不引入 DI 框架与 Navigation 库。模块地图、状态归属与代码约定见
 [docs/architecture.md](docs/architecture.md)。
 
 ## 参与贡献

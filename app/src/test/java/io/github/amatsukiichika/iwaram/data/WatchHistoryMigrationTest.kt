@@ -97,7 +97,8 @@ class WatchHistoryMigrationTest {
         val room = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
             // Room 按**当前实体（v4）**做迁移后的全 schema 校验 —— 迁移链必须补齐到最新版，
             // 否则 v3→v4 的 fileModifiedAt 列缺失会在这里炸（校验对象是终点版本，不是 2→3 时代）。
-            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4)
+            // 迁移清单用 AppDatabase.MIGRATIONS（生产 get() 的同一份），不在这里手抄一份。
+            .addMigrations(*AppDatabase.MIGRATIONS)
             .allowMainThreadQueries()
             .build()
 

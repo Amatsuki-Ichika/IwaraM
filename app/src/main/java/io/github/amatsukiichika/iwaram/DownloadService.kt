@@ -34,6 +34,8 @@ import io.github.amatsukiichika.iwaram.data.DownloadHistoryEntry
 import io.github.amatsukiichika.iwaram.data.DownloadControl
 import io.github.amatsukiichika.iwaram.data.DownloadIncompleteException
 import io.github.amatsukiichika.iwaram.data.deleteReplacedVideoRow
+import io.github.amatsukiichika.iwaram.data.canReuseLibraryFile
+import io.github.amatsukiichika.iwaram.data.isSameDownloadRendition
 import io.github.amatsukiichika.iwaram.data.libraryFileIsComplete
 import io.github.amatsukiichika.iwaram.data.integrityCheckEntry
 import io.github.amatsukiichika.iwaram.data.reserveDownloadSlot
@@ -85,6 +87,16 @@ internal fun isStaleRowForSameVideo(
     newLocalUri: String,
     oldFileExists: Boolean
 ): Boolean = rowUri != newLocalUri && !rowIwaraId.isNullOrBlank() && !oldFileExists
+
+/**
+ * 这次完整性校验结论是否消耗「每个 videoId 每进程一次」的自动修复预算（纯函数）。
+ *
+ * 只有 [IntegrityVerdict.Broken] 才是一次需要修复的事件。Ok / Unknown / NoDownloadRecord
+ * 不是修复：若也把 videoId 放进已修复集合，同一视频之后再真的坏掉就永远不能自动修复，
+ * 与 ADR 0036 的"每 videoId 允许一次自动修复"相反（旧实现对所有非空 verdict 都 add）。
+ */
+internal fun consumesRepairBudget(verdict: IntegrityVerdict?): Boolean =
+    verdict is IntegrityVerdict.Broken
 
 /**
  * 带状态码的下载失败（替代原先的 RuntimeException("HTTP 状态码")）。
@@ -156,6 +168,27 @@ object DownloadState {
     fun restoreIfAbsent(restored: List<Task>) {
         synchronized(this) {
             _tasks.value = mergeRestoredDownloadTasks(_tasks.value, restored, DONE_TASK_HISTORY_LIMIT)
+        }
+    }
+
+    /**
+     * 给仍在排队、但缺少半成品地址的任务补上 docUri（来自持久化记录）。
+     *
+     * 恢复列表时 [pendingToTask] 已带上 docUri；但服务先于 UI 恢复被拉起时，QUEUED 条目
+     * 只能是 onStartCommand 现建的。缺这个地址，取消按钮会把 null 传给 removePendingCompletely，
+     * 旧半成品文件就永远留在磁盘上（之后还会被扫描当成 truncated 视频导入）。
+     * 只补 QUEUED 且原本为空的条目：worker 已经开跑时不能把 RUNNING 进度盖回排队态。
+     */
+    fun fillDocUriIfQueued(videoId: String, docUri: String?) {
+        if (docUri.isNullOrBlank()) return
+        synchronized(this) {
+            _tasks.value = _tasks.value.map { task ->
+                if (task.videoId == videoId && task.state == STATE_QUEUED && task.docUri.isNullOrBlank()) {
+                    task.copy(docUri = docUri)
+                } else {
+                    task
+                }
+            }
         }
     }
 }
@@ -445,7 +478,16 @@ class DownloadService : Service() {
          * 替换式重下要删的那份旧文件（下载记录里的 localUri）。
          * 只删这个地址，绝不按 iwaraId 再去库里找行：同一视频可能有用户导入的另一份源文件。
          */
-        val replaceUri: String? = null
+        val replaceUri: String? = null,
+        /**
+         * 这是"接着已有任务继续"（继续/重试/自动续传/自动修复），而不是一次全新的手动下载。
+         *
+         * 调用方解析签名地址要若干秒，期间用户可能取消或永久删除。续跑任务在这种取消意图
+         * **还挂着** 时必须拒绝入队 —— 旧实现无条件 `control.clear()`，会把取消静默撤销、
+         * 把已删除的视频重新下回库里。全新的手动下载仍清掉旧标记（取消过的视频再点下载
+         * 不能被上次的标记误伤）。
+         */
+        val continuation: Boolean = false
     )
 
     override fun onCreate() {
@@ -519,7 +561,8 @@ class DownloadService : Service() {
                 startId = startId,
                 attempt = it.getIntExtra(EXTRA_ATTEMPTS, 0),
                 replaceExisting = it.getBooleanExtra(EXTRA_REPLACE_EXISTING, false),
-                replaceUri = it.getStringExtra(EXTRA_REPLACE_URI)
+                replaceUri = it.getStringExtra(EXTRA_REPLACE_URI),
+                continuation = it.getBooleanExtra(EXTRA_CONTINUATION, false)
             )
         }
         if (job == null) {
@@ -541,11 +584,20 @@ class DownloadService : Service() {
         }
         // 排队任务必须立刻登记进「正在下载」列表并持久化：
         // 否则排队中的任务不可见，且杀后台后会凭空消失（只有 runDownload 出队才登记）。
+        // docUri 必须带上：恢复/重试的排队卡片若没有半成品地址，取消时会传 null 给
+        // removePendingCompletely，暂停留下的半成品文件就没人删（之后还会被扫描导入）。
+        // 先取内存里上一条同 id 任务的地址（暂停/失败的卡片都带），持久化记录在下面 IO 里兜底补。
+        // 只认未完成的任务：DONE 条目的 docUri 指向**已入库的成品文件**，把它的地址带进排队
+        // 卡片会让"取消"删掉用户的成品（取消只该删半成品）。
+        val previousDocUri = DownloadState.tasks.value
+            .firstOrNull { it.videoId == job.videoId && it.state != DownloadState.STATE_DONE }?.docUri
+            .takeUnless { job.replaceExisting }
         DownloadState.upsert(
             DownloadState.Task(
                 job.videoId, job.title, 0, -1,
                 state = DownloadState.STATE_QUEUED, message = tr("排队等待", "Queued"),
-                url = job.url, fileName = job.fileName, quality = job.quality
+                url = job.url, fileName = job.fileName, quality = job.quality,
+                docUri = previousDocUri
             )
         )
         // trySend：UNLIMITED channel 下必然入队成功，channel 已随 onDestroy 关闭时返回失败
@@ -567,6 +619,11 @@ class DownloadService : Service() {
                 // worker 读到的续传起点就丢了。保留已有记录里的 received/total/docUri，
                 // 这样无论谁先写，续传信息都不会被排队记录覆盖（替换式重下则本来就该清零）。
                 val previous = app.repository.loadPendingDownloads().firstOrNull { it.videoId == job.videoId }
+                // 内存里没有上一条任务（例如进程刚重启、服务先于 UI 被拉起）时，用持久化记录
+                // 把半成品地址补进排队卡片；只补仍为 QUEUED 的条目，不覆盖 worker 的进度。
+                if (previous != null && !job.replaceExisting) {
+                    DownloadState.fillDocUriIfQueued(job.videoId, previous.docUri)
+                }
                 app.repository.savePendingDownload(
                     PendingDownload(
                         videoId = job.videoId, title = job.title,
@@ -700,10 +757,30 @@ class DownloadService : Service() {
             DiagLog.log("Download", "排队期间签名地址已过期，重新解析：${job.title}")
             val fresh = runCatching { resolveDownloadTarget(repo, job.videoId, job.quality) }
             if (fresh.isFailure) {
-                fail(job, repo, tr("下载地址已过期，请重新下载", "The download link expired. Please download again"))
+                fail(
+                    job, repo,
+                    tr("下载地址已过期，请重新下载", "The download link expired. Please download again"),
+                    // 带上半成品地址：失败卡片的「移除」才能连磁盘上的旧半成品一起删掉。
+                    pending?.docUri
+                )
                 return@withContext
             }
-            sourceUrl = fresh.getOrThrow().url
+            // 首选档位可能已从服务端消失，chooseDownloadQuality 会回退到别的档位 ——
+            // 拿它的地址续写旧半成品等于拼接两种编码，必须拒绝（见 isSameDownloadRendition）。
+            val target = fresh.getOrThrow()
+            if (!isSameDownloadRendition(job.quality, target.quality)) {
+                DiagLog.log(
+                    "Download",
+                    "重新解析到不同清晰度（${job.quality} → ${target.quality}），放弃续传：${job.title}"
+                )
+                fail(
+                    job, repo,
+                    tr("所选清晰度已不可用，请重新下载", "The selected quality is no longer available. Download it again"),
+                    pending?.docUri
+                )
+                return@withContext
+            }
+            sourceUrl = target.url
         }
 
         // 库里**已经有这支视频**（同一个 iwaraId）而且文件完整 ⇒ 直接以已有文件收尾，
@@ -721,12 +798,27 @@ class DownloadService : Service() {
             DiagLog.log("Download", "自动重下前删除旧文件：${job.title}")
             // 只删本次任务自己的半成品与下载记录指向的旧文件。不能按 iwaraId 回查库行：
             // 同一视频可能有用户导入的另一份源文件（多源），删错就是用户数据丢失。
-            listOfNotNull(job.replaceUri, pending?.docUri)
+            // 删除失败（SAF 拒删/权限缺失）必须当场报失败：旧文件还在时继续走补丁式续写，
+            // 只会把新内容拼到坏文件上，或者被下面的"已在库"快捷路径当成修复成功。
+            val deleteFailure = listOfNotNull(job.replaceUri, pending?.docUri)
                 .distinct()
-                .forEach { oldUri -> runCatching { repo.deleteLocalFile(oldUri) } }
+                .firstNotNullOfOrNull { oldUri -> repo.deleteLocalFile(oldUri) }
+            if (deleteFailure != null) {
+                DiagLog.log("Download", "替换式重下删除旧文件失败：$deleteFailure")
+                fail(
+                    job, repo,
+                    tr("无法删除损坏的旧文件，请手动删除后重试", "The broken file could not be deleted. Delete it manually and try again")
+                )
+                return@withContext
+            }
         }
         val libraryDoc = documentOf(libraryRow?.localUri)
-        if (libraryDoc != null && libraryFileIsComplete(libraryDoc.length(), pending?.total ?: -1L)) {
+        if (libraryDoc != null &&
+            canReuseLibraryFile(
+                libraryFileIsComplete(libraryDoc.length(), pending?.total ?: -1L),
+                job.replaceExisting
+            )
+        ) {
             DiagLog.log("Download", "已在本地库，跳过重复下载：${job.title}")
             // 这份文件不是本次下载的产物（可能是扫描导入、手动关联 iwaraId 的 mkv/webm），
             // 不能按 MP4 结构判坏，更不能自动删掉用户文件再重下。
@@ -825,13 +917,30 @@ class DownloadService : Service() {
                 }
                 if (httpCode == 401 || httpCode == 403) {
                     // 签名地址：同一个 Job 内只重新解析一次，避免被 CDN 反复拒签时打转。
-                    val freshUrl = if (reResolvedAuth) {
+                    val freshTarget = if (reResolvedAuth) {
                         null
                     } else {
                         reResolvedAuth = true
                         DiagLog.log("Download", "下载被拒签($httpCode)，重新解析地址：${job.title}")
-                        runCatching { resolveDownloadTarget(repo, job.videoId, job.quality) }.getOrNull()?.url
+                        runCatching { resolveDownloadTarget(repo, job.videoId, job.quality) }.getOrNull()
                     }
+                    // 重新解析可能回退到别的档位（首选档消失时）：绝不把另一种编码追加到
+                    // 已写入的半成品后面；直接按失败收尾并留下明确原因。
+                    if (freshTarget != null && !isSameDownloadRendition(job.quality, freshTarget.quality)) {
+                        DiagLog.log(
+                            "Download",
+                            "重新解析到不同清晰度（${job.quality} → ${freshTarget.quality}），放弃续传：${job.title}"
+                        )
+                        finalizeFailure(
+                            job, repo, doc, attempt, e,
+                            tr(
+                                "所选清晰度已不可用，请重新下载",
+                                "The selected quality is no longer available. Download it again"
+                            )
+                        )
+                        return@withContext
+                    }
+                    val freshUrl = freshTarget?.url
                     if (freshUrl != null) {
                         sourceUrl = freshUrl
                         continue
@@ -1195,6 +1304,15 @@ class DownloadService : Service() {
         }
         repo.fetchAndApplyMetadata(entity)
 
+        // 元数据拉取是网络请求，期间用户可能已经把这支视频永久删除（取消意图 + 删行/删文件）。
+        // 删除必须压过收尾：再往下会补一条"下载成功"历史并可能触发自动重下，
+        // 等于把刚删掉的视频连记录一起拉回库里。取消意图是一次性事件，这里消费掉，
+        // 不会影响用户之后再次下载同一支视频（start() 重新入队时还会清理）。
+        if (control.consumeStop(job.videoId) == DownloadControl.Intent.CANCEL) {
+            DiagLog.log("Download", "收尾前用户已取消/删除，跳过成功历史与完整性校验：${job.title}")
+            return
+        }
+
         // 快捷路径会把"本地库已有"写进历史；若记录本来证明这份文件由本应用写入，
         // 且指向同一个 localUri，保留来源标记，别让一次重复点击把它降级成不可校验。
         val previousHistory = runCatching {
@@ -1226,7 +1344,9 @@ class DownloadService : Service() {
         }
         // 每个 videoId 每进程最多自动修一次：第二次仍坏说明重下解决不了（服务端/存储），
         // 再重下只会死循环，改为只通知用户手动处理。
-        val alreadyRetried = verdict != null && !integrityRetriedVideoIds.add(job.videoId)
+        // 预算只由 Broken 消耗：Ok/Unknown/NoDownloadRecord 不是一次"修复"，
+        // 若它们也占掉名额，同一视频之后再坏就永远不能自动修复（与 ADR 0036 的承诺不符）。
+        val alreadyRetried = consumesRepairBudget(verdict) && !integrityRetriedVideoIds.add(job.videoId)
         val autoRedownload = verdict != null && shouldAutoRedownload(verdict, alreadyRetried)
         if (verdict is IntegrityVerdict.Broken) {
             DiagLog.log(
@@ -1457,6 +1577,7 @@ class DownloadService : Service() {
         private const val EXTRA_ATTEMPTS = "attempts"
         private const val EXTRA_REPLACE_EXISTING = "replace_existing"
         private const val EXTRA_REPLACE_URI = "replace_uri"
+        private const val EXTRA_CONTINUATION = "continuation"
 
         /** 自动重试退避期间暂停/取消标记的轮询间隔（毫秒）。 */
         private const val RETRY_WAIT_POLL_MS = 250L
@@ -1492,6 +1613,15 @@ class DownloadService : Service() {
         private val activeJobs = CopyOnWriteArraySet<String>()
 
         fun start(context: Context, job: Job): Boolean {
+            // 续跑任务（继续/重试/自动续传/自动修复）在解析签名地址的几秒里可能已被取消
+            // 或永久删除：此时取消意图还挂着，必须以取消为准，拒绝入队。
+            // 旧实现无条件 clear()，取消被静默撤销，已删除的视频也会被重新下回库里。
+            // 全新的手动下载（continuation=false）仍清掉旧标记：取消过的视频再点下载
+            // 不能被上一次的取消意图误伤（旧语义，也是 DownloadControl 注释的约定）。
+            if (job.continuation && control.consumeCancel(job.videoId)) {
+                DiagLog.log("Download", "续跑前已取消/删除，放弃入队：${job.title}")
+                return false
+            }
             // 暂停/取消标记在「主动发起新任务」时清除：如果在 runDownload 出队后清，
             // 排队中的任务在入队前置入的标记会被出队时误清，导致"暂停/取消排队任务"失效。
             control.clear(job.videoId)
@@ -1504,6 +1634,7 @@ class DownloadService : Service() {
                 .putExtra(EXTRA_ATTEMPTS, job.attempt)
                 .putExtra(EXTRA_REPLACE_EXISTING, job.replaceExisting)
                 .putExtra(EXTRA_REPLACE_URI, job.replaceUri)
+                .putExtra(EXTRA_CONTINUATION, job.continuation)
             // 应用在后台时启动 dataSync 前台服务会被 Android 12+ 拒绝
             // （ForegroundServiceStartNotAllowedException）。调用方必须能收到失败并给出提示，
             // 不能让它从协程里逃逸成进程崩溃。
@@ -1549,7 +1680,23 @@ class DownloadService : Service() {
                     return@launch
                 }
                 // 库行地址可能指向用户自己导入的文件，绝不能拿它当删除目标。
-                runCatching { repo.deleteLocalFile(uri) }
+                // 删除失败必须当场放弃并报失败：旧坏文件还在时继续下载，只会续写到坏文件上
+                // 或被"已在库"快捷路径当成修复成功（旧实现把原因 runCatching 丢掉了）。
+                val deleteError = repo.deleteLocalFile(uri)
+                if (deleteError != null) {
+                    DiagLog.log("Download", "自动重下删除旧文件失败：$deleteError")
+                    DownloadState.upsert(
+                        DownloadState.Task(
+                            videoId, entry.title,
+                            state = DownloadState.STATE_FAILED,
+                            message = tr(
+                                "无法删除损坏的旧文件，请手动删除后重试",
+                                "The broken file could not be deleted. Delete it manually and try again"
+                            )
+                        )
+                    )
+                    return@launch
+                }
                 val target = runCatching {
                     resolveDownloadTarget(repo, videoId, entry.quality)
                 }.getOrNull()
@@ -1567,6 +1714,12 @@ class DownloadService : Service() {
                     )
                     return@launch
                 }
+                // 解析期间用户已取消/永久删除：取消意图还挂着时不要启动，
+                // 也不要再补一条失败卡片（用户已经明确不要这支视频了）。
+                if (control.hasPending(videoId)) {
+                    DiagLog.log("Download", "自动重下解析期间已取消/删除，放弃：$videoId")
+                    return@launch
+                }
                 val started = start(
                     app,
                     Job(
@@ -1576,7 +1729,9 @@ class DownloadService : Service() {
                         fileName = target.fileName,
                         quality = target.quality,
                         replaceExisting = true,
-                        replaceUri = uri
+                        replaceUri = uri,
+                        // 自动修复是既有记录的续跑：解析期间被删除/取消时不得重新入队。
+                        continuation = true
                     )
                 )
                 if (!started) {
@@ -1604,7 +1759,8 @@ class DownloadService : Service() {
          * （关流 → 删半成品 → 清记录）。
          *
          * 调用方（UI）仍要照常清理记录/列表/文件 —— 两边都是幂等的，谁先到谁后到都不会留垃圾。
-         * 标记是"一次性事件"，会被消费方读走；下次 [start] 同一支视频也会清掉它，
+         * 标记是"一次性事件"，会被消费方读走；**全新下载**再次 [start] 同一支视频也会清掉它
+         * （续跑任务则相反：解析期间挂着的取消意图会让 [start] 拒绝入队，见 [Job.continuation]），
          * 所以取消过的视频不会在下次下载时被误取消。
          */
         fun cancel(videoId: String) {

@@ -185,6 +185,11 @@ fun ProfileOverlay(
     var videos by remember { mutableStateOf(PagedState<IwaraVideoItem>()) }
     var images by remember { mutableStateOf(PagedState<IwaraImageItem>()) }
     var posts by remember { mutableStateOf(PagedState<IwaraPostItem>()) }
+    // 各分段的请求代际：force 刷新（排序切换）必须能取代在途请求 —— 旧请求的响应晚到时
+    //   按代际丢弃，否则旧排序的结果会覆盖新排序、后续翻页再把两种顺序拼在一起。
+    var videosGeneration by remember { mutableIntStateOf(0) }
+    var imagesGeneration by remember { mutableIntStateOf(0) }
+    var postsGeneration by remember { mutableIntStateOf(0) }
     /** 头部计数的兜底来源（`/profile` 不返回计数时用各分页端点的 `count`）。 */
     var fetchedCounts by remember { mutableStateOf(IwaraRelationCounts()) }
 
@@ -261,18 +266,22 @@ fun ProfileOverlay(
     /** 吸顶块（药丸栏 + 两个小按钮）的实测高；网格首项的占位块按它撑。 */
     var stickyHeightPx by remember { mutableIntStateOf(0) }
     /** 当前分段的"已滚出像素"：首项还是作者信息块时取它的滚动偏移，首项已换成卡片即视为滚到底。 */
-    val scrolledPx by remember {
+    // key 必须带上 activeGridState：无 key 的 remember 会把首次组合的网格（永远是视频）
+    //   永久捕获，切到图片/帖子后吸顶位移读的还是视频网格的偏移（药丸栏错位、精简标题不出现）。
+    val scrolledPx by remember(activeGridState) {
         derivedStateOf {
             val st = activeGridState
             if (st.firstVisibleItemIndex == 0) st.firstVisibleItemScrollOffset else Int.MAX_VALUE
         }
     }
     /** 作者信息是否已完全滚出 → 顶栏切精简模式（与吸顶块同一个真源，不会两处不一致）。 */
-    val headerScrolled by remember {
+    // 与 scrolledPx 同样按 activeGridState 重新创建：否则 lambda 捕获的是首次组合的
+    //   scrolledPx 委托对象，切段后仍读旧网格的偏移。
+    val headerScrolled by remember(activeGridState) {
         derivedStateOf { headerHeightPx > 0 && scrolledPx >= headerHeightPx }
     }
     /** 吸顶块的垂直位移：0 = 已触顶锁定。 */
-    val stickyOffsetPx by remember {
+    val stickyOffsetPx by remember(activeGridState) {
         derivedStateOf { (headerHeightPx - scrolledPx).coerceAtLeast(0) }
     }
 
@@ -290,16 +299,19 @@ fun ProfileOverlay(
     fun loadVideos(force: Boolean) {
         val id = uid ?: return
         val st = videos
-        // 守卫只挡"正在加载"与"已到底"（与 FeedPager.load 一致）。
-        //   若再加 `!force && loaded && items.isNotEmpty()`，则"继续加载"（force=false）
-        //   在页面已有内容时会被永远拦掉。
-        if (st.loading || (!force && st.end)) return
+        // 非 force 只挡"同一页的重复请求"与"已到底"。
+        //   force（排序切换）必须能取代在途请求：若被 loading 拦掉，旧排序的响应会晚到，
+        //   列表停在旧顺序、chip 却已显示新排序（后续翻页还会把两种顺序拼在一起）。
+        if (!force && (st.loading || st.end)) return
         // 首拉页码：若写 `if (force) 0 else page + 1`，则 [PagedState.page] 初值 0 会算出 1，
         //   首拉请求第 1 页、第 0 页（最新一批）永远拿不到（FeedPager 的 page 初值是 -1，
         //   同一算式首拉得 0 才对）。注意"未加载过"不能只看 items 是否为空：加载失败时 items 也是空的。
         val next = if (force || !st.loaded) 0 else st.page + 1
+        // 代际标记：被更新的 force 刷新取代后，旧请求晚到的回调按代际丢弃（同 FeedPager 的 generation）。
+        val gen = ++videosGeneration
         videos = st.copy(loading = true, error = null)
         cvm.loadUserVideos(id, next, sort, scope = scope) { list, end, err ->
+            if (gen != videosGeneration) return@loadUserVideos
             val (merged, added) =
                 if (force) list to list.size
                 else appendDistinct(videos.items, list, OnlineIdentity::video)
@@ -316,12 +328,14 @@ fun ProfileOverlay(
     fun loadImages(force: Boolean) {
         val id = uid ?: return
         val st = images
-        // 守卫同 loadVideos（去掉"已加载过就不翻页"那一项 —— 它让翻页永远失败）。
-        if (st.loading || (!force && st.end)) return
+        // 守卫同 loadVideos：force 可取代在途请求（去掉"已加载过就不翻页"那一项 —— 它让翻页永远失败）。
+        if (!force && (st.loading || st.end)) return
         // 首拉必须 page 0（同 loadVideos 的说明：page 初值 0 + `page + 1` 会漏掉第一页）。
         val next = if (force || !st.loaded) 0 else st.page + 1
+        val gen = ++imagesGeneration
         images = st.copy(loading = true, error = null)
         cvm.loadUserImages(id, next, sort, scope = scope) { list, end, err ->
+            if (gen != imagesGeneration) return@loadUserImages
             val (merged, added) =
                 if (force) list to list.size
                 else appendDistinct(images.items, list, OnlineIdentity::image)
@@ -337,12 +351,14 @@ fun ProfileOverlay(
     fun loadPosts(force: Boolean) {
         val id = uid ?: return
         val st = posts
-        // 守卫同 loadVideos（去掉"已加载过就不翻页"那一项 —— 它让翻页永远失败）。
-        if (st.loading || (!force && st.end)) return
+        // 守卫同 loadVideos：force 可取代在途请求（去掉"已加载过就不翻页"那一项 —— 它让翻页永远失败）。
+        if (!force && (st.loading || st.end)) return
         // 首拉必须 page 0（同 loadVideos 的说明：page 初值 0 + `page + 1` 会漏掉第一页）。
         val next = if (force || !st.loaded) 0 else st.page + 1
+        val gen = ++postsGeneration
         posts = st.copy(loading = true, error = null)
         cvm.loadUserPosts(id, next, sort, scope = scope) { list, end, err ->
+            if (gen != postsGeneration) return@loadUserPosts
             val (merged, added) =
                 if (force) list to list.size
                 else appendDistinct(posts.items, list, OnlineIdentity::post)
@@ -568,8 +584,9 @@ fun ProfileOverlay(
     LaunchedEffect(Unit) {
         DiagLog.log(
             "Profile",
-            "作者页组合：target(handle=${target.handle},uid=${target.uid},needsLookup=${target.needsProfileLookup}) " +
-                "localKey=$localAuthorKey onlineState=$onlineState"
+            // 只记"有没有"标识，不记 handle/uid/localKey 原文：诊断日志会被一键复制导出。
+            "作者页组合：target(hasHandle=${target.handle != null},hasUid=${target.uid != null}," +
+                "needsLookup=${target.needsProfileLookup}) localKey=${localAuthorKey != null} onlineState=$onlineState"
         )
     }
     LaunchedEffect(stickyHeightPx) {
@@ -588,7 +605,7 @@ fun ProfileOverlay(
             DiagLog.log(
                 "Profile",
                 "空白守卫触发：sticky=$stickyHeightPx header=$headerHeightPx onlineState=$onlineState " +
-                    "segment=$segment profileLoaded=${profile != null} error=$profileError"
+                    "segment=$segment profileLoaded=${profile != null} hasError=${profileError != null}"
             )
         }
     }

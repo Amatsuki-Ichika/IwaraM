@@ -133,6 +133,16 @@ internal fun libraryFileIsComplete(fileLength: Long?, pendingTotal: Long): Boole
 }
 
 /**
+ * 「库里已有这份文件」快捷路径能不能用来收尾这次任务（纯函数）。
+ *
+ * 替换式重下（完整性校验失败后的自动修复）必须跳过：它要修的就是库里那份文件，
+ * 而替换任务的持久记录里 total 恒为 -1（未知）⇒ [libraryFileIsComplete] 只要文件还在
+ * 就判"完整" —— 修复会直接以坏文件收尾、报成功并删掉待续传记录，什么都没修。
+ */
+internal fun canReuseLibraryFile(fileComplete: Boolean, replaceExisting: Boolean): Boolean =
+    fileComplete && !replaceExisting
+
+/**
  * 磁盘满判定：ENOSPC 可能作为 message 出现在 IOException 上，也可能包在 cause 链里；
  * 用 message 关键字判断，避免把"空间不足"当成可重试的网络错误反复重试。
  */

@@ -29,13 +29,73 @@ import java.io.File
  */
 internal const val MAX_SCAN_DEPTH = 12
 
+/**
+ * 扫描根目录的可访问性探测结果（见 [probeTreeRoot]）。
+ *
+ * `DocumentFile.fromTreeUri` 在 minSdk 26 上永远返回对象，`listFiles()` 又会把
+ * SecurityException 吞成空列表 —— 只有显式查询根文档才能区分"授权失效/目录没了"与"空目录"。
+ */
+internal enum class RootProbe { Accessible, Denied, Missing, Unknown }
+
+/** [importFolder] 的结局：调用方必须区分"打不开"与"打开了但没视频"，不能再报假成功。 */
+enum class ImportFolderResult { Success, Inaccessible, Empty }
+
+/**
+ * 由探测结果与扫描到的文件数判定结局（纯函数，可单测）：
+ * - 授权被撤销 / 根目录已不存在 ⇒ [ImportFolderResult.Inaccessible]（提示重新选择文件夹）；
+ * - 根能访问但一个视频都没扫到 ⇒ [ImportFolderResult.Empty]（警告，而不是"检索完成：本地共 N 个"；
+ *   N 是旧计数，会把"一个都没扫到"粉饰成成功）；
+ * - 其余 ⇒ [ImportFolderResult.Success]。
+ */
+internal fun folderImportResult(probe: RootProbe, scannedFiles: Int): ImportFolderResult = when {
+    probe == RootProbe.Denied || probe == RootProbe.Missing -> ImportFolderResult.Inaccessible
+    scannedFiles == 0 -> ImportFolderResult.Empty
+    else -> ImportFolderResult.Success
+}
+
+/**
+ * 显式探测 SAF 树根是否可访问（调用方需在 IO 线程执行）。
+ *
+ * 直接查一次根文档：SecurityException = 授权被撤销；查询成功但没有行 = 目录已不存在。
+ * provider 不认这个查询时返回 [RootProbe.Unknown]，交给后续实际扫描判断（至少不误报授权失效）。
+ */
+internal fun probeTreeRoot(context: Context, treeUri: Uri): RootProbe {
+    val documentUri = runCatching {
+        DocumentsContract.buildDocumentUriUsingTree(
+            treeUri,
+            DocumentsContract.getTreeDocumentId(treeUri)
+        )
+    }.getOrNull() ?: return RootProbe.Unknown
+    return try {
+        val found = context.contentResolver
+            .query(documentUri, arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID), null, null, null)
+            ?.use { it.moveToFirst() }
+        when (found) {
+            true -> RootProbe.Accessible
+            false, null -> RootProbe.Missing
+        }
+    } catch (e: SecurityException) {
+        RootProbe.Denied
+    } catch (e: java.io.FileNotFoundException) {
+        // 部分 provider 对已删除的文档抛 FileNotFoundException，而不是返回空游标。
+        RootProbe.Missing
+    } catch (e: Exception) {
+        // 含 provider 不支持该查询：此刻无法判定，按未知处理（不据此误报"授权失效"）。
+        DiagLog.log("Repo", "扫描根目录探测失败，按未知处理：" + e.javaClass.simpleName)
+        RootProbe.Unknown
+    }
+}
+
 /* ---------- 扫描导入（原 IwaraRepository 方法，扩展函数形式） ---------- */
     /* ---------- 扫描导入 ---------- */
 
     /**
      * 扫描 SAF 树下的所有视频文件，逐个入库并拉取 iwara 元数据。
+     *
+     * @return [ImportFolderResult.Inaccessible] = 根目录打不开（授权撤销/目录被删），
+     *   [ImportFolderResult.Empty] = 能打开但一个视频都没扫到，[ImportFolderResult.Success] = 正常。
      */
-suspend fun IwaraRepository.importFolder(treeUri: Uri, onProgress: (done: Int, total: Int) -> Unit): Boolean {
+suspend fun IwaraRepository.importFolder(treeUri: Uri, onProgress: (done: Int, total: Int) -> Unit): ImportFolderResult {
         return withContext(Dispatchers.IO) {
             val root = DocumentFile.fromTreeUri(context, treeUri)
             if (root == null) {
@@ -43,7 +103,14 @@ suspend fun IwaraRepository.importFolder(treeUri: Uri, onProgress: (done: Int, t
                 // 静默 return 会让扫描接着报「检索完成：本地共 N 个视频」（N 往往是 0），
                 // 用户看到"检索完成"却一条没多，无从归因。
                 DiagLog.log("Repo", "扫描根目录不可访问（SAF 授权可能已失效）")
-                return@withContext false
+                return@withContext ImportFolderResult.Inaccessible
+            }
+            // fromTreeUri 在 API 21+ 只会构造对象（minSdk 26 下永远非 null），listFiles 又会
+            // 把异常吞成空列表 —— 必须显式探测根文档，否则撤销授权/删除目录都会"扫完 0 个"报成功。
+            val probe = probeTreeRoot(context, treeUri)
+            if (probe == RootProbe.Denied || probe == RootProbe.Missing) {
+                DiagLog.log("Repo", "扫描根目录不可访问（SAF 授权失效或目录已删除）")
+                return@withContext ImportFolderResult.Inaccessible
             }
             setRootName(root.name)
             val files = mutableListOf<Pair<DocumentFile, String>>()
@@ -69,9 +136,13 @@ suspend fun IwaraRepository.importFolder(treeUri: Uri, onProgress: (done: Int, t
             suspend fun flushBatch() {
                 if (batch.isEmpty()) return
                 dao.upsertAll(batch.map { it.first })
-                for ((v, id) in batch) {
-                    if (id != null) fetchAndApplyMetadata(v)
+                // 元数据先全部拉完（网络），再在**一个事务**里落库。以前逐条 applyFetchedMetadata，
+                // 每条都是一次独立事务 ⇒ 一批 N 个文件发 N 次 videos/tags 失效，主线程按整库重算 N 次；
+                // 单事务批写后每批只发一次失效（与上面的 upsertAll 同一批语义）。
+                val writes = batch.mapNotNull { (v, id) ->
+                    if (id != null) fetchMetadataWrite(v) else null
                 }
+                if (writes.isNotEmpty()) dao.applyFetchedMetadataBatch(writes)
                 batch.clear()
             }
             // 旧数据回填「文件修改日期」的待写列表（fileModifiedAt == 0 的已入库行）。
@@ -162,7 +233,7 @@ suspend fun IwaraRepository.importFolder(treeUri: Uri, onProgress: (done: Int, t
                     DiagLog.log("Repo", "扫描收尾：清理了 ${pruned.size} 条指向已不存在文件的库行")
                 }
             }
-            true
+            folderImportResult(probe, files.size)
         }
     }
 
@@ -228,10 +299,16 @@ suspend fun IwaraRepository.fetchAllMissing(onProgress: (Int, Int) -> Unit) {
             // 查询下推到 SQL（getAll() 整表读进内存再 filter 开销更大）。
             val pending = dao.getMissingMetadata()
             var done = 0
-            for (v in pending) {
-                fetchAndApplyMetadata(v)
-                done++
-                onProgress(done, pending.size)
+            // 与扫描的攒批同口径：先拉完一批响应（网络），再一个事务批写，
+            // 避免待补条目多时每条一次事务、每条一次 videos/tags 失效。
+            for (chunk in pending.chunked(importBatchSize)) {
+                val writes = chunk.mapNotNull { v ->
+                    val write = fetchMetadataWrite(v)
+                    done++
+                    onProgress(done, pending.size)
+                    write
+                }
+                if (writes.isNotEmpty()) dao.applyFetchedMetadataBatch(writes)
             }
         }
     }

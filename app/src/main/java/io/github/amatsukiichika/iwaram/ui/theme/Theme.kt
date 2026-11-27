@@ -30,13 +30,19 @@ private val DarkColors = darkColorScheme(
     onSurfaceVariant = Color(0xFFA8ACB6)
 )
 
+/** 浅色主题的页面底色；对比度单测（ThemeContrastTest）与主题共用，保证测的就是实际下发的值。 */
+internal val LIGHT_BACKGROUND = Color(0xFFF7F8FA)
+
+/** 浅色主题 onPrimary（主色填充上的文字色），同样供对比度单测共用。 */
+internal val LIGHT_ON_PRIMARY = Color.White
+
 private val LightColors = lightColorScheme(
     primary = Color(0xFF2F5BD8),
     secondary = Color(0xFF5A66C2),
-    background = Color(0xFFF7F8FA),
+    background = LIGHT_BACKGROUND,
     surface = Color(0xFFFFFFFF),
     surfaceVariant = Color(0xFFECEEF4),
-    onPrimary = Color.White,
+    onPrimary = LIGHT_ON_PRIMARY,
     onBackground = Color(0xFF191C20),
     onSurface = Color(0xFF191C20),
     onSurfaceVariant = Color(0xFF4A4E57)
@@ -79,13 +85,19 @@ data class ThemeColorOption(
     val darkSecondary: Color
 )
 
+/**
+ * 内置主题色板：value ↔ 浅色/深色两套 primary+secondary（blue 即历史默认色）。
+ *
+ * 浅色 primary 同时用作文字色（画在 [LIGHT_BACKGROUND] 上）和实心填充（上面是 [LIGHT_ON_PRIMARY]），
+ * 两处都必须达到 WCAG AA 正常字号的 4.5:1 —— 由 `ThemeContrastTest` 逐项钉住，别把颜色调浅。
+ */
 val THEME_COLOR_OPTIONS = listOf(
     ThemeColorOption("blue", "蓝", "Blue", Color(0xFF2F5BD8), Color(0xFF5A66C2), Color(0xFF8AB4FF), Color(0xFFB7C5FF)),
     ThemeColorOption("green", "绿", "Green", Color(0xFF2E7D46), Color(0xFF4F9A6B), Color(0xFF93D6A6), Color(0xFFA8D8B8)),
     ThemeColorOption("purple", "紫", "Purple", Color(0xFF7B4FD0), Color(0xFF9568E0), Color(0xFFC9B2FF), Color(0xFFD6C6FF)),
     ThemeColorOption("red", "红", "Red", Color(0xFFC2185B), Color(0xFFD05680), Color(0xFFFFAFC7), Color(0xFFFFC4D6)),
-    ThemeColorOption("orange", "橙", "Orange", Color(0xFFC2661F), Color(0xFFD98A4A), Color(0xFFFFB77E), Color(0xFFFFCCA4)),
-    ThemeColorOption("teal", "青", "Teal", Color(0xFF00838F), Color(0xFF26A0AC), Color(0xFF7FD8DD), Color(0xFF9FE4E8))
+    ThemeColorOption("orange", "橙", "Orange", Color(0xFFB25A15), Color(0xFFD98A4A), Color(0xFFFFB77E), Color(0xFFFFCCA4)),
+    ThemeColorOption("teal", "青", "Teal", Color(0xFF00757F), Color(0xFF26A0AC), Color(0xFF7FD8DD), Color(0xFF9FE4E8))
 )
 
 /**

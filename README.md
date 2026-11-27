@@ -98,9 +98,8 @@ overridden per build with `-Papp.versionName=0.2.3`; `versionCode` is derived fr
 ## Architecture
 
 A single-activity Compose app with a hand-written overlay stack and a repository layer over Room
-and Retrofit. There are only two app-scoped, shared ViewModels — `VideoViewModel` for the local
-library and `IwaraClientViewModel` for online browsing — deliberately without a DI framework or a
-navigation library. See [docs/architecture.md](docs/architecture.md) for the module map and the
+and Retrofit, deliberately without a DI framework or a navigation library. See
+[docs/architecture.md](docs/architecture.md) for the module map, state ownership and the
 conventions used in this codebase.
 
 ## Contributing

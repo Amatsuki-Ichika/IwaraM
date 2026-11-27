@@ -68,6 +68,36 @@ internal fun ScrollGeometry.seekTarget(fraction: Float): Pair<Int, Int> {
     return (unit * itemsPerUnit.coerceAtLeast(1)) to offsetPx
 }
 
+/**
+ * 带通栏头的折叠几何（[headerScrollGeometry]）的单位 → (`条目下标`, `条目内像素偏移`)。
+ *
+ * [unit] 是折叠后的整行号（与 [seekTarget] 的整数部分同轴，但**未**按 itemsPerUnit 展开），
+ * [offsetPxInUnit] 是该行内的像素偏移（[seekTarget] 的第二项）。
+ *
+ * - 头内（折叠行号在 [headerUnits] 内，或像素落点还没越过实测头高）：落在头条目 0 上，
+ *   偏移 = **整行 + 行内**的像素和，并夹在 [headerHeightPx] 内 —— [headerScrollGeometry] 把
+ *   头的折算行数取整，像素判断补上"取整方向"造成的边界偏差，夹取防止把列表滚过整个头；
+ * - 头之后：按每行 [itemsPerRow] 个条目（网格 = 列数，列表 = 1）展开回内容条目下标。
+ *
+ * 只取行内偏移会丢掉整行部分：头折算好几行时，点头部任意位置都只滚到离顶部不到一行处，
+ * 落点不在手指下方（ADR 0012 的连续滚动条正是要消掉这种跳变）。
+ */
+internal fun ScrollGeometry.foldedSeekTarget(
+    unit: Int,
+    offsetPxInUnit: Int,
+    headerUnits: Int,
+    headerItemCount: Int,
+    itemsPerRow: Int,
+    headerHeightPx: Int
+): Pair<Int, Int> {
+    val targetPx = (unit * unitSizePx + offsetPxInUnit).toInt()
+    if (unit < headerUnits || targetPx < headerHeightPx) {
+        return 0 to targetPx.coerceIn(0, headerHeightPx.coerceAtLeast(0))
+    }
+    val contentUnit = unit - headerUnits
+    return (headerItemCount + contentUnit * itemsPerRow.coerceAtLeast(1)) to offsetPxInUnit
+}
+
 /** 网格布局信息 → 几何。没有可见项 / 总数为 0 时返回 null（调用方按 0 处理）。 */
 internal fun LazyGridLayoutInfo.toScrollGeometry(): ScrollGeometry? {
     val first = visibleItemsInfo.firstOrNull() ?: return null
@@ -209,7 +239,7 @@ internal fun scrollDeltaPx(currentFraction: Float, targetFraction: Float, spanPx
  * 调用方不需要自己分支。
  *
  * 注意：本几何的单位是折叠后的内容行，[seekTarget] 返回的"行号"**含头折算行**；调用方要用
- * [scrollSpanUnits] / [unitSizePx] 自己折算（拖动与点击轨道都走 [seekTarget] 再按列展开）。
+ * [foldedSeekTarget] 把整行号折算回（条目下标, 偏移）——拖动与点击轨道都走这条路径。
  */
 internal fun headerScrollGeometry(
     firstVisibleItemIndex: Int,

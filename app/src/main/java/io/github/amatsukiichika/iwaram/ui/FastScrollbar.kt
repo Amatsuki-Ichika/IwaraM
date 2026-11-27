@@ -35,6 +35,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -551,12 +552,15 @@ private fun LazyGridState.seekFor(
     val li = layoutInfo
     val columns = if (li.visibleItemsInfo.isNotEmpty()) li.visibleItemsInfo.maxOf { it.column } + 1 else 1
     val headerUnits = foldedHeaderUnits(geometry, contentRowCount(li.totalItemsCount, headerItemCount, columns))
-    val unit = geometry.unitAt(fraction)
-    return if (unit < headerUnits) {
-        0 to seek.second
-    } else {
-        (headerItemCount + (unit - headerUnits) * columns) to seek.second
-    }
+    // 头内也要保留整行偏移：只取 seek.second 会丢掉 floor 的部分，落点离手指差出好几行。
+    return geometry.foldedSeekTarget(
+        unit = geometry.unitAt(fraction),
+        offsetPxInUnit = seek.second,
+        headerUnits = headerUnits,
+        headerItemCount = headerItemCount,
+        itemsPerRow = columns,
+        headerHeightPx = headerPx
+    )
 }
 
 /** 列表版 [seekFor]：单位 = 条目，头折算行减掉后直接就是条目下标。 */
@@ -571,12 +575,15 @@ private fun LazyListState.seekFor(
     if (headerItemCount <= 0 || headerPx <= 0) return seek
     val contentItems = (layoutInfo.totalItemsCount - headerItemCount).coerceAtLeast(0)
     val headerUnits = foldedHeaderUnits(geometry, contentItems)
-    val unit = geometry.unitAt(fraction)
-    return if (unit < headerUnits) {
-        0 to seek.second
-    } else {
-        (headerItemCount + (unit - headerUnits)).coerceAtLeast(0) to seek.second
-    }
+    // 同网格版：头内保留"整行 + 行内"的偏移，夹在头高内。
+    return geometry.foldedSeekTarget(
+        unit = geometry.unitAt(fraction),
+        offsetPxInUnit = seek.second,
+        headerUnits = headerUnits,
+        headerItemCount = headerItemCount,
+        itemsPerRow = 1,
+        headerHeightPx = headerPx
+    )
 }
 
 /**
@@ -602,10 +609,15 @@ fun FastScrollbarBasic(
 ) {
     // 组合相位只留一个**布尔**（只在"能不能滚"翻转时才重组）。不要在这里 destructure
     //   layoutInfo：它每帧都变，会把整条滚动条连同动画每帧重组一遍。
-    val canScroll by remember(headerItemCount) {
+    val currentHeaderHeightPx by rememberUpdatedState(headerHeightPx)
+    val canScroll by remember(state, headerItemCount) {
         derivedStateOf {
             val li = state.layoutInfo
-            li.visibleItemsInfo.isNotEmpty() && li.totalItemsCount > li.visibleItemsInfo.size
+            li.visibleItemsInfo.isNotEmpty() &&
+                li.totalItemsCount > li.visibleItemsInfo.size &&
+                // ADR 0012：几何给不出（通栏头比视口高 / 量不到内容行高）时不画也不拖滚动条，
+                //   否则拖动只会弹气泡、内容永远不动。
+                state.scrollbarGeometry(headerItemCount) { currentHeaderHeightPx() } != null
         }
     }
     val scope = rememberCoroutineScope()
@@ -614,7 +626,8 @@ fun FastScrollbarBasic(
     //   持有器是普通数组，只在绘制相位读写，不触发重组/重绘循环。
     val lastSpan = remember { floatArrayOf(1f) }
     // 几何只在绘制/指针相位读（layoutInfo 每帧都变，读进组合相位会每帧重组）。
-    fun geometry(): ScrollGeometry? = state.scrollbarGeometry(headerItemCount, headerHeightPx)
+    //   头高走 rememberUpdatedState：指针回调可能在首次组合后仍持有旧闭包，读 State 才能拿到最新实测值。
+    fun geometry(): ScrollGeometry? = state.scrollbarGeometry(headerItemCount) { currentHeaderHeightPx() }
 
     FastScrollbarBasic(
         progress = { geometry()?.scrollFraction() ?: 0f },
@@ -634,7 +647,7 @@ fun FastScrollbarBasic(
         // 点击轨道：换算回条目下标，一次 scrollToItem 跳到位（离散操作，不逐帧堆积）。
         onScrollToFraction = { f ->
             geometry()?.let { g ->
-                val (index, offsetPx) = state.seekFor(g, f, headerItemCount, headerHeightPx)
+                val (index, offsetPx) = state.seekFor(g, f, headerItemCount) { currentHeaderHeightPx() }
                 scope.launch { state.scrollToItem(index, offsetPx) }
             }
         },
@@ -643,7 +656,7 @@ fun FastScrollbarBasic(
         //   输入回调里反复组合整屏新卡片。
         onDragToFraction = { f ->
             geometry()?.let { g ->
-                val (index, offsetPx) = state.seekFor(g, f, headerItemCount, headerHeightPx)
+                val (index, offsetPx) = state.seekFor(g, f, headerItemCount) { currentHeaderHeightPx() }
                 state.requestScrollToItem(index, offsetPx)
             }
         },
@@ -666,16 +679,20 @@ fun FastScrollbarBasic(
     /** 拖动开始/结束回调：供页面把「正在拖滚动条」并入玻璃背景冻结判据。null = 不关心。 */
     onDraggingChange: ((Boolean) -> Unit)? = null
 ) {
-    val canScroll by remember(headerItemCount) {
+    val currentHeaderHeightPx by rememberUpdatedState(headerHeightPx)
+    val canScroll by remember(state, headerItemCount) {
         derivedStateOf {
             val li = state.layoutInfo
-            li.visibleItemsInfo.isNotEmpty() && li.totalItemsCount > li.visibleItemsInfo.size
+            li.visibleItemsInfo.isNotEmpty() &&
+                li.totalItemsCount > li.visibleItemsInfo.size &&
+                // 同网格版：几何不可用时不着色、不响应拖动（ADR 0012）。
+                state.scrollbarGeometry(headerItemCount) { currentHeaderHeightPx() } != null
         }
     }
     val scope = rememberCoroutineScope()
     // 防闪烁持有器，同 LazyGrid 版（条目高度可变，几何按可见数计，抖动全靠"保持上一帧 + 死区"吸收）。
     val lastSpan = remember { floatArrayOf(1f) }
-    fun geometry(): ScrollGeometry? = state.scrollbarGeometry(headerItemCount, headerHeightPx)
+    fun geometry(): ScrollGeometry? = state.scrollbarGeometry(headerItemCount) { currentHeaderHeightPx() }
 
     FastScrollbarBasic(
         progress = { geometry()?.scrollFraction() ?: 0f },
@@ -694,14 +711,14 @@ fun FastScrollbarBasic(
         canScroll = canScroll,
         onScrollToFraction = { f ->
             geometry()?.let { g ->
-                val (index, offsetPx) = state.seekFor(g, f, headerItemCount, headerHeightPx)
+                val (index, offsetPx) = state.seekFor(g, f, headerItemCount) { currentHeaderHeightPx() }
                 scope.launch { state.scrollToItem(index, offsetPx) }
             }
         },
         // 拖动：同 LazyGrid 版 —— 手指比例换算成目标条目，交给下一次测量落位。
         onDragToFraction = { f ->
             geometry()?.let { g ->
-                val (index, offsetPx) = state.seekFor(g, f, headerItemCount, headerHeightPx)
+                val (index, offsetPx) = state.seekFor(g, f, headerItemCount) { currentHeaderHeightPx() }
                 state.requestScrollToItem(index, offsetPx)
             }
         },

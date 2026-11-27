@@ -87,6 +87,150 @@ class ScrollGeometryTest {
         }
     }
 
+    /* ---------- 通栏头折叠单位 → (条目下标, 偏移)（foldedSeekTarget 纯函数直测） ---------- */
+
+    @Test
+    fun `folded seek target inside the header lands under the finger`() {
+        // 头 600px、内容行 200px ⇒ 头折算 3 行；可滚 25 行、spanPx = 5000px。
+        val geometry = header(0, 0, listOf(600, 200, 200, 200, 200))!!
+        // 头内（目标 < 3 行 = 600px）的任意比例：落点必须是手指对应的像素位置。
+        // 只取 seek.second（行内偏移）会把 floor 掉的整行丢掉 —— 头内最多只滚不到一行。
+        for (fraction in listOf(0.01f, 0.05f, 0.1f, 0.119f)) {
+            val seek = geometry.seekTarget(fraction)
+            val (index, offsetPx) = geometry.foldedSeekTarget(
+                unit = seek.first,
+                offsetPxInUnit = seek.second,
+                headerUnits = 3,
+                headerItemCount = 1,
+                itemsPerRow = 1,
+                headerHeightPx = 600
+            )
+            assertEquals("fraction=$fraction 应落在头条目", 0, index)
+            assertEquals(
+                "fraction=$fraction 的像素落点",
+                (fraction * geometry.spanPx).toDouble(),
+                offsetPx.toDouble(),
+                1.0
+            )
+        }
+    }
+
+    @Test
+    fun `folded seek target inside the header clamps to the measured header height`() {
+        // 头实际只有 500px（折算 2.5 行），但总单位四舍五入后头被当成 3 行；
+        // 第 3 行内的目标必须夹在头高 500px，不能把内容行一起滚过去。
+        val geometry = ScrollGeometry(
+            totalUnits = 32,
+            visibleUnits = 7f,
+            firstUnit = 0,
+            unitOffsetPx = 0f,
+            unitSizePx = 200f,
+            itemsPerUnit = 1
+        )
+        assertEquals(
+            0 to 500,
+            geometry.foldedSeekTarget(
+                unit = 2,
+                offsetPxInUnit = 180,
+                headerUnits = 3,
+                headerItemCount = 1,
+                itemsPerRow = 1,
+                headerHeightPx = 500
+            )
+        )
+    }
+
+    @Test
+    fun `folded seek target inside the header is independent of the grid column count`() {
+        // 头内落点 = 头条目 0 + 像素偏移，与每行几条无关（网格/列表同一口径）。
+        val geometry = ScrollGeometry(
+            totalUnits = 32,
+            visibleUnits = 7f,
+            firstUnit = 0,
+            unitOffsetPx = 0f,
+            unitSizePx = 200f,
+            itemsPerUnit = 1
+        )
+        assertEquals(
+            0 to 300,
+            geometry.foldedSeekTarget(
+                unit = 1,
+                offsetPxInUnit = 100,
+                headerUnits = 3,
+                headerItemCount = 1,
+                itemsPerRow = 2,
+                headerHeightPx = 600
+            )
+        )
+    }
+
+    @Test
+    fun `folded seek target past the header maps rows back to list items`() {
+        // 列表：条目高 50px，头 150px = 折算 3 条；之后的第 n 行 = 第 n 条内容（每行 1 个条目）。
+        val geometry = list(firstItem = 0, itemOffsetPx = 0f)
+        assertEquals(
+            6 to 25,
+            geometry.foldedSeekTarget(
+                unit = 8,
+                offsetPxInUnit = 25,
+                headerUnits = 3,
+                headerItemCount = 1,
+                itemsPerRow = 1,
+                headerHeightPx = 150
+            )
+        )
+    }
+
+    @Test
+    fun `folded seek target treats a downward rounded header as still inside the header`() {
+        // 头 450px / 内容行 200px = 2.25 行，四舍五入后头只占 2 个折叠单位；
+        // 第 3 个单位的前 50px 仍在头内，必须按头内偏移落位，不能误滚到第一条内容。
+        val geometry = ScrollGeometry(
+            totalUnits = 31,
+            visibleUnits = 7f,
+            firstUnit = 0,
+            unitOffsetPx = 0f,
+            unitSizePx = 200f,
+            itemsPerUnit = 1
+        )
+        assertEquals(
+            0 to 420,
+            geometry.foldedSeekTarget(
+                unit = 2,
+                offsetPxInUnit = 20,
+                headerUnits = 2,
+                headerItemCount = 1,
+                itemsPerRow = 1,
+                headerHeightPx = 450
+            )
+        )
+    }
+
+    @Test
+    fun `folded seek target past the header expands grid rows by columns`() {
+        // 网格：一行 2 条，头之后的第 n 行 = 第 1 + n×2 个条目。
+        // 折叠几何的 itemsPerUnit 恒为 1（单位就是折叠行），每行条目数由调用方传入。
+        val geometry = ScrollGeometry(
+            totalUnits = 32,
+            visibleUnits = 7f,
+            firstUnit = 0,
+            unitOffsetPx = 0f,
+            unitSizePx = 200f,
+            itemsPerUnit = 1
+        )
+        assertEquals(
+            5 to 50,
+            geometry.foldedSeekTarget(
+                unit = 5,
+                offsetPxInUnit = 50,
+                headerUnits = 3,
+                headerItemCount = 1,
+                itemsPerRow = 2,
+                headerHeightPx = 600
+            )
+        )
+    }
+
     @Test
     fun `thumb span is visible units over total units with clamping`() {
         // 4 / 20 —— 用"可见条目 / 总条目" = 8/40 会得到同样的值，但网格被拉长/末行不满时就会偏。

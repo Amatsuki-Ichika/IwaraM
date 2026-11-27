@@ -22,6 +22,18 @@ data class VideoThumbRow(
     val localThumbnailPath: String?
 )
 
+/**
+ * 一次待落库的远端元数据（批量事务的输入单元）。
+ *
+ * 扫描先网络拉完一批，再用 [VideoDao.applyFetchedMetadataBatch] 在**一个事务**里写完：
+ * 逐条落库会让 Room 每行都发一次 videos/tags 失效，主线程按整库重算 N 次。
+ */
+data class FetchedMetadataWrite(
+    val video: VideoEntity,
+    val tags: List<TagEntity>,
+    val refs: List<VideoTagCrossRef>
+)
+
 @Dao
 interface VideoDao {
 
@@ -154,30 +166,50 @@ interface VideoDao {
      * 这里直接返回 false，不再插入 —— 旧的 `@Insert(REPLACE)` 会把删掉的行**复活**，
      * 让"已下载"标记和本地库索引重新指回不存在的文件。
      *
+     * 事务由 [applyFetchedMetadataBatch] 提供（单条也走同一事务，不嵌套两层）。
+     *
      * @return 是否真的写入了（false = 行已不存在，调用方无需当作失败）
      */
+    suspend fun applyFetchedMetadata(write: FetchedMetadataWrite): Boolean =
+        applyFetchedMetadataBatch(listOf(write)) == 1
+
+    /**
+     * 批量复合写：**一个事务**内逐条执行与 [applyFetchedMetadata] 完全相同的判存与写入。
+     *
+     * 逐条调用 [applyFetchedMetadata] 时每条都是一次独立事务，Room 每行都发一次
+     * videos/tags 失效 —— 一次扫描上千个新文件就是上千次全库重查 + 主线程重算。
+     * 这里先由调用方把一批响应全部拉完（网络），再一次性提交，失效只发**一次**；
+     * 每条仍走 `affected == 0` 的跳过分支，已删的行不会被复活。
+     *
+     * @return 真正写入的行数（已不存在的行不计入）
+     */
     @Transaction
-    suspend fun applyFetchedMetadata(video: VideoEntity, tags: List<TagEntity>, refs: List<VideoTagCrossRef>): Boolean {
-        val affected = updateFetchedMetadata(
-            localUri = video.localUri,
-            title = video.title,
-            author = video.author,
-            authorId = video.authorId,
-            createdAt = video.createdAt,
-            viewCount = video.viewCount,
-            likeCount = video.likeCount,
-            commentCount = video.commentCount,
-            rating = video.rating,
-            thumbnailUrl = video.thumbnailUrl,
-            tagsCsv = video.tagsCsv
-        )
-        if (affected == 0) return false
-        clearCrossRefs(video.localUri)
-        if (tags.isNotEmpty()) {
-            upsertTags(tags)
-            insertCrossRefs(refs)
+    suspend fun applyFetchedMetadataBatch(writes: List<FetchedMetadataWrite>): Int {
+        var applied = 0
+        for (write in writes) {
+            val video = write.video
+            val affected = updateFetchedMetadata(
+                localUri = video.localUri,
+                title = video.title,
+                author = video.author,
+                authorId = video.authorId,
+                createdAt = video.createdAt,
+                viewCount = video.viewCount,
+                likeCount = video.likeCount,
+                commentCount = video.commentCount,
+                rating = video.rating,
+                thumbnailUrl = video.thumbnailUrl,
+                tagsCsv = video.tagsCsv
+            )
+            if (affected == 0) continue
+            clearCrossRefs(video.localUri)
+            if (write.tags.isNotEmpty()) {
+                upsertTags(write.tags)
+                insertCrossRefs(write.refs)
+            }
+            applied += 1
         }
-        return true
+        return applied
     }
 
     /** 复合删（原子）：清标签关联 + 删库记录（不删磁盘文件）。 */

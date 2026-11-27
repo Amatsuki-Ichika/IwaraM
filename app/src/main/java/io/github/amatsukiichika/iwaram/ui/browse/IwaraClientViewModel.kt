@@ -43,6 +43,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -92,7 +93,7 @@ class IwaraClientViewModel(internal val app: IwaraApp) : ViewModel() {
             // loadPlaylists 都必须立刻变成过期结果，不能等 resetAccountScopedState 的协程。
             sessionEpoch.incrementAndGet()
             _session.value = _session.value.copy(
-                loggedIn = false, username = "", userId = "", avatarUrl = null,
+                loggedIn = false, checking = false, username = "", userId = "", avatarUrl = null,
                 message = tr("登录已过期，请重新登录", "Your session has expired. Please sign in again")
             )
             // 过期与主动登出在数据层面是同一件事：凭证没了，账号级状态就必须清掉，
@@ -175,14 +176,30 @@ class IwaraClientViewModel(internal val app: IwaraApp) : ViewModel() {
                 if (!avatar.isNullOrBlank()) IwaraSession.saveUserInfo(name, id, avatar)
             }
             if (accountResultIsStale(epoch, sessionEpoch.get())) return
-            _session.value = _session.value.copy(
-                loggedIn = true,
-                checking = false,
-                username = name,
-                userId = id,
-                avatarUrl = avatar,
-                message = null
-            )
+            // 成功态写入前重新核对凭证：/user 请求期间会话可能已经过期（监听器清掉 token、
+            // 写下「登录已过期」提示并推进代际）。此时只结束「检查中」，绝不写回 loggedIn=true /
+            // message=null —— 否则过期提示被抹掉、登录表单被一个空身份顶住，用户无路可走。
+            _session.update { current ->
+                if (!IwaraSession.isLoggedIn) {
+                    // 凭证没了就不能再显示已登录身份；message 原样保留（监听器写的过期提示）。
+                    current.copy(
+                        loggedIn = false,
+                        checking = false,
+                        username = "",
+                        userId = "",
+                        avatarUrl = null
+                    )
+                } else {
+                    current.copy(
+                        loggedIn = true,
+                        checking = false,
+                        username = name,
+                        userId = id,
+                        avatarUrl = avatar,
+                        message = null
+                    )
+                }
+            }
         } catch (t: Throwable) {
             if (t is CancellationException) throw t
             if (accountResultIsStale(epoch, sessionEpoch.get())) return
@@ -211,7 +228,12 @@ class IwaraClientViewModel(internal val app: IwaraApp) : ViewModel() {
                 // 换号登录：上一个账号的内存状态先清空，再刷新新账号的资料。
                 resetAccountScopedState()
                 refreshSession(loadRemote = true)
-                _session.value = _session.value.copy(busy = false, loggedIn = true)
+                // refreshSession 期间可能已被过期监听器清掉凭证：只有凭证仍在时才写回已登录，
+                // 否则会把监听器刚写下的过期提示抹掉。
+                _session.update { current ->
+                    if (IwaraSession.isLoggedIn) current.copy(busy = false, loggedIn = true)
+                    else current.copy(busy = false)
+                }
             } catch (t: Throwable) {
                 if (t is CancellationException) throw t
                 _session.value = _session.value.copy(busy = false, message = describeIwaraError(t))
@@ -328,12 +350,14 @@ class IwaraClientViewModel(internal val app: IwaraApp) : ViewModel() {
      * 1. URL 变了（分级 / 排序 / tag 被改过）⇒ 本地参数问题，可直接修；
      * 2. URL 相同但返回里少了某条 ⇒ 上游按账号态过滤，客户端只能补救。
      * 同时带上全局筛选器的开关状态，排除"被筛选器藏起来"的可能。
+     *
+     * [url] 在写入前经 [redactDiagUrl] 脱敏 —— 诊断日志可被一键复制导出，不能带用户搜索词/tag。
      */
     private fun logFeedRequest(label: String, url: String, items: List<IwaraVideoItem>) {
         val filter = GlobalFilterHolder.value
         DiagLog.log(
             "Iwara",
-            "列表[$label] $url → ${items.size} 条 首条=${items.firstOrNull()?.id ?: "-"}" +
+            "列表[$label] ${redactDiagUrl(url)} → ${items.size} 条 首条=${items.firstOrNull()?.id ?: "-"}" +
                 " 全局筛选器=${if (filter.effective) "开" else "关"}"
         )
     }
@@ -361,11 +385,16 @@ class IwaraClientViewModel(internal val app: IwaraApp) : ViewModel() {
         repo.setRating(rating)
         syncEffectiveRating()
         loadMoreVideos(force = true)
+        // 搜索结果覆盖在视频流之上：只重拉视频流时，搜索结果空态里点「改看全部内容」
+        // 会表现为"提示消失但列表仍空"。有搜索/tag 筛选就把结果一并按新分级重拉；
+        // 没有筛选时 retrySearch 是空操作，不额外发请求。
+        if (_searchTags.value.isNotEmpty() || _searchQuery.value.isNotBlank()) retrySearch()
     }
 
     /* ---------- 订阅流 ---------- */
 
-    private val subscribedPager = FeedPager<IwaraVideoItem>(viewModelScope, PAGE_LIMIT, OnlineIdentity::video, ::describeIwaraError)
+    // internal：账号切换测试要直接向分页器种数据（真实加载函数被登录门挡着，无法在单测里走通）。
+    internal val subscribedPager = FeedPager<IwaraVideoItem>(viewModelScope, PAGE_LIMIT, OnlineIdentity::video, ::describeIwaraError)
     val subscribed: StateFlow<FeedState<IwaraVideoItem>> = subscribedPager.state
 
     /**
@@ -537,7 +566,8 @@ class IwaraClientViewModel(internal val app: IwaraApp) : ViewModel() {
             }
             logFeedRequest(
                 "搜索",
-                "search?query=$q&type=videos&page=$page&limit=$PAGE_LIMIT&sort=date&rating=$rating",
+                // 搜索词是用户输入，不进日志（诊断日志会被一键复制导出）；只留端点与分页参数。
+                "search?query=<已隐去>&type=videos&page=$page&limit=$PAGE_LIMIT&sort=date&rating=$rating",
                 items
             )
             items
@@ -584,7 +614,8 @@ class IwaraClientViewModel(internal val app: IwaraApp) : ViewModel() {
             val items = IwaraClient.call {
                 it.videos(page, PAGE_LIMIT, sort, rating, null, null, joined).results.orEmpty()
             }
-            logFeedRequest("tag筛选", "videos?page=$page&limit=$PAGE_LIMIT&sort=$sort&rating=$rating&tags=$joined", items)
+            // tag 名是用户输入，不进日志；只留个数帮助判断筛选规模。
+            logFeedRequest("tag筛选", "videos?page=$page&limit=$PAGE_LIMIT&sort=$sort&rating=$rating&tags=<已隐去:${tags.size}个>", items)
             items
         }
     }
@@ -608,7 +639,8 @@ class IwaraClientViewModel(internal val app: IwaraApp) : ViewModel() {
                     val items = IwaraClient.call {
                         it.videos(page, PAGE_LIMIT, sort, rating, null, null, joined).results.orEmpty()
                     }
-                    logFeedRequest("tag筛选", "videos?page=$page&limit=$PAGE_LIMIT&sort=$sort&rating=$rating&tags=$joined", items)
+                    // tag 名是用户输入，不进日志；只留个数帮助判断筛选规模。
+                    logFeedRequest("tag筛选", "videos?page=$page&limit=$PAGE_LIMIT&sort=$sort&rating=$rating&tags=<已隐去:${tags.size}个>", items)
                     items
                 }
                 else -> {
@@ -618,7 +650,8 @@ class IwaraClientViewModel(internal val app: IwaraApp) : ViewModel() {
                     }
                     logFeedRequest(
                         "搜索",
-                        "search?query=$q&type=videos&page=$page&limit=$PAGE_LIMIT&sort=date&rating=$rating",
+                        // 同 search()：搜索词不进日志。
+                        "search?query=<已隐去>&type=videos&page=$page&limit=$PAGE_LIMIT&sort=date&rating=$rating",
                         items
                     )
                     items
@@ -714,7 +747,8 @@ class IwaraClientViewModel(internal val app: IwaraApp) : ViewModel() {
      */
     fun clearSearch(reason: String = "未标注") {
         if (_searchTags.value.isNotEmpty() || _searchQuery.value.isNotBlank()) {
-            DiagLog.log("Filter", "清空筛选（原因：$reason）tags=${_searchTags.value}")
+            // 只记 tag 数量，不记 tag 原文：诊断日志会被一键复制导出，tag 属于用户隐私。
+            DiagLog.log("Filter", "清空筛选（原因：$reason）tags=${_searchTags.value.size} 个")
         }
         _searchQuery.value = ""
         _searchTags.value = emptyList()
@@ -724,10 +758,11 @@ class IwaraClientViewModel(internal val app: IwaraApp) : ViewModel() {
 
     /* ---------- 收藏 ---------- */
 
-    private val favoriteVideosPager = FeedPager<IwaraVideoItem>(viewModelScope, PAGE_LIMIT, OnlineIdentity::video, ::describeIwaraError)
+    // internal：同 subscribedPager —— 账号切换测试直接种数据，验证 resetAccountScopedState 覆盖收藏分页器。
+    internal val favoriteVideosPager = FeedPager<IwaraVideoItem>(viewModelScope, PAGE_LIMIT, OnlineIdentity::video, ::describeIwaraError)
     val favoriteVideos: StateFlow<FeedState<IwaraVideoItem>> = favoriteVideosPager.state
 
-    private val favoriteImagesPager = FeedPager<IwaraImageItem>(viewModelScope, PAGE_LIMIT, OnlineIdentity::image, ::describeIwaraError)
+    internal val favoriteImagesPager = FeedPager<IwaraImageItem>(viewModelScope, PAGE_LIMIT, OnlineIdentity::image, ::describeIwaraError)
     val favoriteImages: StateFlow<FeedState<IwaraImageItem>> = favoriteImagesPager.state
 
     fun loadMoreFavoriteVideos(force: Boolean = false) {
@@ -754,6 +789,9 @@ class IwaraClientViewModel(internal val app: IwaraApp) : ViewModel() {
     val images: StateFlow<FeedState<IwaraImageItem>> = imagesPager.state
 
     fun loadMoreImages(force: Boolean = false) {
+        // 图片流与帖子流是登录后才能浏览的内容（页面首拉与顶栏刷新同一道门）：
+        // 登出/未登录时一个请求都不发，否则未认证请求失败会把空态顶成错误。
+        if (!_session.value.loggedIn) return
         imagesPager.load(force) { page ->
             IwaraClient.call {
                 it.images(page, PAGE_LIMIT, videoSort.value, _rating.value, null).results.orEmpty()
@@ -765,6 +803,8 @@ class IwaraClientViewModel(internal val app: IwaraApp) : ViewModel() {
     val posts: StateFlow<FeedState<IwaraPostItem>> = postsPager.state
 
     fun loadMorePosts(force: Boolean = false) {
+        // 同 loadMoreImages：帖子流同样需要登录，未登录时顶栏刷新不得发出未认证请求。
+        if (!_session.value.loggedIn) return
         postsPager.load(force) { page ->
             IwaraClient.call {
                 it.posts(page, PAGE_LIMIT, videoSort.value, _rating.value).results.orEmpty()
@@ -853,3 +893,16 @@ internal fun accountResultIsStale(capturedEpoch: Long, currentEpoch: Long): Bool
 
 /** 评论状态的槽位键：目标类型 + 目标 id。 */
 internal fun commentsKey(type: String, targetId: String): String = "$type|$targetId"
+
+/**
+ * 诊断日志脱敏（纯函数）：抹掉 URL 中由用户或作者提供的取值。
+ *
+ * 诊断日志可被「一键复制」导出到聊天/工单里，搜索词、tag 与作者标识属于个人数据；
+ * 保留端点与 `type/page/limit/sort/rating` 已足够定位一次请求，结果条数另行记录。
+ * 见 DiagnosticsRedactionTest。
+ */
+internal fun redactDiagUrl(url: String): String =
+    // 已经写成 `<已隐去…>` 的占位值原样保留（调用点可以自带「共 N 个」这类非原文摘要）。
+    Regex("(?i)(query|tags|user|handle|uid|filter)=(?![<&\\s])[^&\\s]*").replace(url) { match ->
+        "${match.groupValues[1]}=<已隐去>"
+    }

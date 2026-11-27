@@ -1,8 +1,11 @@
 package io.github.amatsukiichika.iwaram.ui
 
+import io.github.amatsukiichika.iwaram.i18n.AppLanguage
+import io.github.amatsukiichika.iwaram.i18n.LanguageMode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.Locale
 
 /** ui 包内的纯文本格式化函数：播放器时间轴、异常摘要、评论 tab 标签。 */
 class UiTextHelpersTest {
@@ -63,5 +66,60 @@ class UiTextHelpersTest {
     fun `commentTabLabel formats large counts via formatCount`() {
         assertEquals("评论 999", commentTabLabel(999))
         assertEquals("评论 1.2万", commentTabLabel(12_345))
+    }
+
+    // ---------- AppLanguage.locale（进程默认 Locale 不得影响输出） ----------
+
+    /** 临时替换进程默认 Locale（模拟逗号小数点/非拉丁数字的系统语言），结束后必定还原。 */
+    private fun <T> withDefaultLocale(locale: Locale, block: () -> T): T {
+        val previous = Locale.getDefault()
+        Locale.setDefault(locale)
+        try {
+            return block()
+        } finally {
+            Locale.setDefault(previous)
+        }
+    }
+
+    /** 临时切换界面语言，结束后必定还原，避免测试间互相污染。 */
+    private fun <T> withLanguage(mode: LanguageMode, block: () -> T): T {
+        val previous = AppLanguage.mode
+        AppLanguage.set(mode)
+        try {
+            return block()
+        } finally {
+            AppLanguage.set(previous)
+        }
+    }
+
+    @Test
+    fun `commentTabLabel follows app language under a comma-decimal process locale`() {
+        // 德语系统 Locale 会把 "%.1f" 格式化成 "1,2"，中文界面必须仍是 "1.2万"。
+        withDefaultLocale(Locale.GERMANY) {
+            withLanguage(LanguageMode.ZH) {
+                assertEquals("评论 1.2万", commentTabLabel(12_345))
+                assertEquals("评论 1", commentTabLabel(1))
+            }
+            withLanguage(LanguageMode.EN) {
+                assertEquals("12K comments", commentTabLabel(12_345))
+                assertEquals("1 comment", commentTabLabel(1))
+            }
+        }
+    }
+
+    @Test
+    fun `formatTime follows app language under a non-Latin-digit process locale`() {
+        // 阿拉伯语系统 Locale 会用阿拉伯-印度数字格式化 %d；播放器时间轴必须跟随
+        // AppLanguage.locale（中/英都输出 0-9），而不是进程默认 Locale。
+        withDefaultLocale(Locale.forLanguageTag("ar")) {
+            withLanguage(LanguageMode.ZH) {
+                assertEquals("12:34", formatTime((12 * 60 + 34) * 1000L))
+                assertEquals("1:01:05", formatTime(3_665_000L))
+            }
+            withLanguage(LanguageMode.EN) {
+                assertEquals("12:34", formatTime((12 * 60 + 34) * 1000L))
+                assertEquals("1:01:05", formatTime(3_665_000L))
+            }
+        }
     }
 }

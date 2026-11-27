@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import io.github.amatsukiichika.iwaram.IwaraApp
 import io.github.amatsukiichika.iwaram.data.GitHubRelease
 import io.github.amatsukiichika.iwaram.data.GitHubReleaseClient
+import io.github.amatsukiichika.iwaram.data.GitHubReleaseResult
 import io.github.amatsukiichika.iwaram.data.IwaraRepository
 import io.github.amatsukiichika.iwaram.data.UpdateChannel
 import io.github.amatsukiichika.iwaram.data.UpdateInstallException
@@ -116,6 +117,9 @@ class UpdateViewModel(application: Application) : AndroidViewModel(application) 
     /** 切换更新通道；仓库会清空忽略项与上次检查时间，界面状态同步回到空闲。 */
     fun setChannel(value: String) {
         if (repository.updateChannel.value == value) return
+        // 在途检查的结果属于旧通道：先取消，避免它回来覆盖新通道的状态。
+        checkJob?.cancel()
+        checkJob = null
         pendingRelease = null
         // 通道变了，旧通道的"最新版本"不再有参考意义，等下次检查再刷新。
         _latestRelease.value = null
@@ -136,8 +140,9 @@ class UpdateViewModel(application: Application) : AndroidViewModel(application) 
     /**
      * 检查更新。
      *
-     * @param manual 手动检查：失败进入 [UpdateUiState.Failed] 供重试，已是最新进入
-     *   [UpdateUiState.UpToDate]，且不套用"忽略此版本"；自动检查则全程静默。
+     * @param manual 手动检查：查询失败进入 [UpdateUiState.Failed] 供重试；API 成功但没有可用
+     *   版本、或已是最新，都进入 [UpdateUiState.UpToDate]（不再误报网络失败），且不套用
+     *   "忽略此版本"；自动检查则全程静默。
      */
     fun checkForUpdates(manual: Boolean) {
         val current = _state.value
@@ -145,26 +150,31 @@ class UpdateViewModel(application: Application) : AndroidViewModel(application) 
         checkJob?.cancel()
         checkJob = viewModelScope.launch {
             _state.value = UpdateUiState.Checking
-            val release = try {
-                GitHubReleaseClient.fetch(channelOf(repository.updateChannel.value), currentVersionName)
+            // 通道在发起请求时固定：请求期间切换通道的话，这份结果属于旧通道，必须丢弃。
+            val checkedChannel = repository.updateChannel.value
+            val result = try {
+                GitHubReleaseClient.fetch(channelOf(checkedChannel), currentVersionName)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
-                null
+                GitHubReleaseResult.Failure
             }
             // 关闭弹窗会取消检查；即使客户端把取消吞成 IOException，这里也立即退出，避免把状态写回。
             currentCoroutineContext().ensureActive()
+            // setChannel 会取消本任务；这里再兜住"响应已返回、取消尚未生效"的窗口。
+            if (repository.updateChannel.value != checkedChannel) return@launch
+            val mapping = mapCheckResult(result, manual, currentVersionName)
+            // API 调用本身成功（含"没有可用版本"）就记录检查时间，自动检查的频率据此计算；
+            // 只认"查到了版本"会让健康但没有新版本的响应在每次启动时都重新打 GitHub。
+            if (mapping.recordLastCheck) {
+                repository.setUpdateLastCheck(System.currentTimeMillis())
+            }
+            val release = (result as? GitHubReleaseResult.Found)?.release
             if (release == null) {
                 pendingRelease = null
-                _state.value = if (manual) {
-                    UpdateUiState.Failed(UpdateFailureKind.NETWORK)
-                } else {
-                    UpdateUiState.Idle
-                }
+                _state.value = mapping.terminalState ?: UpdateUiState.Idle
                 return@launch
             }
-            // 成功拿到 releases（包括"没有更新"）就记录检查时间，自动检查的频率据此计算。
-            repository.setUpdateLastCheck(System.currentTimeMillis())
             _latestRelease.value = release
             if (!isNewerThanCurrent(release)) {
                 pendingRelease = null
@@ -324,4 +334,37 @@ class UpdateViewModel(application: Application) : AndroidViewModel(application) 
         UpdateInstallFailure.INSTALL -> UpdateFailureKind.INSTALL
         UpdateInstallFailure.UNKNOWN -> UpdateFailureKind.UNKNOWN
     }
+}
+
+/**
+ * 检查结果 → 状态写入决策（纯函数，单测见 UpdateCheckResultMappingTest）。
+ *
+ * - [GitHubReleaseResult.Found]：[terminalState] 为 null，由调用方继续比较版本新旧；
+ * - [GitHubReleaseResult.None]：API 调用成功但没有可用版本 —— 手工检查显示「已是最新」，
+ *   自动检查保持静默（[UpdateUiState.Idle]），不再误报网络失败；
+ * - [GitHubReleaseResult.Failure]：手工检查报网络失败，自动检查静默。
+ *
+ * [recordLastCheck] 仅在 API 调用本身成功（Found / None）时为 true，
+ * 自动检查的每日/每周频率据此计算。
+ */
+internal data class CheckResultMapping(
+    val terminalState: UpdateUiState?,
+    val recordLastCheck: Boolean
+)
+
+/** 见 [CheckResultMapping]：把一次查询结果映射成状态与"是否记录检查时间"。 */
+internal fun mapCheckResult(
+    result: GitHubReleaseResult,
+    manual: Boolean,
+    currentVersionName: String
+): CheckResultMapping = when (result) {
+    is GitHubReleaseResult.Found -> CheckResultMapping(terminalState = null, recordLastCheck = true)
+    GitHubReleaseResult.None -> CheckResultMapping(
+        terminalState = if (manual) UpdateUiState.UpToDate(currentVersionName) else UpdateUiState.Idle,
+        recordLastCheck = true
+    )
+    GitHubReleaseResult.Failure -> CheckResultMapping(
+        terminalState = if (manual) UpdateUiState.Failed(UpdateFailureKind.NETWORK) else UpdateUiState.Idle,
+        recordLastCheck = false
+    )
 }

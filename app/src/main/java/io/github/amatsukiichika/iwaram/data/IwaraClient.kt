@@ -1,5 +1,7 @@
 package io.github.amatsukiichika.iwaram.data
 
+import com.google.gson.Gson
+import com.google.gson.GsonBuilder
 import io.github.amatsukiichika.iwaram.i18n.AppLanguage
 import io.github.amatsukiichika.iwaram.i18n.tr
 import okhttp3.Interceptor
@@ -21,6 +23,7 @@ import retrofit2.http.Query
 import java.io.IOException
 import java.net.ConnectException
 import java.net.HttpURLConnection
+import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 import java.util.concurrent.TimeUnit
 
@@ -232,11 +235,21 @@ object IwaraClient {
 
     private val services = java.util.concurrent.ConcurrentHashMap<String, IwaraBrowseService>()
 
+    /**
+     * 共享 Gson：额外注册 [NullSkippingListTypeAdapterFactory]，把坏响应数组里的 null 元素
+     * 在反序列化时丢掉 —— 否则 `{"results":[null]}` 会变成含 null 的 `List<T>`，消费端直接 NPE。
+     */
+    private val gson: Gson by lazy {
+        GsonBuilder()
+            .registerTypeAdapterFactory(NullSkippingListTypeAdapterFactory)
+            .create()
+    }
+
     private fun serviceFor(base: String): IwaraBrowseService = services.getOrPut(base) {
         Retrofit.Builder()
             .baseUrl(base)
             .client(http)
-            .addConverterFactory(GsonConverterFactory.create())
+            .addConverterFactory(GsonConverterFactory.create(gson))
             .build()
             .create(IwaraBrowseService::class.java)
     }
@@ -244,7 +257,7 @@ object IwaraClient {
     val api: IwaraBrowseService get() = serviceFor(activeBase)
 
     /**
-     * 统一调用入口：连接类失败（DNS/连接拒绝）时切换备用域名重试一次。
+     * 统一调用入口：连接类失败（DNS/连接拒绝/连接超时）时切换备用域名重试一次。
      * 网络调用一律走这里，不要直接持有 service。
      */
     suspend fun <T> call(block: suspend (IwaraBrowseService) -> T): T {
@@ -256,11 +269,8 @@ object IwaraClient {
         while (true) {
             try {
                 return block(api)
-            } catch (e: UnknownHostException) {
-                if (retried || !switchBase()) throw e
-                retried = true
-            } catch (e: ConnectException) {
-                if (retried || !switchBase()) throw e
+            } catch (e: IOException) {
+                if (!isFailoverRetryable(e) || retried || !switchBase()) throw e
                 retried = true
             }
         }
@@ -277,16 +287,15 @@ object IwaraClient {
      * 订阅流专用调用：**必须始终打在 [subscriptionBase]（api.iwara.tv）**，不跟随 sticky 的主/备切换。
      *
      * `apiq.iwara.tv` 会**静默忽略** `?subscribed=true` 并返回**全站最新视频**（不报错），
-     * 故订阅流钉死在 api.iwara.tv。网络类失败（DNS/连接拒绝）也**原地重试同一个 base**
+     * 故订阅流钉死在 api.iwara.tv。网络类失败（DNS/连接拒绝/连接超时）也**原地重试同一个 base**
      * （吃瞬时抖动），仍失败就向上抛给订阅页显示"加载失败 · 重试" —— 宁可明着报错，
      * 也不静默把请求落到 apiq 拿到错的"全站最新"内容。
      */
     suspend fun <T> callSubscription(block: suspend (IwaraBrowseService) -> T): T =
         try {
             block(serviceFor(subscriptionBase))
-        } catch (e: UnknownHostException) {
-            block(serviceFor(subscriptionBase))
-        } catch (e: ConnectException) {
+        } catch (e: IOException) {
+            if (!isFailoverRetryable(e)) throw e
             block(serviceFor(subscriptionBase))
         }
 
@@ -296,6 +305,21 @@ object IwaraClient {
         if (!usePrimary) switchedToSecondaryAt = System.currentTimeMillis()
         return true
     }
+}
+
+/**
+ * [IwaraClient.call] / [IwaraClient.callSubscription] 允许换域（或原地）重试一次的网络失败集合：
+ * DNS 解析失败、连接被拒绝、连接超时。
+ *
+ * 主域被静默丢包（防火墙黑洞）时不会立刻拒绝连接，而是在 connectTimeout(15s) 后抛
+ * [SocketTimeoutException]；只认前两类会让整个会话都卡在不可达的主域上。读取超时（60s）
+ * 晚于 callTimeout(30s)，连接建立后的超时不会以 SocketTimeoutException 先出现，所以这里的
+ * SocketTimeoutException 实际只来自连接阶段 —— 请求还没发出，重试不会把变更执行两次。
+ * 其余 IOException（TLS/协议/流中断等）不重试，避免重发可能已到达服务器的请求。
+ */
+internal fun isFailoverRetryable(t: Throwable): Boolean = when (t) {
+    is UnknownHostException, is ConnectException, is SocketTimeoutException -> true
+    else -> false
 }
 
 /* ---------- 端点定义 ---------- */

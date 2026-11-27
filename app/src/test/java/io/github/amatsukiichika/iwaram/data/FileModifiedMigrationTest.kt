@@ -62,7 +62,8 @@ class FileModifiedMigrationTest {
     @Test
     fun `迁移 3到4 后新列就位且旧数据无损`() = runBlocking {
         val room = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
-            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4)
+            // 迁移清单用 AppDatabase.MIGRATIONS（生产 get() 的同一份），不在这里手抄一份。
+            .addMigrations(*AppDatabase.MIGRATIONS)
             .allowMainThreadQueries()
             .build()
 

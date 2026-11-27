@@ -1,10 +1,11 @@
 package io.github.amatsukiichika.iwaram
 
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -35,23 +36,34 @@ class DownloadQueueInvariantTest {
 
     @Test
     fun `job enqueued after worker went idle is still executed - the race window is gone`() = runBlocking {
-        // 旧竞态的复现场景：第一个任务消费完后 worker 空闲退出的窗口内，新任务入队。
-        // 常驻 worker 不退出，无论何时入队都必须被消费。
+        // 旧竞态的复现场景：第一个任务消费完后 worker 空闲（旧实现从这里进入 1500ms receive 超时
+        // 并退出），该窗口内新任务入队。常驻 worker 不退出，无论何时入队都必须被消费。
         val queue = Channel<DownloadService.Job>(Channel.UNLIMITED)
         val executed = mutableListOf<String>()
-        val worker = launch { drainDownloadQueue(queue, execute = recorder(executed)) }
+        // onIdle 只在队列空时触发：等它等价于「worker 已消费完 a 并走到空闲分支」，
+        // 不再用固定间隔轮询赌调度器何时跑测试体。
+        val wentIdle = CompletableDeferred<Unit>()
+        val worker = launch {
+            drainDownloadQueue(
+                queue,
+                execute = recorder(executed),
+                onIdle = { _ ->
+                    if (executed == listOf("a")) wentIdle.complete(Unit)
+                }
+            )
+        }
 
         queue.send(job("a"))
-        // 等第一个任务被消费完（模拟旧的"空闲判定窗口"）
-        while (!executed.contains("a")) delay(10)
+        withTimeout(5_000) { wentIdle.await() }
+        assertEquals("a 消费完后 worker 必须走到空闲分支", listOf("a"), executed)
+
         queue.send(job("b"))
         queue.send(job("c"))
         queue.close()
 
-        // for-in 在 close 后仍会消费完已入队的元素
-        while (executed.size < 3) delay(10)
+        // for-in 在 close 后仍会消费完已入队的元素；join 有界：回归会在这里失败而不是挂死整个 :app:test。
+        withTimeout(5_000) { worker.join() }
         assertEquals(listOf("a", "b", "c"), executed)
-        worker.join()
     }
 
     @Test
@@ -145,7 +157,7 @@ class DownloadQueueInvariantTest {
                 // 传播到循环外 = 取消生效；在此吞掉取消本身以便断言后续状态。
             }
         }
-        worker.join()
+        withTimeout(5_000) { worker.join() }
         assertTrue("取消的任务不得记为已执行", executed.isEmpty())
         assertEquals("排队中的任务不得在取消后被消费", emptyList<String>(), executed)
     }

@@ -104,7 +104,7 @@ To create your own key (contributors do not need one — only maintainers publis
 keytool -genkeypair -v \
   -keystore keystore/release.jks \
   -storetype PKCS12 \
-  -alias iwaram \
+  -alias iwara-m \
   -keyalg RSA -keysize 4096 -validity 10000 \
   -dname "CN=IwaraM, O=IwaraM"
 ```

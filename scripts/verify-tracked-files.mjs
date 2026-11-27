@@ -35,8 +35,8 @@ const files = raw.split("\0").filter(Boolean);
 const RULES = [
   { label: "signing material", match: (f) => /(^|\/)[^/]+\.(jks|keystore|p12|pepk)$/i.test(f) },
   { label: "local configuration", match: (f) => /(^|\/)(keystore\.properties|local\.properties)$/.test(f) || /(^|\/)keystore\//.test(f) },
-  { label: "build output", match: (f) => /\.(apk|aab|ap_|dex)$/i.test(f) },
-  { label: "agent scratch state", match: (f) => /(^|\/)\.zcode\//.test(f) },
+  { label: "build output", match: (f) => /\.(apk|aab|ap_|dex)$/i.test(f) || /(^|\/)dist\//.test(f) },
+  { label: "agent scratch state", match: (f) => /(^|\/)(\.zcode|\.local)\//.test(f) },
   { label: "secret file", match: (f) => /(^|\/)\.env(\.|$)/.test(f) && !/\.(example|sample|template)$/.test(f) },
 ];
 const found = [];

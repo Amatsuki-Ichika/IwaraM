@@ -34,8 +34,10 @@ val appVersionCode: Int = appVersionName.substringBefore('-').split(".").let { p
 }
 
 // Release signing material is read from a git-ignored keystore.properties.
-// The file is optional: debug and test builds work without it, only `assembleRelease` requires it.
+// The file is optional: debug and test builds work without it, and only tasks that package a
+// signed release artifact need it — release-variant compile, test and lint do not.
 val keystorePropertiesFile = rootProject.file("keystore.properties")
+val releasePackagingTasks = setOf("assembleRelease", "bundleRelease", "packageRelease")
 val keystoreProperties = Properties().apply {
     if (keystorePropertiesFile.exists()) {
         keystorePropertiesFile.inputStream().use { load(it) }
@@ -83,7 +85,7 @@ android {
                 storePassword = keystoreProperties.getProperty("storePassword")
                 keyAlias = keystoreProperties.getProperty("keyAlias")
                 keyPassword = keystoreProperties.getProperty("keyPassword")
-            } else if (gradle.startParameter.taskNames.any { it.contains("Release", ignoreCase = true) }) {
+            } else if (gradle.startParameter.taskNames.any { it.substringAfterLast(':') in releasePackagingTasks }) {
                 throw GradleException(
                     "keystore.properties is missing, so the release build cannot be signed. " +
                         "Copy keystore.properties.example and fill in your own values; " +

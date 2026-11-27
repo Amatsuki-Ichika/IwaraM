@@ -83,22 +83,46 @@ internal fun buildPlayerErrorUi(
     chain: List<Throwable>,
     chainMsg: String,
     httpCode: Int?
+): PlayerErrorUi = playerErrorText(
+    errorCode = error.errorCode,
+    errorCodeName = error.errorCodeName,
+    httpCode = httpCode,
+    srReason = SuperResStatus.reason,
+    stackFrame = chain.lastOrNull()?.stackTrace?.firstOrNull(),
+    chainMsg = chainMsg
+)
+
+/**
+ * 错误文案的纯映射（单测见 PlayerErrorTextTest）。
+ *
+ * 只吃错误码 / HTTP 码 / 原因串这类纯数据，不碰 [PlaybackException] —— 它的构造器会摸
+ * `android.os.Bundle` 与 `SystemClock`，JVM 单测里不可用（本函数因此成为唯一映射点）。
+ * 行为与抽取前完全一致：
+ * - [errorCodeName] 原样进 detail（debug 模式上屏）；
+ * - friendly 轨按 HTTP 403 / 其他 HTTP / 2001·2002·1003 / 3000..3999 / 兜底分档。
+ */
+internal fun playerErrorText(
+    errorCode: Int,
+    errorCodeName: String,
+    httpCode: Int?,
+    srReason: String?,
+    stackFrame: StackTraceElement?,
+    chainMsg: String
 ): PlayerErrorUi {
     val httpMsg = httpCode?.let { tr("，服务器返回 HTTP $it", ", server returned HTTP $it") } ?: ""
     // 超分失败的原因 + 最深一帧调用栈直接拼进错误面板，无需额外开菜单即可看到
-    val srReason = SuperResStatus.reason?.let { tr("；超分原因：$it", "; SR reason: $it") } ?: ""
-    val stackMsg = chain.lastOrNull()?.stackTrace?.firstOrNull()
-        ?.let {
-            tr(
-                "（${it.className}.${it.methodName}:${it.lineNumber}）",
-                " (${it.className}.${it.methodName}:${it.lineNumber})"
-            )
-        } ?: ""
+    val srMsg = srReason?.let { tr("；超分原因：$it", "; SR reason: $it") } ?: ""
+    val stackMsg = stackFrame?.let {
+        tr(
+            "（${it.className}.${it.methodName}:${it.lineNumber}）",
+            " (${it.className}.${it.methodName}:${it.lineNumber})"
+        )
+    } ?: ""
     // detail 轨 = 原样全串（debug 模式上屏；DiagLog 侧照旧记录）；
     // friendly 轨 = 按 HTTP 码 / media3 错误域给一句人话（普通模式）。
     val detail = tr(
-        "播放出错（${error.errorCodeName}$httpMsg，代码 ${error.errorCode}）$srReason$stackMsg\n原因链：$chainMsg",
-        "Playback error (${error.errorCodeName}$httpMsg, code ${error.errorCode})$srReason$stackMsg\nCause chain: $chainMsg"
+        "播放出错（$errorCodeName$httpMsg，代码 $errorCode）$srMsg$stackMsg\n原因链：$chainMsg",
+        "Playback error ($errorCodeName$httpMsg, code $errorCode)$srMsg$stackMsg\nCause chain: $chainMsg"
     )
     val friendly = when {
         httpCode == 403 -> tr(
@@ -107,11 +131,11 @@ internal fun buildPlayerErrorUi(
         )
         httpCode != null -> friendlyHttpError(httpCode)
         // 2001/2002 IO 连接域 + 1003 超时（media3 1.4.1 无 ERROR_CODE_IO_NETWORK_READ_FAILED）
-        error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED ||
-            error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT ||
-            error.errorCode == PlaybackException.ERROR_CODE_TIMEOUT -> tr("网络不稳定，请重试", "Network unstable, please retry")
+        errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED ||
+            errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT ||
+            errorCode == PlaybackException.ERROR_CODE_TIMEOUT -> tr("网络不稳定，请重试", "Network unstable, please retry")
         // 3000-3999 = media3 解码错误域
-        error.errorCode in 3000..3999 -> tr("该视频编码无法播放", "This video's codec cannot be played")
+        errorCode in 3000..3999 -> tr("该视频编码无法播放", "This video's codec cannot be played")
         else -> tr("播放出错，请重试", "Playback failed, please retry")
     }
     return PlayerErrorUi(friendly, detail)
@@ -143,14 +167,23 @@ internal fun resolveOrientation(pref: String, isLandscape: Boolean?): Int? = whe
  * 7001/1003/1000 自动恢复共用的"从当前进度重装片"。
  * 只用于管线级故障后**保住旧实例**的场景；切 SR/模型一律走装片 effect 的 epoch 重建 ——
  * 两条恢复通路对同一实例混用，会造成重复装片（在线源连缓冲两次）。
+ *
+ * 重装片前先记下 `playWhenReady` 再原样恢复：它是用户意图，
+ * 与 [rebuildPlayIntent] 同一条理由（错误回调时 `isPlaying` 恒 false，不能用）。
+ * 用户主动暂停、页面退到后台（ON_PAUSE）或被二级页覆盖时它已是 false ——
+ * 原来无条件置 true 会让这些会话在 1003（转屏/切全屏高发）后重新出声。
  */
 internal fun recoverAtCurrentPosition(player: ExoPlayer, url: String) {
     runCatching {
         val pos = player.currentPosition
+        // 必须在 setMediaItem/prepare 之前取：重装片本身不改意图，但要防今后在这里先动了它。
+        // 走 rebuildPlayIntent（已有单测）：错误回调里 isPlaying 恒 false，playWhenReady 才是用户意图；
+        // 用户暂停 / 页面被覆盖时它已是 false，恢复后保持暂停，不能重新出声。
+        val playWhenReady = rebuildPlayIntent(player.playWhenReady, player.isPlaying)
         val item = MediaItem.fromUri(Uri.parse(url))
         if (pos > 0) player.setMediaItem(item, pos) else player.setMediaItem(item)
         player.prepare()
-        player.playWhenReady = true
+        player.playWhenReady = playWhenReady
     }.onFailure { DiagLog.log(TAG, "恢复播放失败: ${it.message}") }
 }
 

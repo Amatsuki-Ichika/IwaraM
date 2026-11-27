@@ -125,7 +125,8 @@ fun IwaraClientViewModel.sendComment(
         commentsByTarget[key] = current.copy(sending = true)
         (scope ?: viewModelScope).launch {
             try {
-                IwaraClient.call {
+                // 变更类请求固定走 callPrimary（主域 apiq）：备用域对写操作会返 200 却不入库。
+                IwaraClient.callPrimary {
                     it.postComment(
                         type,
                         targetId,
@@ -154,7 +155,8 @@ fun IwaraClientViewModel.deleteComment(
         val key = commentsKey(type, targetId)
         (scope ?: viewModelScope).launch {
             try {
-                IwaraClient.call { it.deleteComment(commentId) }.ensureIwaraSuccess()
+                // 删除同样是写操作：固定主域，避免粘性切换把请求带到会"假成功"的备用域。
+                IwaraClient.callPrimary { it.deleteComment(commentId) }.ensureIwaraSuccess()
                 commentsByTarget[key]?.let { snapshot ->
                     commentsByTarget[key] = snapshot.copy(items = snapshot.items.filterNot { it.id == commentId })
                 }
