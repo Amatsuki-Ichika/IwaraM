@@ -52,10 +52,13 @@ android {
     defaultConfig {
         applicationId = "io.github.amatsukiichika.iwaram"
         minSdk = 26
-        // Android 16（API 36）。升档涉及的行为变化均已处理：
-        //   - edge-to-edge 强制：MainActivity 已 enableEdgeToEdge()，各栏/抽屉消费 insets；
-        //   - predictive back 默认开：manifest 已开 enableOnBackInvokedCallback，返回链走 BackHandler；
-        //   - dataSync 前台服务 6h/24h 限额：DownloadService/ScanService 各自实现 onTimeout()。
+        // Android 16 (API 36). The behavior changes that come with this target are handled:
+        //   - edge-to-edge is enforced: MainActivity calls enableEdgeToEdge(), and every bar/drawer
+        //     consumes insets;
+        //   - predictive back is on by default: the manifest enables enableOnBackInvokedCallback,
+        //     and back navigation goes through BackHandler;
+        //   - the 6h/24h dataSync foreground-service limit: DownloadService and ScanService each
+        //     implement onTimeout().
         targetSdk = 36
         versionCode = appVersionCode
         versionName = appVersionName
@@ -157,6 +160,7 @@ dependencies {
 
     implementation(libs.retrofit)
     implementation(libs.retrofit.converter.gson)
+    implementation(libs.gson)
     implementation(libs.okhttp)
 
     implementation(libs.coil.compose)

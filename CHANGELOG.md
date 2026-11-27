@@ -41,11 +41,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Manually linking a video to an iwara ID can no longer resurrect a row deleted in the meantime, scans write fetched metadata in batches instead of re-querying the whole library per file, and malformed API responses with null list elements no longer crash playlist, library or player screens.
 
+- Download failure text and restored failure cards now follow the in-app language instead of freezing the language used when the download failed; a corrupt download-history file is backed up rather than silently overwritten by the next completed download.
+
+- Watch-history covers survive removing the video from the library: a cover still referenced by a history row is not deleted with the library entry. A failed file deletion shows a bilingual message instead of raw platform text.
+
+- The Me tab scrollbar sits on the right edge and freezes the glass backdrop while dragged, and library section markers stay correct after a re-sort or refresh.
+
+- Theme color swatches preview the palette the app will actually use under a forced Light or Dark theme, and turning Developer mode on or off changes resolve-error detail immediately.
+
+- The super-resolution degraded fallback fills the whole output frame, a failed model configure releases the buffers it had already allocated, and related-video prefetch picks the first uncached candidate instead of stopping when the first one is cached.
+
+- Update downloads accept only HTTPS URLs on GitHub's release hosts, including every redirect hop, with the checksum held to the same rule.
+
+- Watch progress is written as a single atomic update, so an older snapshot can no longer roll the saved position back or recreate a removed history row.
+
 ### Changed
 
 - The orange and teal light-theme primaries are slightly darker so their text and filled buttons meet WCAG AA contrast; the other palettes are unchanged.
 
 - Playlist and comment changes always use the primary API domain, so they no longer report success when the secondary host silently ignores the request.
+
+- The unreachable "Ignore this version" card is gone from Settings; the update dialog's Ignore button remains the single working path.
 
 ## [0.2.3] - 2026-11-22
 

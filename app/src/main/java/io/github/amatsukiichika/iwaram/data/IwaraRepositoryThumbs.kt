@@ -124,10 +124,26 @@ suspend fun IwaraRepository.linkIwaraId(video: VideoEntity, id: String) {
     internal fun isInsideDir(path: String, dir: File): Boolean =
         path.startsWith(dir.absolutePath + File.separator)
 
-    /** 行被清理时顺手删掉它的封面文件；只删持久目录里的（缓存目录留给系统回收）。 */
-    internal fun IwaraRepository.deleteLocalThumbnailFile(path: String?) {
+    /**
+     * 行被清理时顺手删掉它的封面文件；只删持久目录里的（缓存目录留给系统回收）。
+     *
+     * 观看历史把库行的 [VideoEntity.localThumbnailPath] 直接当自己的封面快照存着
+     *（见 PlayerScreen 的 recordWatch），历史行必须能独立于库行存在，所以**仍被任一历史行
+     * 引用的封面必须跳过**：否则删库行 / 扫描收尾会把历史页的封面一起删掉，留下死路径
+     * 且没有在线兜底。查询失败按「仍被引用」处理 —— 宁可留一个孤儿文件，也不误删。
+     */
+    internal suspend fun IwaraRepository.deleteLocalThumbnailFile(path: String?) {
         val p = path?.takeIf { it.isNotBlank() } ?: return
         if (!isInsideDir(p, localThumbsDir(context))) return
+        // 取消必须原样上抛；查询失败按「仍被引用」处理，宁可留孤儿文件也不误删历史封面。
+        val referenced = try {
+            historyDao.countByThumbnail(p) > 0
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            true
+        }
+        if (referenced) return
         runCatching { File(p).delete() }
     }
 

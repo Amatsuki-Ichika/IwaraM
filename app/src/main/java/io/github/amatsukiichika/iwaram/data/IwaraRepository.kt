@@ -8,6 +8,7 @@ import android.os.Build
 import androidx.documentfile.provider.DocumentFile
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.ui.DiagLog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -633,7 +634,12 @@ class IwaraRepository(
 
     /**
      * 观看记录的写入方是 PlayerScreen（onDispose 时页面组合已在外走），不能用页面作用域；
-     * 这里持一个私有 IO 作用域做 fire-and-forget，单线程顺序落库（Room 串行写，无并发抖动）。
+     * 这里持一个私有 IO 作用域做 fire-and-forget。
+     *
+     * 注意：这是 **Dispatchers.IO 多线程池，不是单线程**。同一个 key 的两次写入可能乱序执行，
+     * 所以观看历史只允许单条原子语句（[WatchHistoryDao.updateProgress] 的 UPDATE），
+     * 不能做「先读整行、再 REPLACE 写回」的读-改-写 —— 旧快照后落库会回退进度，
+     * 行在中途被删还会被 REPLACE 复活。
      */
     internal val historyScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -743,8 +749,123 @@ data class DownloadHistoryEntry(
     /** 最近一次完整性校验的时间戳（毫秒）；从未校验过为 null，旧记录天然缺省。 */
     val verifiedAt: Long? = null,
     /** 最近一次完整性校验的机器可读结论（见 [integrityVerdictNote]）：ok / unknown / broken:xxx。 */
-    val verifyNote: String? = null
+    val verifyNote: String? = null,
+    /**
+     * 失败原因的机器可读码（见 [DownloadFailureCode]）；成功记录与旧记录为 null。
+     *
+     * 有 code 时界面按**当前语言**重新取词（[downloadFailureText]），[message] 只作旧 JSON 的兼容兜底。
+     * 缺省 null 保证旧记录反序列化不受影响。
+     */
+    val messageCode: String? = null
 )
+
+/**
+ * 下载失败原因码（持久化 / 内存只存机器可读值，渲染时按当前语言取词）。
+ *
+ * 旧实现把 `tr()` 结果直接写进 [DownloadHistoryEntry.message] 与 `DownloadState.Task.message`，
+ * 切换语言后旧条目仍是旧语言（见 docs/decisions/0008）。现在 code 是文案的唯一来源，
+ * message 只作旧数据的兜底；落盘用稳定字符串而不是 enum name，改名不会让旧记录失效。
+ */
+object DownloadFailureCode {
+    const val NO_LIBRARY_ROOT = "no_library_root"
+    const val DOWNLOAD_DIR_INACCESSIBLE = "download_dir_inaccessible"
+    const val URL_EXPIRED = "url_expired"
+    const val QUALITY_GONE = "quality_gone"
+    const val DELETE_BROKEN_FAILED = "delete_broken_failed"
+    const val CANNOT_CREATE_FILE = "cannot_create_file"
+    const val INTEGRITY_FAILED = "integrity_failed"
+    const val CANNOT_START_BACKGROUND = "cannot_start_background"
+
+    /** 通用失败（可重新下载续传），无自动重试次数；与 `pendingToTask` 恢复的文案一致。 */
+    const val DOWNLOAD_FAILED_RESUME = "download_failed_resume"
+
+    /** 通用失败（半成品已保留，可重新下载续传），无自动重试次数。 */
+    const val DOWNLOAD_FAILED_KEPT = "download_failed_kept"
+
+    /** 带自动重试次数的前缀：`download_failed_resume_retries:<n>`。 */
+    const val RESUMED_RETRIES_PREFIX = "download_failed_resume_retries:"
+
+    /** 带自动重试次数的前缀：`download_failed_kept_retries:<n>`。 */
+    const val KEPT_RETRIES_PREFIX = "download_failed_kept_retries:"
+
+    fun resumedAfterRetries(attempts: Int): String = RESUMED_RETRIES_PREFIX + attempts
+
+    fun keptAfterRetries(attempts: Int): String = KEPT_RETRIES_PREFIX + attempts
+}
+
+/**
+ * 失败原因码 → 当前语言的用户文案（纯函数，配单测）。
+ *
+ * - 有已知 code：按当前语言重新取词，语言切换后历史行与内存任务卡立即跟着变；
+ * - code 为 null（旧记录）或未知：回退到当初落盘的 [fallback]，保证升级后旧数据仍可读。
+ */
+fun downloadFailureText(code: String?, fallback: String?): String? {
+    if (code == null) return fallback
+    retryCountOf(code, DownloadFailureCode.KEPT_RETRIES_PREFIX)?.let { n ->
+        return tr(
+            "下载失败（已自动重试 $n 次，半成品已保留，可重新下载续传）",
+            "Download failed after $n automatic retries (the partial file was kept; you can resume)"
+        )
+    }
+    retryCountOf(code, DownloadFailureCode.RESUMED_RETRIES_PREFIX)?.let { n ->
+        return tr(
+            "下载失败（已自动重试 $n 次，可重新下载续传）",
+            "Download failed after $n automatic retries (you can resume)"
+        )
+    }
+    return when (code) {
+        DownloadFailureCode.NO_LIBRARY_ROOT -> tr(
+            "尚未设置管理器根目录，请先在设置里选择文件夹",
+            "No library folder is set. Choose one in Settings first"
+        )
+        DownloadFailureCode.DOWNLOAD_DIR_INACCESSIBLE -> tr(
+            "无法访问下载目录（可能未授予写入权限），请在设置里重新选择下载目录或恢复默认",
+            "Cannot access the download folder (write permission may be missing). " +
+                "Choose the download folder again in Settings or reset it to default"
+        )
+        DownloadFailureCode.URL_EXPIRED -> tr(
+            "下载地址已过期，请重新下载",
+            "The download link expired. Please download again"
+        )
+        DownloadFailureCode.QUALITY_GONE -> tr(
+            "所选清晰度已不可用，请重新下载",
+            "The selected quality is no longer available. Download it again"
+        )
+        DownloadFailureCode.DELETE_BROKEN_FAILED -> tr(
+            "无法删除损坏的旧文件，请手动删除后重试",
+            "The broken file could not be deleted. Delete it manually and try again"
+        )
+        DownloadFailureCode.CANNOT_CREATE_FILE -> tr(
+            "无法在下载目录创建文件（可能未授予写入权限），请在设置里重新选择下载目录或恢复默认",
+            "Cannot create a file in the download folder (write permission may be missing). " +
+                "Choose the download folder again in Settings or reset it to default"
+        )
+        DownloadFailureCode.INTEGRITY_FAILED -> tr(
+            "文件校验失败，请手动重新下载",
+            "Integrity check failed. Please download it again"
+        )
+        DownloadFailureCode.CANNOT_START_BACKGROUND -> tr(
+            "无法在后台开始下载，请打开应用后手动重新下载",
+            "Could not start the download in the background. Open the app and download it again"
+        )
+        DownloadFailureCode.DOWNLOAD_FAILED_RESUME -> tr(
+            "下载失败（可重新下载续传）",
+            "Download failed (you can resume)"
+        )
+        DownloadFailureCode.DOWNLOAD_FAILED_KEPT -> tr(
+            "下载失败（半成品已保留，可重新下载续传）",
+            "Download failed (the partial file was kept; you can resume)"
+        )
+        else -> fallback
+    }
+}
+
+/** 解析 `前缀:<n>` 形式的自动重试次数；前缀不匹配或次数非法（<=0）返回 null。 */
+private fun retryCountOf(code: String, prefix: String): Int? =
+    code.takeIf { it.startsWith(prefix) }
+        ?.removePrefix(prefix)
+        ?.toIntOrNull()
+        ?.takeIf { it > 0 }
 
 /** 一条未完成下载（排队/暂停/失败），持久化于 prefs JSON，供「继续 / 重新下载」断点续传。 */
 data class PendingDownload(

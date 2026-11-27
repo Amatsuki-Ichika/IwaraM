@@ -28,12 +28,24 @@ fun IwaraRepository.addDownloadHistory(entry: DownloadHistoryEntry) = synchroniz
         prefs.edit().putString("download_history_cache", gson.toJson(list.take(100))).apply()
     }
 
+    /** 解析失败的下载历史原文备份键：主键随后会被 add/remove 重写，原文必须先在这里留档。 */
+    internal const val DOWNLOAD_HISTORY_UNPARSED_KEY = "download_history_cache_unparsed"
+
 fun IwaraRepository.loadDownloadHistory(): List<DownloadHistoryEntry> =
         prefs.getString("download_history_cache", null)
             ?.takeIf { it.isNotBlank() }
-            ?.let {
+            ?.let { raw ->
                 runCatching {
-                    gson.fromJson<List<DownloadHistoryEntry>>(it, downloadHistoryType)
+                    gson.fromJson<List<DownloadHistoryEntry>>(raw, downloadHistoryType)
+                }.onFailure { e ->
+                    // 与 loadPendingDownloads 同一套处理：只记类名与原文长度，绝不打原始内容
+                    //（里面有本地文件地址等私人信息）。返回空表的行为不变，但原文先备份：
+                    // 下一次 add/remove 会按空表重写主键，没有备份就永久丢掉
+                    // localUri / totalBytes 等完整性校验依赖的字段。已有备份绝不覆盖。
+                    DiagLog.log("Repo", "下载历史解析失败(${e.javaClass.simpleName})，已备份 ${raw.length} 字符的旧记录")
+                    if (!prefs.contains(DOWNLOAD_HISTORY_UNPARSED_KEY)) {
+                        prefs.edit().putString(DOWNLOAD_HISTORY_UNPARSED_KEY, raw).apply()
+                    }
                 }.getOrNull()
             }
             .orEmpty()
@@ -137,17 +149,20 @@ fun IwaraRepository.recordWatch(
     /**
      * 更新进度（fire-and-forget）。记录不存在时忽略——进度更新只跟随首帧那条记录，
      * 不凭空造行；durationMs > 0 时顺带补写总时长（首帧时常常还拿不到）。
+     *
+     * 写入必须是**单条原子 UPDATE**（[WatchHistoryDao.updateProgress]）：historyScope 是
+     * 多线程 IO 池，原先「byKey 读整行 → REPLACE 写回」的读-改-写会让旧快照后落库
+     *（进度回退），行在中途被删时还会被 REPLACE 复活。
      */
 fun IwaraRepository.updateWatchProgress(key: String, positionMs: Long, durationMs: Long) {
         historyScope.launch {
             runCatching {
-                val row = historyDao.byKey(key) ?: return@launch
-                historyDao.upsert(
-                    row.copy(
-                        positionMs = positionMs.coerceAtLeast(0),
-                        durationMs = if (durationMs > 0) durationMs else row.durationMs,
-                        lastWatchAt = System.currentTimeMillis(),
-                    )
+                historyDao.updateProgress(
+                    key = key,
+                    positionMs = positionMs.coerceAtLeast(0),
+                    // 原样传：DAO 里 `CASE WHEN :durationMs > 0` 决定是否覆盖已存的总时长。
+                    durationMs = durationMs,
+                    now = System.currentTimeMillis(),
                 )
             }.onFailure { e ->
                 DiagLog.log("Repo", "观看进度更新失败(${e.javaClass.simpleName}): ${e.message}")

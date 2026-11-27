@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 // Decision records (ADR-lite). A decision without what it beat invites the same
 // discussion again, so "Alternatives considered" is mandatory, not encouraged.
+// Checks the shape only: four-digit filename numbers, an H1 naming the same
+// number, the Status vocabulary, the required sections, and that every
+// "Superseded by: NNNN" names a record in this directory. Does not judge the
+// prose, the alternatives or whether the decision was right.
 // Usage: node scripts/verify-decisions.mjs [--root <dir>]
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
@@ -12,6 +16,7 @@ const STATUSES = new Set(["proposed", "accepted", "superseded", "deprecated"]);
 const REQUIRED = ["## Problem", "## Decision", "## Alternatives considered", "## Consequences"];
 const issues = [];
 const numbers = new Map();
+const supersessions = [];
 let checked = 0;
 
 if (!existsSync(DIR)) {
@@ -23,9 +28,9 @@ for (const name of readdirSync(DIR).sort()) {
   if (!name.endsWith(".md") || name === "README.md" || name === "TEMPLATE.md") continue;
   const file = join(DIR, name);
   const rel = relative(ROOT, file).split(/[\\/]/).join("/");
-  const match = /^(\d{3,4})-[a-z0-9]+(?:-[a-z0-9]+)*\.md$/.exec(name);
+  const match = /^(\d{4})-[a-z0-9]+(?:-[a-z0-9]+)*\.md$/.exec(name);
   if (match === null) {
-    issues.push(`${rel}: filename must be NNNN-kebab-slug.md (e.g. 0007-use-room-schema-export.md)`);
+    issues.push(`${rel}: filename must be NNNN-kebab-slug.md with a four-digit number (e.g. 0007-use-room-schema-export.md)`);
     continue;
   }
   const number = match[1];
@@ -36,6 +41,17 @@ for (const name of readdirSync(DIR).sort()) {
   }
 
   const text = readFileSync(file, "utf8").replace(/^\uFEFF/, "");
+  const title = /^#\s+(.+?)\s*$/m.exec(text);
+  if (title === null) {
+    issues.push(`${rel}: missing "# NNNN \u2014 title" heading`);
+  } else {
+    const heading = /^(\d{4})\s+\u2014\s+\S/.exec(title[1]);
+    if (heading === null) {
+      issues.push(`${rel}: H1 must read "# NNNN \u2014 title" with a four-digit number`);
+    } else if (heading[1] !== number) {
+      issues.push(`${rel}: H1 number ${heading[1]} does not match filename number ${number}`);
+    }
+  }
   const statusLine = /^Status:\s+(\S+)\s*$/m.exec(text);
   if (statusLine === null) {
     issues.push(`${rel}: missing "Status:" line (one of proposed, accepted, superseded, deprecated)`);
@@ -47,15 +63,26 @@ for (const name of readdirSync(DIR).sort()) {
       issues.push(`${rel}: missing section "${heading}"`);
     }
   }
-  if (statusLine !== null && statusLine[1] === "superseded" && !/^Superseded by:\s+\d{3,4}\s*$/m.test(text)) {
-    issues.push(`${rel}: a superseded decision needs "Superseded by: NNNN"`);
+  if (statusLine !== null && statusLine[1] === "superseded") {
+    const supersededBy = /^Superseded by:\s+(\d{4})\s*$/m.exec(text);
+    if (supersededBy === null) {
+      issues.push(`${rel}: a superseded decision needs "Superseded by: NNNN"`);
+    } else {
+      supersessions.push({ rel, target: supersededBy[1] });
+    }
   }
   checked += 1;
 }
 
+for (const { rel, target } of supersessions) {
+  if (!numbers.has(target)) {
+    issues.push(`${rel}: "Superseded by: ${target}" names no decision record in docs/decisions`);
+  }
+}
+
 for (const issue of issues) console.log(`INVALID ${issue}`);
 if (issues.length > 0) {
-  console.error(`\nFAIL ${issues.length} problem(s) in ${checked + issues.length} decision record(s). Records are numbered ADRs: path is the index, Status is the state.`);
+  console.error(`\nFAIL ${issues.length} problem(s) in ${checked + issues.length} decision record(s). Records are numbered ADRs: filename and H1 share the number, Status is the state.`);
   process.exit(1);
 }
 console.log(`PASS ${checked} decision record(s) follow the ADR-lite format.`);

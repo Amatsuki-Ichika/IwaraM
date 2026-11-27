@@ -9,6 +9,7 @@ import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * 下载队列不变量回归用例。
@@ -104,6 +105,63 @@ class DownloadQueueInvariantTest {
         queue.close()
         drainDownloadQueue(queue, execute = { _ -> }, onIdle = { idleStartIds.add(it) })
         assertEquals(listOf(12), idleStartIds)
+    }
+
+    @Test
+    fun `two workers finishing out of order stop with the highest delivered startId`() = runBlocking {
+        // Low-3 回归：双 worker 下完成序 ≠ 交付序。后交付的 12 先完成，它的 onIdle 因 11
+        // 仍在跑被抑制；11 最后完成时必须拿「onStartCommand 见过的最大 startId」（12）去
+        // stopSelf —— 只带 11 会被框架忽略，服务会带着已经收起的前台通知在后台空转。
+        val queue = Channel<DownloadService.Job>(Channel.UNLIMITED)
+        val latestDelivered = AtomicInteger(0)
+        val active = AtomicInteger(0)
+        val idleStartIds = mutableListOf<Int>()
+        val bothRunning = CompletableDeferred<Unit>()
+        val laterJobWentIdle = CompletableDeferred<Unit>()
+        val stoppedWith = CompletableDeferred<Int>()
+
+        val execute: suspend (DownloadService.Job) -> Unit = { job ->
+            try {
+                if (active.incrementAndGet() == 2) bothRunning.complete(Unit)
+                // 两个任务都已在跑之后才允许任何一方收尾，钉住"完成乱序"这个前提。
+                withTimeout(5_000) { bothRunning.await() }
+                if (job.startId == 11) {
+                    // 先交付的最后收尾：等 12 的 onIdle 已经被抑制之后才结束。
+                    withTimeout(5_000) { laterJobWentIdle.await() }
+                }
+            } finally {
+                active.decrementAndGet()
+            }
+        }
+        val workers = List(2) {
+            launch {
+                drainDownloadQueue(
+                    queue,
+                    execute = execute,
+                    onIdle = { lastStartId ->
+                        idleStartIds.add(lastStartId)
+                        if (lastStartId == 12) laterJobWentIdle.complete(Unit)
+                        // 与 Service.stopIfIdle 同一判据：队列空且没有在跑的任务才自停。
+                        if ((queue.isEmpty || queue.isClosedForReceive) && active.get() == 0) {
+                            stoppedWith.complete(stopStartId(lastStartId, latestDelivered.get()))
+                        }
+                    }
+                )
+            }
+        }
+
+        fun deliver(job: DownloadService.Job) {
+            // 对应 onStartCommand：每次交付都抬高「见过的最大 startId」，哪怕任务随后被丢弃。
+            latestDelivered.updateAndGet { current -> maxOf(current, job.startId) }
+            queue.trySend(job)
+        }
+        deliver(job("earlier", startId = 11))
+        deliver(job("later", startId = 12))
+
+        val stopped = withTimeout(5_000) { stoppedWith.await() }
+        assertEquals("最后收工的自停必须带上见过的最大 startId", 12, stopped)
+        assertEquals("12 先空闲但被抑制，只有 11 收尾时才真正自停", listOf(12, 11), idleStartIds)
+        workers.forEach { it.cancel() }
     }
 
     @Test

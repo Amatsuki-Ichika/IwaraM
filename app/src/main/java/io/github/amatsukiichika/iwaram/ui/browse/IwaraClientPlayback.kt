@@ -104,11 +104,29 @@ fun IwaraClientViewModel.loadRelatedVideos(
             // 列表一到就顺手预取「下一集」的签名地址（只挑 1 个；回调已经发过、不等它）：
             // 点下一集时只剩「详情」一跳，清晰度那一跳由缓存省掉；预取失败也只是回到现取，
             // 不影响播放，见 docs/decisions/0038-online-playback-latency.md。
-            related.firstOrNull { it.id != null && it.id != id }?.let { next ->
+            // 候选必须先查缓存：命中缓存的那条进 prefetchSignedUrls 会直接 no-op，
+            // 若只看 id 不同就选它，后面真正未缓存的一集永远轮不到预取。预算仍是 1 个。
+            firstUncachedRelatedVideo(related, id) { candidateId ->
+                playbackSignedUrlCache.cachedQualities(candidateId).isNotEmpty()
+            }?.let { next ->
                 jobScope.launch { prefetchSignedUrls(next) }
             }
         }
     }
+
+/**
+ * 选「下一集」预取候选：第一个 id 不同、且签名地址尚未缓存的条目。
+ * 命中缓存的候选在 [prefetchSignedUrls] 里会直接返回，跳过它们才能兑现 ADR 0038 的预取承诺。
+ * 纯函数（缓存查询由 [isCached] 注入）便于单测。
+ */
+internal fun firstUncachedRelatedVideo(
+    related: List<IwaraVideoItem>,
+    currentId: String,
+    isCached: (String) -> Boolean
+): IwaraVideoItem? = related.firstOrNull { item ->
+    val candidateId = item.id
+    candidateId != null && candidateId != currentId && !isCached(candidateId)
+}
 
     /**
      * 用列表项数据立即构造可展示的 VideoEntity（播放地址留空占位），

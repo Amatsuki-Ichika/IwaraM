@@ -2,6 +2,8 @@ package io.github.amatsukiichika.iwaram.data
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.HttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
@@ -15,8 +17,8 @@ import java.util.concurrent.TimeUnit
  * @property versionName 规范化版本名（tag 去 v，保留预发布段），如 0.2.2-rc.1。
  * @property tagName Release 原始 tag，如 v0.2.2-rc.1。
  * @property body Release 说明正文（GitHub 未填写时为空串）。
- * @property apkUrl 名字以 -arm64-v8a.apk 结尾的安装包下载地址。
- * @property shaUrl 与 [apkUrl] 同名 .apk.sha256 校验文件的下载地址。
+ * @property apkUrl 名字以 -arm64-v8a.apk 结尾的安装包下载地址（仅 https + GitHub 白名单主机）。
+ * @property shaUrl 与 [apkUrl] 同名 .apk.sha256 校验文件的下载地址（同样受白名单约束）。
  * @property prerelease GitHub 的预发布标记（发布工作流按 tag 是否含 "-" 自动设置）。
  */
 data class GitHubRelease(
@@ -118,6 +120,7 @@ object GitHubReleaseClient {
      * - [UpdateChannel.STABLE] 跳过 prerelease = true；
      * - tag_name 不是合法版本（[parse] 返回 null）的跳过；
      * - 必须同时存在 *-arm64-v8a.apk 资产和与它同名的 .apk.sha256 资产，否则跳过；
+     * - 两个资产的下载地址都必须是 https 且主机在 [UPDATE_DOWNLOAD_HOSTS] 内，否则跳过；
      * - 结果取 semver 最大，不依赖数组顺序（GitHub 返回按创建时间倒序，但别赌）。
      *
      * @return 有无候选见 [GitHubReleaseResult]；响应不是 JSON 数组时按 [GitHubReleaseResult.Failure]。
@@ -189,9 +192,39 @@ object GitHubReleaseClient {
 /** 资产名（去首尾空白）。 */
 private fun assetName(asset: JSONObject): String = asset.optString("name").trim()
 
-/** 资产的下载地址；缺失时 null。 */
+/**
+ * 应用内更新允许下载的主机：发布页 github.com 与它的两个资产 CDN。
+ *
+ * 解析出的 apkUrl/shaUrl 和 UpdateInstaller 的每一个网络请求（包括 OkHttp 跟随的
+ * 每一跳重定向）都按这份白名单校验：被篡改的 releases 响应既不能把安装包指向任意
+ * 主机，也不能让"期望校验和"从其它主机取回。
+ */
+internal val UPDATE_DOWNLOAD_HOSTS = setOf(
+    "github.com",
+    "objects.githubusercontent.com",
+    "release-assets.githubusercontent.com"
+)
+
+/** 纯函数：主机白名单规则；资产地址解析与每一跳重定向目标共用这一条。 */
+internal fun isAllowedUpdateUrl(url: HttpUrl): Boolean =
+    url.isHttps && url.host in UPDATE_DOWNLOAD_HOSTS
+
+/**
+ * 纯函数：把候选地址收窄成可下载的更新地址。
+ *
+ * 只接受 https 且主机在 [UPDATE_DOWNLOAD_HOSTS] 内的绝对 URL；空值、其它协议、
+ * 其它主机或无法解析时返回 null（调用方按"该资产不可用"跳过该 Release）。
+ */
+internal fun allowedUpdateUrl(raw: String?): String? {
+    val text = raw?.trim().orEmpty()
+    if (text.isEmpty()) return null
+    val url = text.toHttpUrlOrNull() ?: return null
+    return if (isAllowedUpdateUrl(url)) url.toString() else null
+}
+
+/** 资产的下载地址；缺失、非 https 或主机不在白名单时 null。 */
 private fun downloadUrl(asset: JSONObject): String? =
-    asset.optString("browser_download_url").trim().takeIf { it.isNotEmpty() }
+    allowedUpdateUrl(asset.optString("browser_download_url"))
 
 /**
  * 纯函数入口（包级转发）：[GitHubReleaseClient.parseReleaseList] 在网络层之外单独可测，

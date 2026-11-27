@@ -31,8 +31,8 @@ class GitHubReleaseParseTest {
             "draft": true,
             "body": "draft notes",
             "assets": [
-              {"name": "IwaraM-0.3.0-arm64-v8a.apk", "browser_download_url": "https://example.com/IwaraM-0.3.0-arm64-v8a.apk"},
-              {"name": "IwaraM-0.3.0-arm64-v8a.apk.sha256", "browser_download_url": "https://example.com/IwaraM-0.3.0-arm64-v8a.apk.sha256"}
+              {"name": "IwaraM-0.3.0-arm64-v8a.apk", "browser_download_url": "https://github.com/IwaraM-0.3.0-arm64-v8a.apk"},
+              {"name": "IwaraM-0.3.0-arm64-v8a.apk.sha256", "browser_download_url": "https://github.com/IwaraM-0.3.0-arm64-v8a.apk.sha256"}
             ]
           },
           {
@@ -41,8 +41,8 @@ class GitHubReleaseParseTest {
             "draft": false,
             "body": "rc notes",
             "assets": [
-              {"name": "IwaraM-0.2.3-rc.1-arm64-v8a.apk", "browser_download_url": "https://example.com/IwaraM-0.2.3-rc.1-arm64-v8a.apk"},
-              {"name": "IwaraM-0.2.3-rc.1-arm64-v8a.apk.sha256", "browser_download_url": "https://example.com/IwaraM-0.2.3-rc.1-arm64-v8a.apk.sha256"}
+              {"name": "IwaraM-0.2.3-rc.1-arm64-v8a.apk", "browser_download_url": "https://github.com/IwaraM-0.2.3-rc.1-arm64-v8a.apk"},
+              {"name": "IwaraM-0.2.3-rc.1-arm64-v8a.apk.sha256", "browser_download_url": "https://github.com/IwaraM-0.2.3-rc.1-arm64-v8a.apk.sha256"}
             ]
           },
           {
@@ -51,9 +51,9 @@ class GitHubReleaseParseTest {
             "draft": false,
             "body": "stable notes",
             "assets": [
-              {"name": "source.zip", "browser_download_url": "https://example.com/source.zip"},
-              {"name": "IwaraM-0.2.2-arm64-v8a.apk", "browser_download_url": "https://example.com/IwaraM-0.2.2-arm64-v8a.apk"},
-              {"name": "IwaraM-0.2.2-arm64-v8a.apk.sha256", "browser_download_url": "https://example.com/IwaraM-0.2.2-arm64-v8a.apk.sha256"}
+              {"name": "source.zip", "browser_download_url": "https://github.com/source.zip"},
+              {"name": "IwaraM-0.2.2-arm64-v8a.apk", "browser_download_url": "https://github.com/IwaraM-0.2.2-arm64-v8a.apk"},
+              {"name": "IwaraM-0.2.2-arm64-v8a.apk.sha256", "browser_download_url": "https://github.com/IwaraM-0.2.2-arm64-v8a.apk.sha256"}
             ]
           }
         ]
@@ -65,8 +65,8 @@ class GitHubReleaseParseTest {
         assertEquals("0.2.2", release.versionName)
         assertEquals("v0.2.2", release.tagName)
         assertEquals("stable notes", release.body)
-        assertEquals("https://example.com/IwaraM-0.2.2-arm64-v8a.apk", release.apkUrl)
-        assertEquals("https://example.com/IwaraM-0.2.2-arm64-v8a.apk.sha256", release.shaUrl)
+        assertEquals("https://github.com/IwaraM-0.2.2-arm64-v8a.apk", release.apkUrl)
+        assertEquals("https://github.com/IwaraM-0.2.2-arm64-v8a.apk.sha256", release.shaUrl)
         assertFalse(release.prerelease)
     }
 
@@ -128,6 +128,22 @@ class GitHubReleaseParseTest {
     }
 
     @Test
+    fun assetUrlOutsideTheGithubAllowlistIsSkippedForNextCandidate() {
+        val apkName = "IwaraM-0.2.6-arm64-v8a.apk"
+        val json = listJson(
+            releaseJson(
+                "v0.2.6",
+                assets = listOf(
+                    assetJson(apkName, host = "evil.example"),
+                    assetJson(apkName + ".sha256", host = "evil.example")
+                )
+            ),
+            releaseJson("v0.2.5")
+        )
+        assertEquals("0.2.5", parseReleaseList(json, UpdateChannel.STABLE)!!.versionName)
+    }
+
+    @Test
     fun invalidTagOrMissingAssetsNeverMatch() {
         assertNull(parseReleaseList("[]", UpdateChannel.STABLE))
         assertNull(parseReleaseList(listJson(releaseJson("nightly")), UpdateChannel.BETA))
@@ -154,10 +170,10 @@ class GitHubReleaseParseTest {
 
     /* ---------- fixtures ---------- */
 
-    private fun assetJson(name: String): JSONObject =
+    private fun assetJson(name: String, host: String = "github.com"): JSONObject =
         JSONObject()
             .put("name", name)
-            .put("browser_download_url", "https://example.com/" + name)
+            .put("browser_download_url", "https://$host/" + name)
 
     private fun releaseJson(
         tag: String,

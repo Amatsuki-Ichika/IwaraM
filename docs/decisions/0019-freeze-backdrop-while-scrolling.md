@@ -18,10 +18,7 @@ the layer is not re-recorded and the last recorded frame stays as the sample. Wh
 recording resumes on the next frame. The back-to-top button keeps sampling the frozen frame during
 the drag, so it does not flash or fall back to a plain fill.
 
-Every list that shows the button (library, infinite grids, paged author grids, profile and playlist
-overlays) uses the same pair `rememberGlassScrollBackdrop()` + `glassScrollBackdropSource(source) { scrolling }`.
-The predicate also covers the scrollbar thumb: dragging it moves the list through `dispatchRawDelta`, which never sets `isScrollInProgress`, so each page feeds the scrollbar's `onDraggingChange` into the same scrolling predicate and the freeze applies while the thumb is held too.
-A list with no backdrop (blur disabled) gets `null` and behaves as before.
+Every list that shows the button (library, infinite grids, paged author grids, profile and playlist overlays) uses the same pair `rememberGlassScrollBackdrop()` + `glassScrollBackdropSource(source) { scrolling }`. The predicate also covers the scrollbar thumb: dragging it moves the list through `requestScrollToItem`, which never sets `isScrollInProgress`, so each page feeds the scrollbar's `onDraggingChange` into the same scrolling predicate and the freeze applies while the thumb is held too. A list with no backdrop (blur disabled) gets `null` and behaves as before.
 
 The same gate exists one level up: the host records the whole tab content into the main backdrop that the floating bottom bar and the static top bar sample, and that source had no scroll condition at all. Each main tab page now reports its own scrolling predicate (list scroll or scrollbar drag) to a shared `MainContentScrollActivity` channel, and the host source stops recording while any page reports scrolling. Without this second gate the list stopped re-recording its own header backdrop but the window still re-recorded the whole content area every frame, which is exactly the second full-screen pass this decision removes. The channel keeps one token per page rather than a single flag, because a page that leaves during a tab or mode switch could otherwise clear the incoming page's state.
 
