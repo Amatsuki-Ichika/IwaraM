@@ -61,6 +61,8 @@ fun PlaylistsOverlay(cvm: IwaraClientViewModel, actions: IwaraNavActions, onClos
     val pageScope = rememberCoroutineScope()
     val playlists by cvm.playlists.collectAsStateWithLifecycle()
     var showCreateDialog by remember { mutableStateOf(false) }
+    // 新建失败的原因：对话框保持打开并就地显示，用户可改名重试。
+    var createError by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) { cvm.loadPlaylists(force = !playlists.loaded) }
 
@@ -69,7 +71,10 @@ fun PlaylistsOverlay(cvm: IwaraClientViewModel, actions: IwaraNavActions, onClos
             title = tr("我的播放列表", "My playlists"),
             onBack = onClose,
             trailing = {
-                IconButton(onClick = { showCreateDialog = true }) {
+                IconButton(onClick = {
+                    createError = null
+                    showCreateDialog = true
+                }) {
                     Icon(Icons.Filled.Add, contentDescription = tr("新建播放列表", "New playlist"))
                 }
             }
@@ -135,27 +140,36 @@ fun PlaylistsOverlay(cvm: IwaraClientViewModel, actions: IwaraNavActions, onClos
 
     if (showCreateDialog) {
         CreatePlaylistDialog(
+            error = createError,
             onDismiss = { showCreateDialog = false },
             onCreate = { title ->
-                cvm.createPlaylist(title, scope = pageScope) { showCreateDialog = false }
+                // 只有成功才关闭对话框：失败留在原地显示原因，用户可以改名重试。
+                // 旧实现无论成败都关门，失败看起来与成功一样。
+                cvm.createPlaylist(title, scope = pageScope) { err ->
+                    createError = err
+                    if (err == null) showCreateDialog = false
+                }
             }
         )
     }
 }
 
 @Composable
-private fun CreatePlaylistDialog(onDismiss: () -> Unit, onCreate: (String) -> Unit) {
+private fun CreatePlaylistDialog(onDismiss: () -> Unit, onCreate: (String) -> Unit, error: String? = null) {
     var title by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(tr("新建播放列表", "New playlist")) },
         text = {
-            OutlinedTextField(
-                value = title,
-                onValueChange = { title = it },
-                label = { Text(tr("标题", "Title")) },
-                singleLine = true
-            )
+            Column {
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    label = { Text(tr("标题", "Title")) },
+                    singleLine = true
+                )
+                FeedbackText(error)
+            }
         },
         confirmButton = {
             TextButton(onClick = { if (title.isNotBlank()) onCreate(title) }) { Text(tr("创建", "Create")) }
@@ -278,7 +292,12 @@ fun PlaylistDetailOverlay(
             confirmButton = {
                 TextButton(onClick = {
                     confirmDelete = false
-                    cvm.deletePlaylist(playlistId, scope = pageScope) { _ -> onClose() }
+                    // 只有删除成功才返回：失败留在详情页显示原因。
+                    // 旧实现无论成败都返回，列表里播放列表还在，看起来像 UI 没刷新。
+                    cvm.deletePlaylist(playlistId, scope = pageScope) { err ->
+                        error = err
+                        if (err == null) onClose()
+                    }
                 }) { Text(tr("删除", "Delete")) }
             },
             dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text(tr("取消", "Cancel")) } }

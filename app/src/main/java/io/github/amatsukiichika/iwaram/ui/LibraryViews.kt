@@ -98,7 +98,7 @@ internal fun VideoGrid(
     onLongClick: (VideoEntity) -> Unit,
     onImport: () -> Unit,
     onAuthorClick: (VideoEntity) -> Unit = {},
-    /** 被全局筛选器隐藏的条数（>0 ⇒ 空态文案要说"是筛掉的"，不是"库里没有"）。 */
+    /** 被当前搜索 / 分类筛选 / 全局筛选隐藏的条数（>0 ⇒ 空态文案要说"是筛掉的"，不是"库里没有"）。 */
     hiddenByFilter: Int = 0,
     state: LazyGridState = rememberLazyGridState(),
     bottomPadding: androidx.compose.ui.unit.Dp = androidx.compose.ui.unit.Dp(0f),
@@ -228,13 +228,18 @@ internal fun TagCloud(
     onSelect: (String) -> Unit,
     bottomPadding: androidx.compose.ui.unit.Dp = androidx.compose.ui.unit.Dp(0f),
     /** 悬浮顶栏高度 → 顶部 contentPadding（这个视图本来没有，一并补上）。 */
-    topPadding: androidx.compose.ui.unit.Dp = androidx.compose.ui.unit.Dp(0f)
+    topPadding: androidx.compose.ui.unit.Dp = androidx.compose.ui.unit.Dp(0f),
+    /** 滚动状态由 [LibraryScreen] 提升：玻璃背景源要靠它判断"标签云在滚"（决策 0019）。 */
+    state: LazyListState = rememberLazyListState()
 ) {
     if (tags.isEmpty()) {
         EmptyState(onImport = null, hint = tr("暂无标签，请先导入并联网拉取", "No tags yet — import videos and go online to fetch them"))
         return
     }
-    LazyColumn(contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 12.dp + topPadding, bottom = 12.dp + bottomPadding)) {
+    LazyColumn(
+        state = state,
+        contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 12.dp + topPadding, bottom = 12.dp + bottomPadding)
+    ) {
         item {
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),

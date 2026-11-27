@@ -51,15 +51,9 @@ class IwaraSessionTokenMigrationTest {
     @Before
     fun setUp() {
         context = ApplicationProvider.getApplicationContext()
-        // Robolectric 会把 Conscrypt 注册成最高优先级的 X.509 provider；JDK 的 JarVerifier
-        // 静态自检用当前最高优先级 provider 验签，在 Conscrypt 下会抛
-        // DIGEST_AND_KEY_TYPE_NOT_SUPPORTED ⇒ SecurityException("Framework jar verification
-        // can not be initialized")，并把这个 worker JVM 的整个 JCE 拖死（之后任何
-        // KeyGenerator/Cipher 都是 NoClassDefFoundError）。本测试要用软件 AES 密钥，
-        // 先摘掉 Conscrypt 让自检走 JDK 自带的 SUN provider。
-        java.security.Security.getProviders()
-            .filter { it.javaClass.name.startsWith("org.conscrypt") }
-            .forEach { java.security.Security.removeProvider(it.name) }
+        // Conscrypt 由 app/build.gradle.kts 的 robolectric.conscryptMode=OFF 统一关闭
+        //（data/AGENTS.md 规定的唯一出处）。这里绝不再改 JVM 级 Security provider：
+        // 无恢复的 removeProvider 会把整个测试 JVM 的 JCA 行为改掉，让套件重新依赖类执行顺序。
         useSoftwareKey()
         prefs.edit().clear().commit()
         // IwaraSession 是 object：清掉上一个测试留下的恢复状态与内存 token。
@@ -188,5 +182,21 @@ class IwaraSessionTokenMigrationTest {
         assertEquals("legacy-access-token", IwaraSession.awaitAccessToken())
         assertEquals("legacy-refresh-token", IwaraSession.refreshToken)
         assertTrue("恢复完成后应已迁移为密文", prefs.getString("iwara_refresh_token", null)!!.startsWith("v1:"))
+    }
+
+    @Test
+    fun `the test JVM runs without a conscrypt provider`() {
+        // 这条不变量把"workaround 只有一个出处"钉住：Conscrypt 只应由
+        // app/build.gradle.kts 的 robolectric.conscryptMode=OFF 关闭。
+        // 删掉那条 Gradle 属性（或有人在测试里手动注册 Conscrypt）时这里立即变红，
+        // 而不是让套件退化成依赖类执行顺序的随机失败。
+        val leaked = java.security.Security.getProviders()
+            .filter { it.javaClass.name.startsWith("org.conscrypt") }
+            .map { it.name }
+        assertTrue(
+            "单元测试 JVM 注册了 Conscrypt provider $leaked；请保留 app/build.gradle.kts 的 " +
+                "robolectric.conscryptMode=OFF，不要在测试里改 JVM 级 Security provider",
+            leaked.isEmpty()
+        )
     }
 }

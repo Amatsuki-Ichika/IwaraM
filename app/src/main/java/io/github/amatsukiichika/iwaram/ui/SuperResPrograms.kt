@@ -13,6 +13,26 @@ import com.google.gson.JsonParser
 import io.github.amatsukiichika.iwaram.i18n.tr
 
 private const val TAG = "SuperRes"
+
+/**
+ * 中间缓冲的显存预算（128 MiB），见 [Anime4kProgram.configure] 的准入规则二。
+ *
+ * 取 128MiB 的理由：1080p（含 2560×1080 这种宽银幕）加最重的 A4K_HQ（12 张）约 95~127MiB，
+ * 要放行；2560×1440 加同样 12 张约 169MiB，要拒绝。2K 源配轻模型（如 DN_* 的 1~2 张）仍能过。
+ */
+internal const val MAX_INTERMEDIATE_TEXTURE_BYTES = 128L * 1024L * 1024L
+
+/** RGBA8 纹理的每像素字节数（media3 `GlUtil.createTexture` 非 HDR 路径的格式）。 */
+private const val BYTES_PER_PIXEL = 4
+
+/**
+ * 中间缓冲的显存估算（字节）：每张都按**输入尺寸**分配 RGBA8。
+ * 纯函数便于单测（见 SuperResMemoryBudgetTest）：1080p × 12 张约 95MiB，
+ * 2560×1440 × 12 张约 169MiB —— 后者必须被准入检查拒绝。
+ */
+internal fun intermediateTextureBytes(count: Int, inputWidth: Int, inputHeight: Int): Long =
+    count.toLong() * inputWidth.toLong() * inputHeight.toLong() * BYTES_PER_PIXEL
+
 /** 读当前绑定的帧缓冲 id —— 输出帧缓冲即调用方绑定的那个（两个程序同一取法）。 */
 private fun currentFramebufferId(): Int {
     val buf = IntArray(1)
@@ -245,7 +265,7 @@ internal class Anime4kProgram(
         SuperResStatus.sourceHeight = inputHeight
         SuperResStatus.outputWidth = outW
         SuperResStatus.outputHeight = outH
-        // 只有一条统一规则：输出总像素不超过 MAX_OUTPUT_PIXELS（2K 档，也就是 scaledSize 的上限）。
+        // 准入规则一：输出总像素不超过 MAX_OUTPUT_PIXELS（2K 档，也就是 scaledSize 的上限）。
         // 按模型分别设源分辨率上限会让绝大多数 1080p 内容静默落到直通降级。放大档的输出
         // 已被 scaledSize 收敛、恒满足；只有当源本身就超过 2K（1440p 以上）时才直通。
         // 真跑不动的设备由 7001 自动保护兜底。
@@ -263,6 +283,32 @@ internal class Anime4kProgram(
                 )
             )
             DiagLog.log(TAG, "configure in=${inputWidth}x${inputHeight} 超 ${megapixels}MP 上限 → 直通降级")
+            return Size(inputWidth, inputHeight)
+        }
+        // 准入规则二：中间缓冲全部按输入尺寸分配（见下面的 targets），只卡输出像素不够 ——
+        // 恰好 2K（2560×1440）的源输出没超标，但最重的 A4K_HQ（12 张）要约 169MiB 显存，
+        // 低端机上分配失败会把整条管线打成 7001，比直通降级更糟。按「张数 × 输入像素 × 4B」
+        // 对总预算核对，超了同样直通（DN_* 这类 1~2 张的轻模型仍可用 2K 源）。
+        val intermediateBytes = intermediateTextureBytes(intermediateNames.size, inputWidth, inputHeight)
+        if (intermediateBytes > MAX_INTERMEDIATE_TEXTURE_BYTES) {
+            releaseTargets()
+            isAllocFailed = true
+            val needMb = String.format(java.util.Locale.US, "%.0f", intermediateBytes / (1024.0 * 1024.0))
+            val limitMb = String.format(
+                java.util.Locale.US,
+                "%.0f",
+                MAX_INTERMEDIATE_TEXTURE_BYTES / (1024.0 * 1024.0)
+            )
+            SuperResStatus.markDegraded(
+                tr(
+                    "源分辨率 ${inputWidth}x${inputHeight} 需要 ${needMb}MB 中间显存（${intermediateNames.size} 张），" +
+                        "超过 ${limitMb}MB 上限，本模型自动停用（直通输出）",
+                    "Source resolution ${inputWidth}x${inputHeight} needs ${needMb}MB of intermediate GPU memory " +
+                        "(${intermediateNames.size} textures), above the ${limitMb}MB limit; this model is disabled " +
+                        "(passthrough output)"
+                )
+            )
+            DiagLog.log(TAG, "configure in=${inputWidth}x${inputHeight} 中间显存 ${needMb}MB 超 ${limitMb}MB 上限 → 直通降级")
             return Size(inputWidth, inputHeight)
         }
         return try {
@@ -425,9 +471,11 @@ internal class Anime4kProgram(
          * 中间缓冲张数上限。
          *
          * 这不是纹理单元限制（GLES2 至少 8 个单元，而单趟最多同时绑 8 张：Restore M 的
-         * 1x1x56 卷积），而是显存限制：每张 = W×H×4 字节，1080p（2.07MP）一张约 8.3MB。
-         * 最重的 A4K_HQ 有 12 张（含高光钳制的 STATSMAX 与自写回用的 STATSMAX_v2，
-         * 它有 540p 上限，实际约 2.1MB/张 → 25MB 左右）。超出就抛异常让上层降级。
+         * 1x1x56 卷积），而是显存限制：每张都按**输入尺寸**分配 RGBA8，W×H×4 字节 ——
+         * 1080p（2.07MP）一张约 8.3MB，最重的 A4K_HQ 有 12 张（含高光钳制的 STATSMAX
+         * 与自写回用的 STATSMAX_v2），1080p 合计约 95MiB；同一模型跑 2560×1440 源
+         * 则约 169MiB。张数只是第一道闸，实际准入按总字节核对，见
+         * [MAX_INTERMEDIATE_TEXTURE_BYTES] 与 configure() 的准入规则二。
          */
         const val MAX_INTERMEDIATES = 12
 

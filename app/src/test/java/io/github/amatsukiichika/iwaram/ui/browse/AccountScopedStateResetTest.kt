@@ -3,8 +3,10 @@ package io.github.amatsukiichika.iwaram.ui.browse
 import android.os.Looper
 import androidx.test.core.app.ApplicationProvider
 import io.github.amatsukiichika.iwaram.IwaraApp
+import io.github.amatsukiichika.iwaram.data.IwaraImageItem
 import io.github.amatsukiichika.iwaram.data.IwaraPlaylist
 import io.github.amatsukiichika.iwaram.data.IwaraSession
+import io.github.amatsukiichika.iwaram.data.IwaraVideoItem
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -43,6 +45,12 @@ class AccountScopedStateResetTest {
         )
         followStates["author-1"] = true
         likeStates["video:video-1"] = true
+        // 账号级分页器：直接向内部 FeedPager 种数据（公开的加载函数要求登录且走网络，单测不可用）。
+        // load 在 viewModelScope 上执行，Robolectric 主线程 idle 后数据才会落进状态。
+        subscribedPager.load { listOf(IwaraVideoItem(id = "sub-1")) }
+        favoriteVideosPager.load { listOf(IwaraVideoItem(id = "fav-1")) }
+        favoriteImagesPager.load { listOf(IwaraImageItem(id = "fav-img-1")) }
+        shadowOf(Looper.getMainLooper()).idle()
     }
 
     @Test
@@ -93,6 +101,10 @@ class AccountScopedStateResetTest {
     fun `logout clears the account scoped state so the next account cannot inherit it`() {
         val vm = newViewModel()
         vm.seedAccountScopedState()
+        // 先确认种子确实落进分页器：否则下面的"清空"断言会空转通过。
+        assertTrue("订阅流的分页器必须先有数据", vm.subscribed.value.items.isNotEmpty())
+        assertTrue("收藏视频的分页器必须先有数据", vm.favoriteVideos.value.items.isNotEmpty())
+        assertTrue("收藏图片的分页器必须先有数据", vm.favoriteImages.value.items.isNotEmpty())
 
         vm.logout()
 
@@ -101,12 +113,19 @@ class AccountScopedStateResetTest {
         assertTrue("关注快照必须清空", vm.followStates.isEmpty())
         assertTrue("点赞快照必须清空", vm.likeStates.isEmpty())
         assertTrue("评论面板必须回到初始态", vm.commentsByTarget.isEmpty())
+        // 三个账号级分页器必须回到初始态：漏掉任一个，B 登录后都会接着看到 A 的列表。
+        assertEquals("订阅流必须回到初始态", FeedState<IwaraVideoItem>(), vm.subscribed.value)
+        assertEquals("收藏视频必须回到初始态", FeedState<IwaraVideoItem>(), vm.favoriteVideos.value)
+        assertEquals("收藏图片必须回到初始态", FeedState<IwaraImageItem>(), vm.favoriteImages.value)
     }
 
     @Test
     fun `a session expiring clears the same slots as an explicit logout`() {
         val vm = newViewModel()
         vm.seedAccountScopedState()
+        assertTrue("订阅流的分页器必须先有数据", vm.subscribed.value.items.isNotEmpty())
+        assertTrue("收藏视频的分页器必须先有数据", vm.favoriteVideos.value.items.isNotEmpty())
+        assertTrue("收藏图片的分页器必须先有数据", vm.favoriteImages.value.items.isNotEmpty())
 
         // 真实路径：IwaraSession 在续期失败后清凭证并回调 VM.init 注册的 listener。
         // 回调可能来自 OkHttp 线程，VM 用 viewModelScope 回到主线程再清。
@@ -117,5 +136,8 @@ class AccountScopedStateResetTest {
         assertFalse("loaded 必须复位", vm.playlists.value.loaded)
         assertTrue("评论面板必须回到初始态", vm.commentsByTarget.isEmpty())
         assertTrue("关注快照必须清空", vm.followStates.isEmpty())
+        assertEquals("订阅流必须回到初始态", FeedState<IwaraVideoItem>(), vm.subscribed.value)
+        assertEquals("收藏视频必须回到初始态", FeedState<IwaraVideoItem>(), vm.favoriteVideos.value)
+        assertEquals("收藏图片必须回到初始态", FeedState<IwaraImageItem>(), vm.favoriteImages.value)
     }
 }

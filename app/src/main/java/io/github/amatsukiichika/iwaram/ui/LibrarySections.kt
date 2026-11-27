@@ -13,6 +13,7 @@ import io.github.amatsukiichika.iwaram.data.TagEntity
 import io.github.amatsukiichika.iwaram.data.VideoEntity
 import io.github.amatsukiichika.iwaram.data.filterBy
 import io.github.amatsukiichika.iwaram.data.localVideoKeys
+import io.github.amatsukiichika.iwaram.i18n.AppLanguage
 import io.github.amatsukiichika.iwaram.i18n.tr
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -83,15 +84,18 @@ private fun countTier(n: Int): String = when {
 
 private fun monthLabel(epochMs: Long): String {
     val ym = YearMonth.from(Instant.ofEpochMilli(epochMs).atZone(ZoneId.systemDefault()))
-    return tr("${ym.year}年${ym.monthValue}月", "%d-%02d".format(ym.year, ym.monthValue))
+    return tr(
+        "${ym.year}年${ym.monthValue}月",
+        "%d-%02d".format(AppLanguage.locale, ym.year, ym.monthValue)
+    )
 }
 
 /** 下载时间排序的分节标签按天 —— 集中在最近一两个月下载时按月只剩 1 个分节，滚动条不渲染。 */
 private fun dayLabel(epochMs: Long): String {
     val d = Instant.ofEpochMilli(epochMs).atZone(ZoneId.systemDefault()).toLocalDate()
     return tr(
-        "%02d月%02d日".format(d.monthValue, d.dayOfMonth),
-        "%02d-%02d".format(d.monthValue, d.dayOfMonth)
+        "%02d月%02d日".format(AppLanguage.locale, d.monthValue, d.dayOfMonth),
+        "%02d-%02d".format(AppLanguage.locale, d.monthValue, d.dayOfMonth)
     )
 }
 

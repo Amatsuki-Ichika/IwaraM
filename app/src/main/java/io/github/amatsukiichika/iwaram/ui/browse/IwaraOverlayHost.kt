@@ -66,6 +66,15 @@ internal fun IwaraOverlay.isActionSheet(): Boolean =
     this is IwaraOverlay.VideoActions || this is IwaraOverlay.ImageActions
 
 /**
+ * 覆盖层"仍在屏上"的最上层序号：活栈顶页与退场页里取最大者（null = 完全离场）。
+ *
+ * 退场页的序号通常更大；"上一页还在退场时又压入新页"则取新页 —— 两者都要参与绘制排序，
+ * 只认活栈会让弹出最后一页的那一帧 zIndex 塌到 0（正在滑出的页被播放页盖住）。
+ */
+internal fun overlayOnScreenTopSeq(liveTopSeq: Long?, leavingTopSeq: Long?): Long? =
+    listOfNotNull(liveTopSeq, leavingTopSeq).maxOrNull()
+
+/**
  * Iwara 二级页覆盖层栈的宿主：评论/作者主页/关系列表/播放列表详情/图片/帖子/收藏/播放列表/下载列表/关注/tag 页。
  * 放在根 Box（与设置/播放页同层）全屏盖住顶栏与底栏。栈内所有页常驻组合，返回上一页时是"原地露出"：
  * 滚动位置、已加载数据都还在，也不会重新请求。
@@ -106,6 +115,14 @@ fun IwaraOverlayHost(
     coveredByOther: Boolean = false,
     /** 不是最上层时让出系统返回键（PredictiveBackHandler 后注册者优先）。 */
     backEnabled: Boolean = true,
+    /**
+     * 退场动画还没播完的顶层页序号（null = 没有退场页）。
+     *
+     * 调用方据此把退场页继续算作"在屏"：zIndex 与返回键归属都要认它 ——
+     * 否则弹出最后一页后、动画结束前的 320ms 里，播放页/设置页会把它盖住（滑出看不见），
+     * 第二次返回也会穿透到主页面（清筛选 / 退出 App）。
+     */
+    onLeavingTopSeqChange: (Long?) -> Unit = {},
     /** 动作面板里的「检查文件完整性」；null = 不显示该行（仅已下载的视频显示）。 */
     onCheckIntegrity: ((IwaraVideoItem) -> Unit)? = null
 ) {
@@ -148,6 +165,8 @@ fun IwaraOverlayHost(
         val live = livePageStack(overlays)
         val leaving = leavingPages.filter { e -> overlays.none { it.seq == e.seq } && !e.isActionSheet }
         val renderList = live + leaving
+        // 退场页仍算"在屏"：把最上面那一页的序号报给调用方（绘制顺序与返回键归属要用）。
+        SideEffect { onLeavingTopSeqChange(leaving.maxOfOrNull { it.seq }) }
         renderList.forEachIndexed { renderIdx, entry ->
             // 退场页不在活跃栈里 → indexOf 返回 -1，顺带就是 isLeaving 判定。
             val liveIndex = live.indexOfFirst { it.seq == entry.seq }
@@ -226,14 +245,23 @@ fun IwaraOverlayHost(
 
     // 预测式返回（设置页/播放页同款）：跟手右滑；越过阈值松手**立刻**弹栈、不加任何补间，
     // 取消则同步复位。取消路径不含挂起点，避免协程被打断导致状态卡住。
-    //   enabled 只认**栈顶是覆盖层页**：动作面板是独立 Dialog 窗口、自己注册窗口级预测返回，
-    //   主窗口再注册就会"以为有主、实际无回调"（或同一手势在两个窗口各拖一遍）；面板打开时
-    //   主窗口不注册；被更上层（播放页/设置页）或外部盖住时同样让出。
+    //   enabled 只认**栈顶是覆盖层页、或它还在播退场动画**：动作面板是独立 Dialog 窗口、自己注册
+    //   窗口级预测返回，主窗口再注册就会"以为有主、实际无回调"（或同一手势在两个窗口各拖一遍）；
+    //   面板打开时主窗口不注册；被更上层（播放页/设置页）或外部盖住时同样让出。
     val actionSheetOnTop = overlays.lastOrNull()?.isActionSheet == true
     val topPage = overlays.lastOrNull { !it.isActionSheet }
+    // 退场页仍算在屏：live 栈已空但退场动画没播完时也注册返回，
+    //   把这一下吞掉（no-op）—— 否则第二个返回会交给主页面（清筛选 / 收起搜索）或直接退出 App。
+    //   与 MainActivity 用"退场页仍占返回"对齐（见 onLeavingTopSeqChange）。
+    val pageStillOnScreen = topPage != null || leavingPages.isNotEmpty()
     PredictiveBackHandler(
-        enabled = backEnabled && topPage != null && !actionSheetOnTop && !coveredByOther
+        enabled = backEnabled && pageStillOnScreen && !actionSheetOnTop && !coveredByOther
     ) { flow: Flow<BackEventCompat> ->
+        // 只有退场页（live 栈已空）：整段手势消费掉，不弹栈、也不把进度传给主内容。
+        if (topPage == null) {
+            flow.collect { }
+            return@PredictiveBackHandler
+        }
         var completed = false
         // 每次手势一个新实例：对 progress 事件做时间差分，估算松手瞬间的跟手速度。
         val velocity = BackVelocityTracker()

@@ -288,6 +288,9 @@ fun PlayerScreen(
     LaunchedEffect(watchKey) {
         positionMs = 0L
         durationMs = 0L
+        // 换视频＝换了一份超分上下文：清掉上一部片留下的「SR 自动停用」提醒与原因。
+        // 同片换代（切模型/换清晰度/7001 恢复）不会走到这里，提醒保留到重新打开 SR。
+        SuperResStatus.reset()
     }
     var isSeeking by remember { mutableStateOf(false) }
     // 在线视频**拖动进度条之后的加载**也要给加载动画（与进入时同款）。
@@ -532,6 +535,8 @@ fun PlayerScreen(
                         "特效管线失败（7001），已自动停用超分并恢复播放",
                         "Effect pipeline failed (7001); super resolution disabled and playback resumed"
                     )
+                    // pipelineFailed 与原因要跨这次换代保留：装片路径只调 resetMeasurements
+                    // 清实测值，chip 的「SR 自动停用」与诊断原因一直显示到重新打开 SR 为止。
                     // 出错时刻的进度/时长记进页面状态，恢复统一交给装片
                     //   effect 的 epoch 重建通路（srEnabled 翻 false 触发）——新实例上特效在首次
                     //   prepare 前重建，装片时经 resumePos 精确续播。若在回调里先对旧实例
@@ -690,9 +695,12 @@ fun PlayerScreen(
         }
         videoHeight = null
         videoWidth = null
-        // 换片/换清晰度时连超分的实测分辨率一起清掉 —— 否则诊断面板会继续显示
+        // 换片/换清晰度时只清实测分辨率等「这一条视频」的值 —— 否则诊断面板会继续显示
         // 上一部视频的"源分辨率"，看起来就像"分辨率识别错了"。
-        SuperResStatus.reset()
+        // 不能整份 reset：pipelineFailed / 原因要留到重新打开 SR（buildEffects 里的 reset()）
+        // 或换了视频（上面按 watchKey 的 effect）为止 —— 否则 7001 自动停用后刚记下的
+        // 「SR 自动停用」与诊断原因会被这条装片路径当场抹掉。
+        SuperResStatus.resetMeasurements()
         // 续播决策：同片换代（换清晰度/重试重装/切模型/错误恢复）→ prepareRebuild 已捕获
         //   进度，精确续播；换了视频 → 从续播起点起播（推荐切换 = 0；从历史点开 = 历史进度）。
         //   页面 positionMs/durationMs 不能当判据：400ms 轮询/事件写入与视频身份切换存在

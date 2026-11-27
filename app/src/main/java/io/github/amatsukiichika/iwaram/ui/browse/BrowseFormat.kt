@@ -1,14 +1,22 @@
 package io.github.amatsukiichika.iwaram.ui.browse
 
 import io.github.amatsukiichika.iwaram.data.parseIwaraDate
+import io.github.amatsukiichika.iwaram.i18n.AppLanguage
 import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.i18n.trCount
 
 /* ---------- 小工具 ---------- */
 
+/** 计数简写：数字格式跟随界面语言（[AppLanguage.locale]），不受进程默认 Locale 影响。 */
 fun formatCount(n: Int): String = when {
-    n >= 100_000_000 -> tr("${"%.1f".format(n / 100_000_000f)}亿", "${"%.0f".format(n / 1_000_000f)}M")
-    n >= 10_000 -> tr("${"%.1f".format(n / 10_000f)}万", "${"%.0f".format(n / 1_000f)}K")
+    n >= 100_000_000 -> tr(
+        "${"%.1f".format(AppLanguage.locale, n / 100_000_000f)}亿",
+        "${"%.0f".format(AppLanguage.locale, n / 1_000_000f)}M"
+    )
+    n >= 10_000 -> tr(
+        "${"%.1f".format(AppLanguage.locale, n / 10_000f)}万",
+        "${"%.0f".format(AppLanguage.locale, n / 1_000f)}K"
+    )
     else -> n.toString()
 }
 
@@ -16,10 +24,10 @@ fun formatCount(n: Int): String = when {
 private val timeAgoDateFormatter =
     java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd", java.util.Locale.CHINA)
 
-/** ISO 时间 → 相对时间文案；解析失败返回 null。 */
-fun timeAgoLabel(iso: String?): String? {
+/** ISO 时间 → 相对时间文案；解析失败返回 null。[now] 可注入，单测用固定时钟。 */
+fun timeAgoLabel(iso: String?, now: Long = System.currentTimeMillis()): String? {
     val ms = parseIwaraDate(iso) ?: return null
-    val diff = System.currentTimeMillis() - ms
+    val diff = now - ms
     val minute = 60_000L
     val hour = 60 * minute
     val day = 24 * hour

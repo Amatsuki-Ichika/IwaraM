@@ -241,6 +241,8 @@ fun LibraryScreen(
         val folderState = rememberLazyListState()
         val authorState = rememberLazyListState()
         val timeState = rememberLazyListState()
+        // 标签云也有自己的 LazyColumn：状态提升到这里，滚动门才能看到它（见下面的 scrolling）。
+        val tagState = rememberLazyListState()
         val pageScope = rememberCoroutineScope()
         // 拖滚动条不走手势滚动（走 requestScrollToItem），**不会**置 isScrollInProgress ⇒ 单独记「scrub 中」，
         //   并入下面的玻璃背景冻结判据：否则拖动期间每帧全屏重录背景，UI 线程掉帧。
@@ -252,7 +254,7 @@ fun LibraryScreen(
                 LibraryMode.FOLDER -> folderState.isScrollInProgress
                 LibraryMode.AUTHOR -> authorState.isScrollInProgress
                 LibraryMode.TIME -> timeState.isScrollInProgress
-                LibraryMode.TAG -> false
+                LibraryMode.TAG -> tagState.isScrollInProgress
             }
         }
         ReportMainContentScrollActivity(scrolling)
@@ -294,7 +296,8 @@ fun LibraryScreen(
                                     onAuthorClick = { v ->
                                         onOpenAuthor(v.authorId ?: VideoViewModel.UNKNOWN_AUTHOR_KEY, v.author)
                                     },
-                                    // 全局筛选器：筛空时换一条空态文案（不然会显示"还没有视频，导入…"）
+                                    // 被任意一层筛选（搜索 / 分类 / 全局）藏掉的条数：
+                                    // 筛空时换一条空态文案（不然会显示"还没有视频，导入…"）
                                     hiddenByFilter = state.hiddenByFilter,
                                     state = allState,
                                     bottomPadding = bottomPadding,
@@ -365,7 +368,7 @@ fun LibraryScreen(
                             )
                         }
                     }
-                    LibraryMode.TAG -> TagCloud(state.tags, state.selectedTags, vm::selectTag, bottomPadding, topPadding)
+                    LibraryMode.TAG -> TagCloud(state.tags, state.selectedTags, vm::selectTag, bottomPadding, topPadding, state = tagState)
                 }
             }
         }

@@ -85,6 +85,22 @@ object SuperResStatus {
     }
 
     /**
+     * 换片/换清晰度时只清「这一条视频的实测值」（源/输出分辨率、倍率、引擎）。
+     *
+     * 不能整份 [reset]：7001 自动停用后的 [pipelineFailed] 与 [reason] 还要继续支撑
+     * chip 的「SR 自动停用」和诊断面板里的原因，直到重新打开 SR（[SuperRes.buildEffects]
+     * 里的 [reset]）或换了视频（播放页按视频身份清零）为止。
+     */
+    fun resetMeasurements() {
+        activeScale = null
+        engine = null
+        sourceWidth = null
+        sourceHeight = null
+        outputWidth = null
+        outputHeight = null
+    }
+
+    /**
      * 降级状态赋值入口：degraded=true + 清倍率 + 记原因，避免多处重复。
      */
     fun markDegraded(reason: String?) {

@@ -5,7 +5,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 
-const SKIP_DIRS = new Set([".git", ".gradle", ".kotlin", ".idea", "build", "node_modules", ".zcode", "dist", "out"]);
+const SKIP_DIRS = new Set([".git", ".gradle", ".kotlin", ".idea", "build", "node_modules", ".zcode", ".local", "dist", "out"]);
 const argRoot = process.argv.indexOf("--root");
 const ROOT = resolve(argRoot !== -1 ? process.argv[argRoot + 1] : process.cwd());
 const issues = [];

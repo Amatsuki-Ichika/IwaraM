@@ -29,11 +29,29 @@ data class GitHubRelease(
 )
 
 /**
+ * 一次 releases 查询的结果，把三种此前都压成 null 的结局分开：
+ * - [Found]：查到该通道可更新的最新版本；
+ * - [None]：API 调用成功、响应可解析，但没有满足通道/资产配对条件的候选
+ *   （例如新版本缺配套 sha256，或前 30 条全是预发布而正式通道用不上）；
+ * - [Failure]：网络失败、HTTP 非 2xx、响应体缺失或不可解析。
+ *
+ * UI 只有区分 [None] 与 [Failure] 才能把"已是最新"和"网络问题"分别提示，
+ * 也才能只在 API 调用本身成功时记录检查时间（[None] 也算成功）。
+ */
+sealed interface GitHubReleaseResult {
+    data class Found(val release: GitHubRelease) : GitHubReleaseResult
+
+    data object None : GitHubReleaseResult
+
+    data object Failure : GitHubReleaseResult
+}
+
+/**
  * GitHub Releases 客户端（应用内更新用）。
  *
  * 只读公开仓库的 releases 列表，不需要鉴权；正式/测试通道的取舍由 [UpdateChannel] 决定。
- * [fetch] 负责网络与 IO 线程，[parseReleaseList] 是纯函数：单测直接喂固定 JSON，不联网
- * （见 GitHubReleaseParseTest）。
+ * [fetch] 负责网络与 IO 线程，[parseReleaseListResult] 是纯函数：单测直接喂固定 JSON，不联网
+ * （见 GitHubReleaseResultTest / GitHubReleaseParseTest）。
  */
 object GitHubReleaseClient {
 
@@ -66,9 +84,11 @@ object GitHubReleaseClient {
      * 拉取 releases 并按 [channel] 选出可更新的最新版本。
      *
      * @param currentVersionName 当前安装的版本名，只用于 User-Agent（GitHub API 要求带 UA）。
-     * @return 可更新版本；网络失败、HTTP 非 2xx、没有满足通道的候选一律 null（这次没查到）。
+     * @return [GitHubReleaseResult.Found] 可更新版本；[GitHubReleaseResult.None] 表示 API 调用
+     *   成功且响应可解析、但没有满足通道的候选；网络失败、HTTP 非 2xx、响应体缺失或不可解析
+     *   返回 [GitHubReleaseResult.Failure]。调用方据此区分"网络问题"与"确实没有更新"。
      */
-    suspend fun fetch(channel: UpdateChannel, currentVersionName: String): GitHubRelease? =
+    suspend fun fetch(channel: UpdateChannel, currentVersionName: String): GitHubReleaseResult =
         withContext(Dispatchers.IO) {
             val userAgent = "IwaraM/" + currentVersionName.ifBlank { "unknown" }
             val request = Request.Builder()
@@ -79,14 +99,14 @@ object GitHubReleaseClient {
                 .build()
             try {
                 http.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful) return@withContext null
-                    val body = response.body?.string() ?: return@withContext null
-                    parseReleaseList(body, channel)
+                    if (!response.isSuccessful) return@withContext GitHubReleaseResult.Failure
+                    val body = response.body?.string() ?: return@withContext GitHubReleaseResult.Failure
+                    parseReleaseListResult(body, channel)
                 }
             } catch (_: IOException) {
-                // 断网 / DNS / 超时都按"这次没查到"处理，让调用方显示可重试提示；
+                // 断网 / DNS / 超时都按"查询失败"处理，让调用方显示可重试提示；
                 // CancellationException 不属于 IOException，不会被这里吞掉。
-                null
+                GitHubReleaseResult.Failure
             }
         }
 
@@ -100,10 +120,10 @@ object GitHubReleaseClient {
      * - 必须同时存在 *-arm64-v8a.apk 资产和与它同名的 .apk.sha256 资产，否则跳过；
      * - 结果取 semver 最大，不依赖数组顺序（GitHub 返回按创建时间倒序，但别赌）。
      *
-     * @return 无候选时 null。
+     * @return 有无候选见 [GitHubReleaseResult]；响应不是 JSON 数组时按 [GitHubReleaseResult.Failure]。
      */
-    fun parseReleaseList(json: String, channel: UpdateChannel): GitHubRelease? {
-        val releases = runCatching { JSONArray(json) }.getOrNull() ?: return null
+    fun parseReleaseListResult(json: String, channel: UpdateChannel): GitHubReleaseResult {
+        val releases = runCatching { JSONArray(json) }.getOrNull() ?: return GitHubReleaseResult.Failure
         var bestVersion: UpdateVersion? = null
         var bestRelease: GitHubRelease? = null
         for (index in 0 until releases.length()) {
@@ -121,8 +141,16 @@ object GitHubReleaseClient {
                 bestRelease = release
             }
         }
-        return bestRelease
+        return bestRelease?.let { GitHubReleaseResult.Found(it) } ?: GitHubReleaseResult.None
     }
+
+    /**
+     * 兼容入口：只关心版本、不区分"没有候选"与"查询失败"时用。
+     *
+     * @return 该通道可更新版本；[GitHubReleaseResult.None] / [GitHubReleaseResult.Failure] 均为 null。
+     */
+    fun parseReleaseList(json: String, channel: UpdateChannel): GitHubRelease? =
+        (parseReleaseListResult(json, channel) as? GitHubReleaseResult.Found)?.release
 
     /** 单个 Release 的资产配对与字段读取；缺 APK 或缺配套 sha256 时返回 null（跳过该条）。 */
     private fun releaseOf(

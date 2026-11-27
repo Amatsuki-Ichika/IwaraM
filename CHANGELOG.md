@@ -21,6 +21,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Comments stay attached to their own video, image or post when several panels are open; author pages no longer crash when a page repeats an item; a tag tapped in a playlist or the player always searches online; and the replies label is fully bilingual.
 
+- Download repairs now report what actually happened: a replace job no longer claims success when the broken file could not be deleted, a resume whose quality disappeared fails with a message instead of appending a different rendition, and a cancel issued while the signed URL is still being resolved (including during auto-resume or after permanently deleting the video) is honoured. Paused partials keep their file address, deleting a just-finished download no longer triggers a re-download that brings it back, and an automatic repair consumes its one-per-video budget only when the file is actually broken.
+
+- A library folder whose permission was revoked, was deleted or now lists no videos reports a clear warning with a re-select hint instead of "scan complete" with a stale count; picking a different folder during a running scan now rescans with the new folder.
+
+- A profile refresh discovered after a server-side session revocation no longer flips the UI back to signed-in or erases the expiry notice.
+
+- The player stays paused through the 1003 "detaching surface" recovery instead of starting audio, the seek bar exposes accessibility semantics and a 48 dp touch target, and the super-resolution auto-disable reason survives the automatic rebuild. Player progress timestamps follow the in-app language.
+
+- Comments load past the first 32, the empty-search "Show all content" hint actually reloads the results, Images/Posts ask a signed-out user to sign in, playlist create/delete failures show the error, changing the author-page sort during a load applies, follower lists paginate, a tag tapped on a page over the player opens the filtered feed, and a late like or resolve result no longer leaks onto the next video.
+
+- Update checks distinguish "no eligible release" (shown as up to date) from a network failure, record the check time either way so automatic checks keep their interval, ignore a result that arrives after a channel switch, and fail over to the secondary domain on a connect timeout.
+
+- The local library says "no matching content" when search or filters hide everything instead of asking to import a folder; tag-cloud scrolling freezes the glass backdrop like every other list; folder, month and author bucket labels follow a system-language change.
+
+- "Protect screenshots" now also covers bottom sheets and dialogs, and the diagnostics buffer no longer records search queries, tag names or author handles.
+
+- The author-page scrollbar seek lands under the finger inside the header band and the bar is not drawn when its geometry is unavailable; bottom tabs and pill selectors announce which item is selected; dragging a bottom-sheet handle while it closes can no longer strand the sheet; a vertical swipe over the opacity slider scrolls the page.
+
+- Manually linking a video to an iwara ID can no longer resurrect a row deleted in the meantime, scans write fetched metadata in batches instead of re-querying the whole library per file, and malformed API responses with null list elements no longer crash playlist, library or player screens.
+
+### Changed
+
+- The orange and teal light-theme primaries are slightly darker so their text and filled buttons meet WCAG AA contrast; the other palettes are unchanged.
+
+- Playlist and comment changes always use the primary API domain, so they no longer report success when the secondary host silently ignores the request.
+
 ## [0.2.3] - 2026-11-22
 
 Downloads are verified, resumable and checkable, the app can update itself, and the player, scrollbars and overlays get their finishing pass.
@@ -61,7 +87,7 @@ Downloads are verified, resumable and checkable, the app can update itself, and 
 
 - Up to two downloads run in parallel, falling back to one with a backoff when the server answers 429/403; each transfer uses a 256 KB buffer.
 
-- Online playback buffers 15 s before starting and up to 60 s ahead, keeps up to 16 connections and reuses signed URLs prefetched while the player opens.
+- Online playback starts after 1 s and keeps a 15 s minimum, 60 s maximum buffer ahead, keeps up to 16 connections and reuses signed URLs prefetched while the player opens.
 
 - Local library cards open an action sheet (set iwara ID, check integrity, remove from library, permanently delete) instead of the ID dialog directly.
 

@@ -70,11 +70,12 @@ fun thumbnailFileIdFromUrl(url: String?): String? {
 /* ---------- 历史页的三个纯函数（配单测） ---------- */
 
 /**
- * 日期分组头：今天 / 昨天 / M月d日（跨年带年份）。按本地时区的**日历日**分组，
+ * 日期分组头：今天 / 昨天 / M月d日（跨年带年份）。按时区的**日历日**分组，
  * 与 B 站历史页的分组一致。
+ *
+ * [zone] 默认系统时区；显式传入是为了让单测用固定时区断言，不依赖运行机器的时区。
  */
-fun historyGroupLabel(lastWatchAt: Long, now: Long): String {
-    val zone = ZoneId.systemDefault()
+fun historyGroupLabel(lastWatchAt: Long, now: Long, zone: ZoneId = ZoneId.systemDefault()): String {
     val day = Instant.ofEpochMilli(lastWatchAt).atZone(zone).toLocalDate()
     val today = Instant.ofEpochMilli(now).atZone(zone).toLocalDate()
     return when {
@@ -91,9 +92,14 @@ fun historyGroupLabel(lastWatchAt: Long, now: Long): String {
     }
 }
 
-/** 观看时间行文本：「M月d日 HH:mm」（本地时区）。 */
-fun historyTimeText(lastWatchAt: Long): String {
-    val zoned = Instant.ofEpochMilli(lastWatchAt).atZone(ZoneId.systemDefault())
+/**
+ * 观看时间行文本：「M月d日 HH:mm」。
+ *
+ * [zone] 默认系统时区；显式传入是为了让单测用固定时区断言（epoch 0 在负时区是 12月31日），
+ * 不依赖运行机器的时区。
+ */
+fun historyTimeText(lastWatchAt: Long, zone: ZoneId = ZoneId.systemDefault()): String {
+    val zoned = Instant.ofEpochMilli(lastWatchAt).atZone(zone)
     val pattern = tr("M'月'd'日' HH:mm", "MMM d, HH:mm")
     return zoned.format(DateTimeFormatter.ofPattern(pattern, AppLanguage.locale))
 }

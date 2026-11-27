@@ -5,7 +5,6 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
@@ -16,6 +15,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -32,6 +33,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
@@ -104,13 +106,13 @@ fun <T> PillSelector(
             )
         }
         Row(
-            modifier = rowModifier,
+            modifier = rowModifier.selectableGroup(),
             horizontalArrangement = rowArrangement,
             verticalAlignment = rowVerticalAlignment
         ) {
             segments.forEach { seg ->
                 val isSelected = seg.key == selected
-                // 修饰符链序：weight（可选）→ minWidth（可选）→ 测量 → clip → clickable → padding。
+                // 修饰符链序：weight（可选）→ minWidth（可选）→ 测量 → clip → selectable → padding。
                 var segModifier: Modifier = if (evenWeight) Modifier.weight(1f) else Modifier
                 if (segmentMinWidth != null) {
                     segModifier = segModifier.defaultMinSize(minWidth = segmentMinWidth)
@@ -126,7 +128,12 @@ fun <T> PillSelector(
                         )
                     }
                     .clip(RoundedCornerShape(cornerRadius))
-                    .clickable { onSelect(seg.key) }
+                    // 单选：选中态下发给无障碍服务（Role.RadioButton），不再只靠颜色区分。
+                    .selectable(
+                        selected = isSelected,
+                        role = Role.RadioButton,
+                        onClick = { onSelect(seg.key) }
+                    )
                     .padding(segmentPadding)
                 Box(segModifier, contentAlignment = Alignment.Center) {
                     segmentContent(seg, isSelected)

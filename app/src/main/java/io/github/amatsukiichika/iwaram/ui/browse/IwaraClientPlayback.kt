@@ -30,7 +30,10 @@ import io.github.amatsukiichika.iwaram.data.VideoEntity
 import io.github.amatsukiichika.iwaram.data.describeIwaraError
 import io.github.amatsukiichika.iwaram.data.ensureIwaraSuccess
 import io.github.amatsukiichika.iwaram.data.GlobalFilterHolder
+import io.github.amatsukiichika.iwaram.data.isSameDownloadRendition
+import io.github.amatsukiichika.iwaram.data.loadPendingDownloads
 import io.github.amatsukiichika.iwaram.data.parseIwaraDate
+import io.github.amatsukiichika.iwaram.data.qualityLabelOfFileName
 import io.github.amatsukiichika.iwaram.data.playbackSignedUrlCache
 import io.github.amatsukiichika.iwaram.data.resolveDownloadTarget
 import io.github.amatsukiichika.iwaram.data.selectPlaybackQuality
@@ -271,18 +274,61 @@ fun IwaraClientViewModel.startDownloadById(
     ) {
         (scope ?: viewModelScope).launch {
             try {
+                // 先读一次待续传记录：它既是"续跑还是全新下载"的判据，也决定重新解析要用
+                // **哪个档位**。解析签名地址要两次网络往返，期间用户可能取消或永久删除
+                // （两条路径都会先删待续传记录、再置取消意图）。
+                val pending = withContext(Dispatchers.IO) {
+                    runCatching { repo.loadPendingDownloads().firstOrNull { it.videoId == id } }
+                        .getOrNull()
+                }
+                val hadPending = pending != null
+                // 续跑沿用记录里的档位，而不是当前设置：否则用户改过下载清晰度后点「继续」，
+                // 会拿新档位的地址往旧半成品的偏移后面续写，拼出损坏文件（review Medium-58）。
+                // 旧记录的 quality 字段可能为空，文件名里的 `(档位)` 是同一信息的可读来源。
+                val pendingQuality = pending?.let { p ->
+                    p.quality.takeIf { it.isNotBlank() } ?: qualityLabelOfFileName(p.fileName)
+                }
                 // 解析（详情 → 清晰度 → 归一化签名地址）与下载服务"地址过期后重解析"共用一条路径。
-                val target = resolveDownloadTarget(repo, id)
-                DownloadService.start(
+                val target = resolveDownloadTarget(repo, id, pendingQuality?.takeIf { it.isNotBlank() })
+                if (!pendingQuality.isNullOrBlank() &&
+                    !isSameDownloadRendition(pendingQuality, target.quality)
+                ) {
+                    // 首选档位已不可用（chooseDownloadQuality 回退到了别的档）：宁可不续传，
+                    // 也不能把另一种编码追加到旧文件后面；让用户按新档位重新下载。
+                    onError(
+                        tr(
+                            "所选清晰度已不可用，请重新下载",
+                            "The selected quality is no longer available. Download it again"
+                        )
+                    )
+                    return@launch
+                }
+                if (hadPending) {
+                    // 记录已不在 = 解析期间被取消/永久删除：不能再启动，否则删掉的视频会被重新下回库里。
+                    // 读取失败按"还在"处理（true）—— 服务侧对取消意图还有一道拒绝，不能因一次读取抖动误丢任务。
+                    val stillPending = withContext(Dispatchers.IO) {
+                        runCatching { repo.loadPendingDownloads().any { it.videoId == id } }
+                            .getOrDefault(true)
+                    }
+                    if (!stillPending) {
+                        DiagLog.log("Iwara", "解析期间任务已被取消/删除，不启动下载：$id")
+                        return@launch
+                    }
+                }
+                val started = DownloadService.start(
                     app,
                     DownloadService.Job(
                         videoId = id,
                         title = target.title,
                         url = target.url,
                         fileName = target.fileName,
-                        quality = target.quality
+                        quality = target.quality,
+                        // 续跑：服务在解析期间出现取消意图时拒绝入队，而不是清掉它。
+                        continuation = hadPending
                     )
                 )
+                // 服务拒绝启动（续跑前已取消/删除）：不提示"已加入下载队列"。
+                if (!started) return@launch
                 // 提示必须在真正入队之后：解析与建地址都可能失败，
                 // 先弹"已加入下载队列"再弹错误，用户会以为任务已经下起来了。
                 onSuccess()

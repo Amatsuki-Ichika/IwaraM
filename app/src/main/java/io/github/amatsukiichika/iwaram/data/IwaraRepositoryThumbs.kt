@@ -25,11 +25,30 @@ import java.io.File
     /* ---------- 元数据拉取与落库 ---------- */
 
 suspend fun IwaraRepository.fetchAndApplyMetadata(video: VideoEntity) {
-        val id = video.iwaraId ?: return
+        val write = fetchMetadataWrite(video) ?: return
         try {
+            // 行已被删时这里返回 false（不复活），不是失败；写库异常也只记日志 —— 与旧实现一致：
+            // 元数据补全是尽力而为，不能因为一次写库抖动把扫描/下载收尾整个打断。
+            dao.applyFetchedMetadata(write)
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            DiagLog.log("Repo", "元数据落库失败 ${video.iwaraId}: ${e.javaClass.simpleName}")
+        }
+    }
+
+    /**
+     * 拉取远端元数据并组装成一次**待写入**（不落库）。网络失败返回 null。
+     *
+     * 扫描攒批时先用它把一批响应全部拉完（网络天然串行、不占写事务），
+     * 再用 [VideoDao.applyFetchedMetadataBatch] 一次性落库 —— 逐条落库会让 Room
+     * 每行发一次 videos/tags 失效，主线程按整库重算 N 次。
+     */
+suspend fun IwaraRepository.fetchMetadataWrite(video: VideoEntity): FetchedMetadataWrite? {
+        val id = video.iwaraId ?: return null
+        return try {
             // 元数据补全走唯一的 IwaraClient 网络栈（与浏览/登录共用鉴权、401 刷新与基址回退）。
             val resp = IwaraClient.call { it.video(id) }
-            if (resp.title.isNullOrBlank() && resp.id == null) return
+            if (resp.title.isNullOrBlank() && resp.id == null) return null
 
             val tags = resp.tags.orEmpty().mapNotNull { it.id }.filter { it.isNotBlank() }
             val updated = video.copy(
@@ -45,13 +64,13 @@ suspend fun IwaraRepository.fetchAndApplyMetadata(video: VideoEntity) {
                 tagsCsv = tags.joinToString(","),
                 metaFetched = true
             )
-            // 四步写收进单个 Room 事务（更新元数据列 → 清旧关联 → 重建标签/关联），
+            // 落库时四步写收进单个 Room 事务（更新元数据列 → 清旧关联 → 重建标签/关联），
             // 中途崩溃不再留下孤儿 cross-ref 或半更新的条目；行已被扫描收尾删掉时
             // 事务内的 UPDATE 命中 0 行，直接放弃写入，不会把已删记录复活。
-            dao.applyFetchedMetadata(
+            FetchedMetadataWrite(
                 video = updated,
                 tags = tags.map { TagEntity(id = it, name = it) },
-                refs = tags.map { VideoTagCrossRef(video.localUri, it) }
+                refs = tags.map { VideoTagCrossRef(updated.localUri, it) }
             )
         } catch (e: Exception) {
             // 取消必须原样上抛。`CancellationException` 是 `IllegalStateException` 的子类，
@@ -61,14 +80,24 @@ suspend fun IwaraRepository.fetchAndApplyMetadata(video: VideoEntity) {
             // 网络失败时保留本地条目，等待后续重试。
             // 无痕迹时"检索完成但元数据缺失"类问题无法归因，这里落 DiagLog。
             DiagLog.log("Repo", "元数据拉取失败 ${video.iwaraId}: ${e.javaClass.simpleName}: ${e.message ?: ""}")
+            null
         }
     }
 
-    /** 手动指定某条视频的 iwara ID 后调用。 */
+    /**
+     * 手动指定某条视频的 iwara ID 后调用。
+     *
+     * 只 UPDATE 身份列（iwaraId + metaFetched=0），绝不整行 REPLACE：传入的 [video] 是
+     * 打开手动关联弹窗那一刻的快照，弹窗期间扫描/下载可能更新过 fileName/封面/修改日期，
+     * 而且行可能已被扫描收尾删掉 —— REPLACE 会把删掉的行复活成指向不存在文件的幽灵条目。
+     * UPDATE 后重新读出真实行：行已不存在（命中 0 行）就干净放弃，绝不复活。
+     */
 suspend fun IwaraRepository.linkIwaraId(video: VideoEntity, id: String) {
         withContext(Dispatchers.IO) {
-            dao.upsert(video.copy(iwaraId = id, metaFetched = false))
-            fetchAndApplyMetadata(video.copy(iwaraId = id))
+            dao.setIwaraId(video.localUri, id)
+            // 重新读整行：既避免用弹窗快照去拉元数据，也顺带完成"行是否还在"的判存。
+            val row = dao.byUri(video.localUri) ?: return@withContext
+            fetchAndApplyMetadata(row)
         }
     }
 

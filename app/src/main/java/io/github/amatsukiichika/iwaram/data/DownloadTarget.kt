@@ -122,5 +122,20 @@ internal fun isSignedUrlExpired(
     return ttl <= slackMs
 }
 
+/**
+ * 重新解析出来的目标是否仍是**同一个档位**（纯函数，可单测）。
+ *
+ * 续传只能往同一 rendition 的字节流后面追加：`chooseDownloadQuality` 在首选档位消失时
+ * 会回退到 `pickViewUrl` / 列表第一档，若直接拿新地址的 `.url` 续写，就会把另一种编码
+ * 的字节拼到旧半成品的偏移后面 —— 长度可能刚好对上，内容却是坏的。
+ *
+ * 档位名一致即可：标题可能在上游被改名，文件名随之变化，但同一档位的编码与字节布局不变。
+ * 任一侧为空时无法确认，按"不一致"处理（宁可让用户重新下载，也不拼出损坏文件）。
+ */
+internal fun isSameDownloadRendition(jobQuality: String, freshQuality: String): Boolean {
+    val expected = jobQuality.trim()
+    return expected.isNotEmpty() && expected == freshQuality.trim()
+}
+
 /** 留出的安全余量：地址余量不足一分钟就换新的，避免请求在路上过期。 */
 internal const val DOWNLOAD_URL_EXPIRY_SLACK_MS = 60_000L

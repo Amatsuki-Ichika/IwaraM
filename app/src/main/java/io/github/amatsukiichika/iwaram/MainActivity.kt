@@ -181,6 +181,7 @@ import io.github.amatsukiichika.iwaram.ui.browse.OverlayEntry
 import io.github.amatsukiichika.iwaram.ui.browse.drawOrderSeqs
 import io.github.amatsukiichika.iwaram.ui.browse.zIndexOf
 import io.github.amatsukiichika.iwaram.ui.browse.layerStillOnScreen
+import io.github.amatsukiichika.iwaram.ui.browse.overlayOnScreenTopSeq
 import io.github.amatsukiichika.iwaram.ui.browse.buildEntity
 import io.github.amatsukiichika.iwaram.ui.browse.downloadVideo
 import io.github.amatsukiichika.iwaram.ui.browse.startDownloadById
@@ -389,6 +390,19 @@ class MainActivity : ComponentActivity() {
             )
 
             LaunchedEffect(Unit) { vm.onStart() }
+
+            // 跟随系统语言时，设备语言变化会重建 Activity 而 ViewModel 存活：分桶缓存
+            //（月份 / 根目录 / 「未指定」作者等标签）仍是旧语言。这里把解析出的 Locale 报给
+            // ViewModel 重算；rememberSaveable 让"上一次的 Locale"跨 Activity 重建保留，
+            // 只有真的变了才重算（旋转屏幕等其它配置变化不重复计算）。
+            val configLanguageTag = LocalConfiguration.current.locales[0].toLanguageTag()
+            val lastConfigLanguageTag = rememberSaveable { mutableStateOf(configLanguageTag) }
+            LaunchedEffect(configLanguageTag) {
+                if (lastConfigLanguageTag.value != configLanguageTag) {
+                    lastConfigLanguageTag.value = configLanguageTag
+                    vm.onLanguageChanged()
+                }
+            }
 
             val themeMode by vm.themeMode.collectAsStateWithLifecycle()
             val themeColor by vm.themeColor.collectAsStateWithLifecycle()
@@ -721,6 +735,10 @@ class MainActivity : ComponentActivity() {
         // 播放页作为覆盖层叠在主页之上：返回时主页始终在下方，滑出即可露出真实主页内容。
         var showingPlayer by remember { mutableStateOf(false) }
         var showingSettings by remember { mutableStateOf(false) }
+        /**
+         * 播放页当前显示的视频标识（本地文件 URI + 在线 id）—— 换片时据此清掉上一支视频残留的解析错误。
+         */
+        var playerShownVideoKey by remember { mutableStateOf("") }
         // 两个二级页各自"手势松手动量"（冻结进度 + 松手速度）：手势松手时由页面回调写入，
         // 退场动画按"剩余距离 / 速度"换算时长、带动量衔接；开页时清空，非手势关闭读不到就是默认规格。
         var playerBackMomentum by remember { mutableStateOf<BackMomentum?>(null) }
@@ -739,8 +757,28 @@ class MainActivity : ComponentActivity() {
         // `key(seq)` —— Compose 把它们当成同一份状态槽，后压入的页面复用前一个页面的 Animatable。
         val overlays = remember { mutableStateListOf<OverlayEntry>() }
 
+        /**
+         * 最近被弹出、但宿主（[IwaraOverlayHost]）还没播完 320ms 退场动画的覆盖层页序号。
+         *
+         * 退场页仍然算"在屏"：绘制顺序与返回键归属都必须继续认它（见下面的 overlayOnScreenSeq）。
+         * 宿主退场动画播完（移出 leavingPages）后经 [IwaraOverlayHost.onLeavingTopSeqChange] 回报 null 清掉。
+         */
+        var overlayExitSeq by remember { mutableStateOf<Long?>(null) }
+
         fun popOverlay() {
-            if (overlays.isNotEmpty()) overlays.removeAt(overlays.lastIndex)
+            if (overlays.isNotEmpty()) {
+                val removed = overlays.removeAt(overlays.lastIndex)
+                // 页面（不是独立窗口的动作面板）弹出后还要播退场：当帧就记为"仍在屏"的最上层，
+                // 等宿主下一帧回报的话，这一帧它的 zIndex 会塌到 0（被播放页/设置页盖住）。
+                if (!removed.isActionSheet) overlayExitSeq = removed.seq
+            }
+        }
+
+        /** 弹掉 [keepIndex] 之上的所有覆盖层页（[keepIndex] = -1 表示全弹）；理由同 [popOverlay]。 */
+        fun popOverlaysAbove(keepIndex: Int) {
+            val removed = overlays.drop(keepIndex + 1)
+            while (overlays.size > keepIndex + 1) overlays.removeAt(overlays.lastIndex)
+            removed.lastOrNull { !it.isActionSheet }?.let { overlayExitSeq = it.seq }
         }
 
         /** 从动作面板进入新页面时替换面板本身，避免返回时又回到面板。 */
@@ -758,7 +796,7 @@ class MainActivity : ComponentActivity() {
                 overlay is IwaraOverlay.Profile -> {
                     val idx = profileRevertIndex(overlays.map { it.overlay }, overlay)
                     if (idx >= 0) {
-                        while (overlays.size > idx + 1) overlays.removeAt(overlays.lastIndex)
+                        popOverlaysAbove(idx)
                     } else {
                         overlays.add(OverlayEntry(nextOverlaySeq(), overlay))
                     }
@@ -859,6 +897,16 @@ class MainActivity : ComponentActivity() {
 
         /** 打开播放页（必须走这里才能拿到新的层序号）。[startMs] = 观看历史续播起点（默认 0）。 */
         fun openPlayer(startMs: Long = 0L) {
+            // 换片 / 全新打开时清掉上一支视频的解析错误：错误面板只属于发起解析的那一支视频。
+            // 本地副本分支（resolveAndPlay 命中本地库）、相关推荐本地条目、作者页本地卡片
+            // 都不经过 startResolve，不清就会把"无法播放"盖在新视频上。
+            // 同时作废上一支视频的在途解析：它的迟到回调（失败时写 resolveError）不能落到新片上。
+            val videoKey = (prs.currentVideo?.localUri ?: "") + "|" + (prs.currentOnline?.id ?: "")
+            if (!showingPlayer || videoKey != playerShownVideoKey) {
+                prs.resolveGen++
+                prs.resolveError = null
+            }
+            playerShownVideoKey = videoKey
             prs.playerStartMs = startMs
             // 引擎开关不影响"打开哪个页"——PlayerScreen 单页按引擎运行，
             // 详情区/点赞/评论/下载在 mpv 引擎下原样可用。
@@ -1005,14 +1053,17 @@ class MainActivity : ComponentActivity() {
         val pageShape = rememberAdaptivePageShape(exposed = mainExposed)
 
         // 三层的绘制顺序 = 各自"打开序号"的大小（大的画在上面），序号取自同一个进程级计数器，
-        // 因此最新打开的页永远在最上面。覆盖层栈用栈顶页的序号（栈内各页之间的层序仍由
-        // IwaraOverlayHost 按序渲染）。
+        // 因此最新打开的页永远在最上面。覆盖层栈用"仍在屏"的最上层序号（含退场页；栈内各页
+        // 之间的层序仍由 IwaraOverlayHost 按序渲染）。
         // 两个"进出场过渡状态"必须在这里声明：它们的 currentState/targetState 要参与下面的
         // 绘制顺序计算（见 drawSeqs）。各自的 SideEffect 仍在原处只负责下发目标值。
         val settingsVisible = remember { MutableTransitionState(false) }
         val playerVisible = remember { MutableTransitionState(false) }
 
         val overlayTopSeq = overlays.lastOrNull { !it.isActionSheet }?.seq
+        // 覆盖层"仍在屏上"的最上层序号 = 活栈顶 ∪ 退场页（宿主 leavingPages 回报）。
+        // 弹栈当帧 popOverlay 已把被弹页乐观记进 overlayExitSeq，宿主退场播完后再回报 null 清掉。
+        val overlayOnScreenSeq = overlayOnScreenTopSeq(overlayTopSeq, overlayExitSeq)
         // 用于让位 / 让出返回键：只认"打开着"的层（按返回那一刻就该让位、让键）。
         val visibleSeqs = listOfNotNull(
             overlayTopSeq,
@@ -1039,7 +1090,9 @@ class MainActivity : ComponentActivity() {
         )
 
         val drawSeqs = drawOrderSeqs(
-            overlayTopSeq = overlayTopSeq,
+            // 覆盖层传"仍在屏"的序号（含退场页），不是活栈顶：弹出最后一页后的退场期间，
+            // 它仍要画在播放页/设置页之上 —— 否则滑出动画被不透明播放页盖住（只剩瞬间切换）。
+            overlayTopSeq = overlayOnScreenSeq,
             settingsSeq = settingsSeq,
             settingsOnScreen = settingsOnScreen,
             playerSeq = playerSeq,
@@ -1059,8 +1112,10 @@ class MainActivity : ComponentActivity() {
         val backTarget = backOwner(
             onboardingVisible = false,
             sheetOpen = showingFilter || overlays.lastOrNull()?.isActionSheet == true,
-            overlaySeq = overlayTopSeq,
-            overlayOnScreen = overlayTopSeq != null,
+            // 覆盖层同样认"仍在屏的退场页"：弹出最后一页后的退场窗口里，返回仍归覆盖层（宿主吞掉），
+            // 不会落到主页面去清筛选 / 收起搜索，也不会退出 App。
+            overlaySeq = overlayOnScreenSeq,
+            overlayOnScreen = overlayOnScreenSeq != null,
             settingsSeq = settingsSeq,
             settingsOnScreen = settingsOnScreen,
             playerSeq = playerSeq,
@@ -1089,6 +1144,10 @@ class MainActivity : ComponentActivity() {
 
         /** 关闭播放页的唯一入口：关页 + 清播放上下文 + 作废在途解析。 */
         fun closePlayer() {
+            // 重复关闭（退场动画播放中 / 动画刚播完、页面还没摘掉的那一两帧）必须是 no-op：
+            // 无条件置 playerExitPending 会让它永远为 true —— LaunchedEffect(showingPlayer) 不会为
+            // "已经是 false 的 showingPlayer"重跑，再也没人清，播放页会永远挂在屏外并占着返回键。
+            if (!showingPlayer) return
             prs.resolveGen++ // 作废在途解析回调
             showingPlayer = false
             // 同步登记"退场动画还没播完"（挂载标记靠它派生，见 playerMounted 的说明）。
@@ -1109,7 +1168,7 @@ class MainActivity : ComponentActivity() {
             when (val plan = authorNavPlan(overlays, playerSeq, showingPlayer, incoming)) {
                 is AuthorNavPlan.PopTo -> {
                     // 回退到栈内那一层：不改写已有作者页（复用原条目），也不重复压同一作者页。
-                    while (overlays.size > plan.targetIndex + 1) overlays.removeAt(overlays.lastIndex)
+                    popOverlaysAbove(plan.targetIndex)
                     if (plan.closesPlayer) closePlayer()
                 }
                 AuthorNavPlan.PushOnTop -> pushOverlay(incoming)
@@ -1163,6 +1222,10 @@ class MainActivity : ComponentActivity() {
             openRelations = { uid, kind -> pushOverlay(IwaraOverlay.Relations(uid, kind)) },
             openSettings = { openSettings() },
             openTagVideos = { tag, online ->
+                // 标签可能点自压在播放页之上的页面（播放页 → 作者页 → 点 tag）：
+                // 与播放页自己的 tag chip 同一语义 —— 先关播放页，否则清栈后露出的是暂停的
+                // 播放页，筛选结果被挡在它后面（用户以为点 tag 没反应）。
+                if (showingPlayer) closePlayer()
                 val top = overlays.lastOrNull()?.overlay
                 when {
                     // 已在该 tag 页：不重复压栈（只有在线 tag 才有这个二级页）。
@@ -1175,7 +1238,7 @@ class MainActivity : ComponentActivity() {
                     // 本地卡片给的是 tag 名字（hasTag() 按名字比对）。以前按 currentTab 猜，
                     // 从「我的」页打开播放列表或在播放页点 tag 时，在线 tag 会被当成地库筛选。
                     online -> {
-                        overlays.clear()
+                        popOverlaysAbove(-1)
                         // 先切回「视频」tab 与视频分段，再筛：否则底部还停在「我的」/别的分段。
                         // 顺序不能反：`selectVideoSegment` 内部会 `clearSearch()`，先筛后切会被清掉。
                         currentTab = HomeTab.VIDEO
@@ -1183,7 +1246,7 @@ class MainActivity : ComponentActivity() {
                         cvm.searchByTag(tag)
                     }
                     else -> {
-                        overlays.clear()
+                        popOverlaysAbove(-1)
                         vm.selectTag(tag)
                         currentTab = HomeTab.MANAGER
                     }
@@ -1485,15 +1548,19 @@ class MainActivity : ComponentActivity() {
 
         // ---- 二级页覆盖层栈（评论/主页/播放列表/图片/帖子/收藏/播放列表/tag）----
         // 参考播放页：根 Box 全屏盖住顶栏与底栏；栈内含播放器同款预测式返回（见 IwaraOverlayHost）。
-        // zIndex 由"栈顶页的打开序号"决定：在播放页里点作者时，作者页的序号更大，画在播放页之上。
+        // zIndex 由"仍在屏"的最上层页序号决定（含退场页）：在播放页里点作者时，作者页的序号更大，
+        // 画在播放页之上；弹出后它的退场动画同样画在播放页之上（不被不透明播放页盖住）。
         // 被更新的一层盖住时栈顶页照常让位（coveredByOther）；不是最上层就让出返回键。
         IwaraOverlayHost(
             overlays, ::popOverlay, cvm, vm, navActions,
             // 手势进度回传：拖动中实时让主内容跟着回位，松手/取消回调 null（由 cover 动画归位）
             onBackProgress = { overlayGesture = it },
-            modifier = Modifier.zIndex(layerZ(overlayTopSeq)),
+            // 覆盖层"仍在屏"的序号（含退场页），与 drawSeqs / backOwner 同源。
+            modifier = Modifier.zIndex(layerZ(overlayOnScreenSeq)),
             coveredByOther = overlayCovered,
             backEnabled = backTarget == BackOwner.OVERLAY,
+            // 宿主回报退场页序号：退场动画播完（离开 leavingPages）后回报 null，清掉乐观记录。
+            onLeavingTopSeqChange = { overlayExitSeq = it },
             // 在线卡片长按面板里的「检查文件完整性」（只有已下载的视频才显示该行）。
             onCheckIntegrity = { item ->
                 item.id?.let { id ->
@@ -1689,6 +1756,9 @@ class MainActivity : ComponentActivity() {
                                 val previous = prs.onlineLiked
                                 prs.onlineLiked = !previous
                                 cvm.toggleLike("video", id, previous) { ok, err ->
+                                    // 迟到回调只属于发起它的那支视频：播放页已换片就静默丢弃，
+                                    // 否则 A 的结果会覆盖 B 的点赞态（与上面相关推荐的 id 守卫同源）。
+                                    if (prs.currentOnline?.id != id) return@toggleLike
                                     if (ok != null) prs.onlineLiked = ok
                                     else {
                                         prs.onlineLiked = previous
