@@ -93,7 +93,8 @@ fun IwaraClientViewModel.loadPlaylists(force: Boolean = false) {
 fun IwaraClientViewModel.createPlaylist(title: String, scope: CoroutineScope? = null, onDone: (String?) -> Unit) {
         (scope ?: viewModelScope).launch {
             try {
-                val created = IwaraClient.call { it.createPlaylist(IwaraPlaylistBody(title.trim())) }
+                // 变更类请求固定走 callPrimary（主域 apiq）：备用域对写操作会返 200 却不入库。
+                val created = IwaraClient.callPrimary { it.createPlaylist(IwaraPlaylistBody(title.trim())) }
                 _playlists.value = _playlists.value.copy(
                     items = listOf(created) + _playlists.value.items
                 )
@@ -108,7 +109,7 @@ fun IwaraClientViewModel.createPlaylist(title: String, scope: CoroutineScope? = 
 fun IwaraClientViewModel.addToPlaylist(playlistId: String, videoId: String, scope: CoroutineScope? = null, onDone: (String?) -> Unit) {
         (scope ?: viewModelScope).launch {
             try {
-                IwaraClient.call { it.addToPlaylist(playlistId, videoId) }.ensureIwaraSuccess()
+                IwaraClient.callPrimary { it.addToPlaylist(playlistId, videoId) }.ensureIwaraSuccess()
                 onDone(null)
             } catch (t: Throwable) {
                 if (t is CancellationException) throw t
@@ -120,7 +121,7 @@ fun IwaraClientViewModel.addToPlaylist(playlistId: String, videoId: String, scop
 fun IwaraClientViewModel.removeFromPlaylist(playlistId: String, videoId: String, scope: CoroutineScope? = null, onDone: (String?) -> Unit) {
         (scope ?: viewModelScope).launch {
             try {
-                IwaraClient.call { it.removeFromPlaylist(playlistId, videoId) }.ensureIwaraSuccess()
+                IwaraClient.callPrimary { it.removeFromPlaylist(playlistId, videoId) }.ensureIwaraSuccess()
                 onDone(null)
             } catch (t: Throwable) {
                 if (t is CancellationException) throw t
@@ -132,7 +133,7 @@ fun IwaraClientViewModel.removeFromPlaylist(playlistId: String, videoId: String,
 fun IwaraClientViewModel.deletePlaylist(playlistId: String, scope: CoroutineScope? = null, onDone: (String?) -> Unit) {
         (scope ?: viewModelScope).launch {
             try {
-                IwaraClient.call { it.deletePlaylist(playlistId) }.ensureIwaraSuccess()
+                IwaraClient.callPrimary { it.deletePlaylist(playlistId) }.ensureIwaraSuccess()
                 _playlists.value = _playlists.value.copy(
                     items = _playlists.value.items.filterNot { it.id == playlistId }
                 )

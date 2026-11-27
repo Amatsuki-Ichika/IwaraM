@@ -60,6 +60,11 @@ import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.progressBarRangeInfo
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.setProgress
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.dp
@@ -67,6 +72,7 @@ import io.github.amatsukiichika.iwaram.ui.components.GlassRoundButton
 import androidx.compose.ui.unit.sp
 import androidx.media3.common.C
 import com.kyant.backdrop.Backdrop
+import io.github.amatsukiichika.iwaram.i18n.AppLanguage
 import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.ui.components.AnchorMenu
 import io.github.amatsukiichika.iwaram.ui.components.AnchorMenuGeometry
@@ -300,7 +306,13 @@ internal fun formatTime(ms: Long): String {
     val h = totalSec / 3600
     val m = (totalSec % 3600) / 60
     val s = totalSec % 60
-    return if (h > 0) "%d:%02d:%02d".format(h, m, s) else "%d:%02d".format(m, s)
+    // 按界面语言格式化，而不是进程默认 Locale —— 系统语言用非拉丁数字（如阿拉伯语）时，
+    // 中文/英文界面也必须显示 0-9（ui/AGENTS.md：日期/数字用 AppLanguage.locale）。
+    return if (h > 0) {
+        String.format(AppLanguage.locale, "%d:%02d:%02d", h, m, s)
+    } else {
+        String.format(AppLanguage.locale, "%d:%02d", m, s)
+    }
 }
 
 /** 细线条进度条 + 圆形滑块，支持点击定位与拖动。
@@ -316,10 +328,29 @@ private fun SeekBar(
     modifier: Modifier = Modifier
 ) {
     val frac = if (durationMs > 0) (currentMs().toFloat() / durationMs).coerceIn(0f, 1f) else 0f
+    // 无读屏语义的自绘进度条：TalkBack/Switch Access 既无法聚焦也不能改进度。
+    // contentDescription 供聚焦播报，progressBarRangeInfo 给出当前百分比，
+    // setProgress 把“增大/减小”动作换算回 seek —— 与点击/拖动走同一个 onSeek。
+    // 文案在组合期取好（语义 lambda 不参与重组，语言切换要跟着本条重组刷新）。
+    val seekDescription = tr("播放进度", "Playback position")
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(28.dp)
+            // 48dp 是最小可点目标：行内其他图标按钮已是 48dp，行高不变，
+            // 细线/滑块的视觉尺寸与位置也不变（都在 Box 内居中）。
+            .height(48.dp)
+            .semantics {
+                contentDescription = seekDescription
+                progressBarRangeInfo = ProgressBarRangeInfo(frac, 0f..1f)
+                setProgress { target ->
+                    if (durationMs > 0) {
+                        onSeek((target.coerceIn(0f, 1f) * durationMs).toLong())
+                        true
+                    } else {
+                        false
+                    }
+                }
+            }
             .pointerInput(durationMs) {
                 detectTapGestures { offset ->
                     if (durationMs > 0 && size.width > 0) {

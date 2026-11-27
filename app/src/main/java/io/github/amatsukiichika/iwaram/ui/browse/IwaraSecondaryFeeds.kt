@@ -68,6 +68,7 @@ import io.github.amatsukiichika.iwaram.data.loadDownloadHistory
 import io.github.amatsukiichika.iwaram.data.loadPendingDownloads
 import io.github.amatsukiichika.iwaram.data.removeDownloadHistory
 import io.github.amatsukiichika.iwaram.data.removePendingDownload
+import io.github.amatsukiichika.iwaram.i18n.AppLanguage
 import io.github.amatsukiichika.iwaram.i18n.tr
 import io.github.amatsukiichika.iwaram.ui.FastScrollbarBasic
 import io.github.amatsukiichika.iwaram.ui.components.debugAwareErrorText
@@ -78,7 +79,6 @@ import kotlinx.coroutines.withContext
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-import java.util.Locale
 
 /** 收藏覆盖层（从「我的」页进入）：顶栏返回 + 视频/图片分段。 */
 @Composable
@@ -190,9 +190,11 @@ private fun FavoriteImagesGrid(cvm: IwaraClientViewModel, actions: IwaraNavActio
 
 /* ---------- 下载列表：左"正在下载"右"已完成" ---------- */
 
-// DateTimeFormatter 不可变、线程安全：共享的 SimpleDateFormat 一旦被多线程并发 format 会输出
-// 错乱结果（PlayerDiagnostics 的注释里有同款告诫），改用 java.time 消除这颗埋雷。
-private val downloadTimeFormat = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm", Locale.getDefault())
+// 格式化器按当前界面语言构建：AppLanguage 可在运行中切换，静态缓存会锁死首次语言；
+// DateTimeFormatter 不可变、线程安全，每次新建也没有共享 SimpleDateFormat 的并发问题。
+private fun downloadTimeText(epochMs: Long): String =
+    DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm", AppLanguage.locale)
+        .format(Instant.ofEpochMilli(epochMs).atZone(ZoneId.systemDefault()))
 
 /** 下载列表覆盖层：药丸滑块切换 正在下载/已完成，列表带基础滚动条。 */
 @Composable
@@ -453,11 +455,7 @@ private fun DownloadHistoryList(cvm: IwaraClientViewModel, modifier: Modifier = 
                             buildString {
                                 if (entry.quality.isNotBlank()) append(entry.quality)
                                 append(" · ")
-                                append(
-                                    downloadTimeFormat.format(
-                                        Instant.ofEpochMilli(entry.time).atZone(ZoneId.systemDefault())
-                                    )
-                                )
+                                append(downloadTimeText(entry.time))
                             },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -621,9 +619,9 @@ private suspend fun removeHistoryAndFile(
 }
 
 internal fun formatBytes(bytes: Long): String = when {
-    bytes >= 1L shl 30 -> String.format("%.2f GB", bytes / (1L shl 30).toFloat())
-    bytes >= 1L shl 20 -> String.format("%.1f MB", bytes / (1L shl 20).toFloat())
-    bytes >= 1L shl 10 -> String.format("%.0f KB", bytes / (1L shl 10).toFloat())
+    bytes >= 1L shl 30 -> "%.2f GB".format(AppLanguage.locale, bytes / (1L shl 30).toFloat())
+    bytes >= 1L shl 20 -> "%.1f MB".format(AppLanguage.locale, bytes / (1L shl 20).toFloat())
+    bytes >= 1L shl 10 -> "%.0f KB".format(AppLanguage.locale, bytes / (1L shl 10).toFloat())
     else -> bytes.toString() + " B"
 }
 

@@ -2,8 +2,8 @@ package io.github.amatsukiichika.iwaram.ui.components
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -52,7 +52,8 @@ import androidx.compose.ui.unit.dp
  * 值（[value] / `onValueChange`）即时跟手，只有画出来的位置用短弹簧追上
  * （`dampingRatio = 1f, stiffness = 1400f`）；两个动画值只在 `drawBehind` 的 lambda 里读。
  *
- * 交互与 M3 一致：按下即生效（点哪跳哪）、可拖、值域 0f..1f；触控高度 ≥32dp。
+ * 交互与 M3 一致：点击（按下后原地抬起）跳到点击处；拖动要越过**水平**触摸阈值才接管
+ * （竖直滑动留给外层滚动容器，不会被滑条吞掉）；值域 0f..1f；触控高度 ≥32dp。
  */
 @Composable
 fun AppSlider(
@@ -74,6 +75,10 @@ fun AppSlider(
     val density = LocalDensity.current
     var widthPx by remember { mutableIntStateOf(0) }
     var dragging by remember { mutableStateOf(false) }
+    // "按下"与"拖动"分开记：tap 检测负责按下的起止，拖动检测负责拖动期间保持；
+    // 两者任一为真圆点就放大（避免两种手势各自收尾时互相覆盖状态）。
+    var pressed by remember { mutableStateOf(false) }
+    val thumbPressed = pressed || dragging
 
     /** 常态 / 按下直径（px）。 */
     val thumbBasePx = with(density) { thumbSize.toPx() }
@@ -87,7 +92,7 @@ fun AppSlider(
      * 写成 `by` 会在组合期解包，按下/松手的每一帧都会重组调用方。
      */
     val thumbPxState = animateFloatAsState(
-        targetValue = if (dragging) thumbPressedPx else thumbBasePx,
+        targetValue = if (thumbPressed) thumbPressedPx else thumbBasePx,
         animationSpec = spring(dampingRatio = 0.62f, stiffness = 700f),
         label = "appSliderThumb"
     )
@@ -115,21 +120,28 @@ fun AppSlider(
             .onSizeChanged { widthPx = it.width }
             .semantics { progressBarRangeInfo = ProgressBarRangeInfo(fraction, 0f..1f) }
             .pointerInput(Unit) {
-                awaitEachGesture {
-                    val down = awaitFirstDown(requireUnconsumed = false)
-                    dragging = true
-                    onValueChange(fractionOf(down.position.x))
-                    val id = down.id
-                    while (true) {
-                        val event = awaitPointerEvent()
-                        val change = event.changes.firstOrNull { it.id == id } ?: break
-                        if (!change.pressed) break
-                        onValueChange(fractionOf(change.position.x))
+                // 点击跳转：按下后原地抬起才算点击；手势被外层滚动接管时 detectTapGestures 自动取消。
+                detectTapGestures(
+                    onPress = {
+                        pressed = true
+                        tryAwaitRelease()
+                        pressed = false
+                    },
+                    onTap = { position -> onValueChange(fractionOf(position.x)) }
+                )
+            }
+            .pointerInput(Unit) {
+                // 拖动：先等水平方向的触摸阈值（与 M3 滑条一致）。竖滑留给外层 LazyColumn，
+                // 未过阈值前不消费、不改值 —— 否则设置页从滑条上起手的滚动会被整段吞掉。
+                detectHorizontalDragGestures(
+                    onDragStart = { dragging = true },
+                    onDragEnd = { dragging = false },
+                    onDragCancel = { dragging = false },
+                    onHorizontalDrag = { change, _ ->
                         change.consume()
+                        onValueChange(fractionOf(change.position.x))
                     }
-                    // 松手：圆点弹回常态大小（位置由跟手弹簧自己收尾，不需要额外归零）。
-                    dragging = false
-                }
+                )
             }
     ) {
         // ---- 轨道 / 蓝条 / 白点：全部在绘制相位画（读动画值不重组；见类注释"读法纪律"）----

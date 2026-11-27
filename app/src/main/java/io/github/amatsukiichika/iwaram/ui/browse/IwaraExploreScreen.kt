@@ -465,6 +465,12 @@ fun ImagesGrid(cvm: IwaraClientViewModel, actions: IwaraNavActions, bottomPaddin
     // 首拉失败也不重试。守卫防循环：items 非空不 force（FeedPager 的 force=true 会
     // 从第 0 页重拉），loading 中不重复触发；翻页交给 InfiniteGrid.onLoadMore。
     val session by cvm.session.collectAsStateWithLifecycle()
+    // 图片流需要登录：未登录时给登录入口，而不是一句"暂无图片"让人以为站点没内容。
+    // （与订阅段同一个 LoginRequiredPanel；顶栏刷新在 VM 的 loadMoreImages 里同样被拦。）
+    if (!session.loggedIn && !session.checking) {
+        LoginRequiredPanel(tr("图片流需要登录后使用", "Sign in to use the image feed"))
+        return
+    }
     LaunchedEffect(session.loggedIn) {
         if (session.loggedIn && cvm.images.value.let { it.items.isEmpty() && !it.loading }) {
             cvm.loadMoreImages(force = true)
@@ -500,6 +506,11 @@ fun PostsList(cvm: IwaraClientViewModel, actions: IwaraNavActions, bottomPadding
     val state by cvm.posts.collectAsStateWithLifecycle()
     // 同 ImagesGrid，登录感知 key + 防循环守卫。
     val session by cvm.session.collectAsStateWithLifecycle()
+    // 同 ImagesGrid：帖子流同样需要登录，未登录时给出登录入口。
+    if (!session.loggedIn && !session.checking) {
+        LoginRequiredPanel(tr("帖子流需要登录后使用", "Sign in to use the posts feed"))
+        return
+    }
     LaunchedEffect(session.loggedIn) {
         if (session.loggedIn && cvm.posts.value.let { it.items.isEmpty() && !it.loading }) {
             cvm.loadMorePosts(force = true)

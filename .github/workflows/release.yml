@@ -4,20 +4,26 @@ on:
   push:
     tags: ['v*']
 
+# Read-only by default; the publish job alone is granted the write scope it needs.
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  release:
+  build:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      previous_tag: ${{ steps.version.outputs.previous_tag }}
     steps:
       # Full history so all tags are available when computing the release-notes base.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
 
@@ -33,14 +39,14 @@ jobs:
           fi
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v6
+        uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6
         with:
           distribution: temurin
           java-version: '17'
           cache: gradle
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '24'
 
@@ -50,12 +56,13 @@ jobs:
         run: node scripts/check.mjs
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v4
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4
 
       - name: Install SDK packages
         run: sdkmanager "platforms;android-37.2" "build-tools;36.0.0"
 
       - name: Check tag matches gradle.properties
+        id: version
         env:
           TAG_NAME: ${{ github.ref_name }}
         run: |
@@ -95,16 +102,19 @@ jobs:
             exit 1
           fi
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           # Base for the compare link: the newest stable tag before this one, so a stable release's
           # link covers everything since the previous stable (RC tags skipped; an RC's link covers
           # the full delta since the last stable).
           # || true guards against grep's no-match exit under pipefail on the first release.
           PREVIOUS_TAG="$(git tag --list 'v*' --sort=-creatordate | grep -ve '-' | grep -Fvx "v$VERSION" | head -n1 || true)"
           echo "PREVIOUS_TAG=$PREVIOUS_TAG" >> "$GITHUB_ENV"
+          echo "previous_tag=$PREVIOUS_TAG" >> "$GITHUB_OUTPUT"
 
       - name: Lint
         run: ./gradlew :app:lintDebug --no-daemon
 
+      # The keystore exists only in this job; the publish job receives the finished APK instead.
       - name: Restore signing material
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
@@ -153,10 +163,37 @@ jobs:
           cp app/build/outputs/apk/release/app-release.apk "IwaraM-$VERSION-arm64-v8a.apk"
           sha256sum "IwaraM-$VERSION-arm64-v8a.apk" > "IwaraM-$VERSION-arm64-v8a.apk.sha256"
 
+      - name: Upload release assets
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: release-assets
+          path: |
+            IwaraM-*.apk
+            IwaraM-*.apk.sha256
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # Only CHANGELOG.md is needed here, for the release body.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Download release assets
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: release-assets
+
       # Curated release body: the CHANGELOG section for this version (or [Unreleased] while an RC
       # has no versioned section), the APK name and checksum, and a compare link to the previous
       # stable tag. No commit list: the CHANGELOG is the list.
       - name: Build release body
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+          PREVIOUS_TAG: ${{ needs.build.outputs.previous_tag }}
         run: |
           section() {
             awk -v header="## [$1]" 'index($0, header) == 1 { flag = 1; next } /^## / { flag = 0 } flag' CHANGELOG.md
@@ -182,7 +219,7 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3
         with:
           files: |
             IwaraM-*.apk

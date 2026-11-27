@@ -5,7 +5,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 
-const SKIP_DIRS = new Set([".git", "node_modules", "dist", "build", "out", "coverage", ".venv", "__pycache__", ".artifacts"]);
+const SKIP_DIRS = new Set([".git", "node_modules", "dist", "build", "out", "coverage", ".venv", "__pycache__", ".artifacts", ".local"]);
 const argRoot = process.argv.indexOf("--root");
 const ROOT = resolve(argRoot !== -1 ? process.argv[argRoot + 1] : process.cwd());
 

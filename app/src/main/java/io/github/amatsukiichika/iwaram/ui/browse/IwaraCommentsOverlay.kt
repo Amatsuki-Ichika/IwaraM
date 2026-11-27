@@ -33,6 +33,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -103,6 +104,23 @@ fun CommentsPanel(
     Column(modifier.navigationBarsPadding().imePadding()) {
         Box(Modifier.weight(1f).fillMaxWidth()) {
         val commentsListState = rememberLazyListState()
+        // 滚到接近底部自动拉下一页（与 InfiniteGrid 同一套判据）：评论状态本身按
+        // (type, targetId) 分槽、页码/到底/错误都在里面，这里只负责触发。
+        // 没有这段时列表永远停在第一页（PAGE_LIMIT = 32 条），热门作品的旧评论看不到。
+        // state 是快照状态；items.size/loading/endReached/error 作为 remember key 驱动重算。
+        val shouldLoadMore by remember(state.items.size, state.loading, state.endReached, state.error) {
+            derivedStateOf {
+                if (state.items.isEmpty() || state.loading || state.endReached || state.error != null) {
+                    return@derivedStateOf false
+                }
+                val info = commentsListState.layoutInfo
+                val last = info.visibleItemsInfo.lastOrNull()?.index ?: return@derivedStateOf false
+                last >= info.totalItemsCount - 3
+            }
+        }
+        LaunchedEffect(shouldLoadMore) {
+            if (shouldLoadMore) cvm.loadMoreComments(type, targetId)
+        }
         LazyColumn(
             state = commentsListState,
             modifier = Modifier.fillMaxSize(),
@@ -155,6 +173,25 @@ fun CommentsPanel(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(vertical = 24.dp)
                     )
+                }
+            }
+            // 尾部状态行：手动翻页入口 + 到底提示。出错时不显示（由上面的错误行提供「重试」），
+            // 避免失败后自动翻页与错误提示互相覆盖。
+            if (state.items.isNotEmpty() && !state.loading && state.error == null) {
+                item(key = "__footer__") {
+                    Box(Modifier.fillMaxWidth().padding(vertical = 12.dp), Alignment.Center) {
+                        if (state.endReached) {
+                            Text(
+                                tr("没有更多评论了", "No more comments"),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        } else {
+                            TextButton(onClick = { cvm.loadMoreComments(type, targetId) }) {
+                                Text(tr("加载更多评论", "Load more comments"))
+                            }
+                        }
+                    }
                 }
             }
         }

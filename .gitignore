@@ -27,9 +27,11 @@ keystore/
 *.ap_
 *.dex
 *.class
+/dist/
 
 # AI agent workspace config (local tooling only)
 .zcode/
+/.local/
 
 # OS / editor
 .DS_Store

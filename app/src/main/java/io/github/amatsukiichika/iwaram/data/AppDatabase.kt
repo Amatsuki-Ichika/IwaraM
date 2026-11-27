@@ -78,6 +78,16 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * 全部迁移的**唯一清单**：生产 [get] 与迁移测试共用。
+         *
+         * 以前三个迁移测试各自手抄一份 addMigrations(...) 列表，测试独自成立 ——
+         * 新增迁移只加进 get() 或只加进测试都不会变红，真实升级却在用户机器上崩
+         * （"A migration from X to Y was required but not found"）。现在只有这一份。
+         */
+        internal val MIGRATIONS: Array<Migration> =
+            arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
@@ -88,7 +98,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "iwara_manager.db"
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                    .addMigrations(*MIGRATIONS)
                     .build().also { INSTANCE = it }
             }
     }

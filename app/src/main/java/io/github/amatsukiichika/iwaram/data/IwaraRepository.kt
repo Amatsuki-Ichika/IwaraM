@@ -641,8 +641,9 @@ class IwaraRepository(
     internal val watchHistoryLimit = 500
 
     /**
-     * 扫描导入的攒批大小 —— 每这么多个新文件做一次批量 upsert
-     * （= 一次写库事务 + 一次 observeAll 失效），见 [importFolder] 内注释。
+     * 扫描导入的攒批大小 —— 每这么多个新文件做一次批量 upsert，
+     * 同一批的元数据也是先全部拉完再一次事务批写（每批各一次失效，而不是每文件一次），
+     * 见 [importFolder] 与 [VideoDao.applyFetchedMetadataBatch] 内注释。
      */
     internal val importBatchSize = 20
 

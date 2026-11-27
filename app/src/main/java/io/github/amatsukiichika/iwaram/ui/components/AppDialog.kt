@@ -64,6 +64,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.github.amatsukiichika.iwaram.LocalAppRepository
 import io.github.amatsukiichika.iwaram.R
 import io.github.amatsukiichika.iwaram.i18n.tr
 import kotlinx.coroutines.delay
@@ -137,12 +139,15 @@ fun AppDialog(
     if (!windowShown) return
 
     val dialog = remember { AppDialogWindow(anchorView) }
+    // 截图保护：弹窗是独立窗口，FLAG_SECURE 不会从 Activity 窗口继承 —— 按仓库设置同步到本窗口。
+    val screenshotProtection by LocalAppRepository.current.screenshotProtection.collectAsStateWithLifecycle()
     // 系统栏图标外观跟随主题（浅色主题 = 深色图标，暗色自动翻转）。
     val lightStatusBars = MaterialTheme.colorScheme.background.luminance() > 0.5f
     SideEffect {
-        // 每次重组重申窗口全屏 + 下发系统栏外观 + 更新返回键语义。
+        // 每次重组重申窗口全屏 + 下发系统栏外观 + 更新返回键语义 + 截图保护。
         dialog.updateWindowSize()
         dialog.syncSystemBars(lightStatusBars)
+        dialog.syncScreenshotProtection(screenshotProtection)
         dialog.onBackPressed = {
             if (currentDismissOnOutside) currentOnDismiss()
         }
@@ -464,6 +469,16 @@ private class AppDialogWindow(
                 isAppearanceLightStatusBars = lightStatusBars
                 isAppearanceLightNavigationBars = lightStatusBars
             }
+        }
+    }
+
+    /** 截图保护：FLAG_SECURE 是窗口级标记，独立弹窗必须自己同步（关闭设置时清除）。 */
+    fun syncScreenshotProtection(enabled: Boolean) {
+        val window = window ?: return
+        if (enabled) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
         }
     }
 

@@ -17,13 +17,14 @@ overlays, so the player never took part in the rule.
 The player participates in stack ordering through its entry sequence (`playerSeq`) although it
 is not an overlay entry. `authorNavPlan` in `ui/browse/IwaraPageStack.kt` decides where an author
 page goes: with no page for that profile in the stack the new page is pushed on top of the player
-and the player keeps playing underneath; with an existing page the overlays above it are popped,
-and the player is closed only when it is the layer being popped, that is when `playerSeq` is
-greater than that page's sequence. `MainActivity.openAuthorProfile` is the only entry point for
-author pages; the player's author tap no longer closes the player. An existing author page is
-reused and never rewritten, and one author never gets two pages. When any page covers the player,
-the player pauses; it does not resume on its own. Player visibility remains a separate flag and
-the player is still a single slot: opening another video replaces the current one.
+and the player stays loaded underneath but pauses while covered; with an existing page the
+overlays above it are popped, and the player is closed only when it is the layer being popped,
+that is when `playerSeq` is greater than that page's sequence. `MainActivity.openAuthorProfile` is
+the only entry point for author pages; the player's author tap no longer closes the player. An
+existing author page is reused and never rewritten, and one author never gets two pages. When any
+page covers the player, the player pauses; it does not resume on its own. Player visibility remains
+a separate flag and the player is still a single slot: opening another video replaces the current
+one.
 
 ## Alternatives considered
 

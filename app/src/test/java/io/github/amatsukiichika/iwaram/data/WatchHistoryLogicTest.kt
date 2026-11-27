@@ -89,35 +89,48 @@ class WatchHistoryLogicTest {
 
     /* ---------- historyGroupLabel（B 站样式分组头）---------- */
 
+    /** 固定时区 + 固定日期：断言不依赖机器时区，也不会在真实午夜跨日时漂移。 */
+    private val fixedToday = java.time.LocalDate.of(2026, 11, 26)
+
     private fun millisOf(date: java.time.LocalDate, hour: Int): Long =
-        date.atStartOfDay(java.time.ZoneId.systemDefault()).plusHours(hour.toLong()).toInstant().toEpochMilli()
+        date.atStartOfDay(java.time.ZoneOffset.UTC).plusHours(hour.toLong()).toInstant().toEpochMilli()
 
     @Test
     fun `分组头 今天`() {
-        val now = millisOf(java.time.LocalDate.now(), 12)
-        assertEquals("今天", historyGroupLabel(millisOf(java.time.LocalDate.now(), 1), now))
+        val now = millisOf(fixedToday, 12)
+        assertEquals("今天", historyGroupLabel(millisOf(fixedToday, 1), now, java.time.ZoneOffset.UTC))
     }
 
     @Test
     fun `分组头 昨天（跨日）`() {
-        val today = java.time.LocalDate.now()
-        val now = millisOf(today, 12)
+        val now = millisOf(fixedToday, 12)
         // 昨天 23:59 与 今天 00:01 是相邻两天：对 now=今天中午而言，昨天任意时刻都是"昨天"
-        assertEquals("昨天", historyGroupLabel(millisOf(today.minusDays(1), 23), now))
+        assertEquals(
+            "昨天",
+            historyGroupLabel(millisOf(fixedToday.minusDays(1), 23), now, java.time.ZoneOffset.UTC)
+        )
     }
 
     @Test
     fun `分组头 今年更早只带月日`() {
-        val today = java.time.LocalDate.now()
-        val now = millisOf(today, 12)
-        val label = historyGroupLabel(millisOf(today.minusDays(10), 8), now)
-        org.junit.Assert.assertTrue("应形如 M月d日：$label", label.matches(Regex("\\d{1,2}月\\d{1,2}日")))
+        val now = millisOf(fixedToday, 12)
+        val label = historyGroupLabel(
+            millisOf(fixedToday.minusDays(10), 8),
+            now,
+            java.time.ZoneOffset.UTC
+        )
+        // 2026-11-26 往前 10 天 = 2026-11-16
+        assertEquals("11月16日", label)
     }
 
     @Test
     fun `分组头 跨年带年份`() {
-        val now = millisOf(java.time.LocalDate.now(), 12)
-        val label = historyGroupLabel(millisOf(java.time.LocalDate.of(2020, 5, 4), 8), now)
+        val now = millisOf(fixedToday, 12)
+        val label = historyGroupLabel(
+            millisOf(java.time.LocalDate.of(2020, 5, 4), 8),
+            now,
+            java.time.ZoneOffset.UTC
+        )
         assertEquals("2020年5月4日", label)
     }
 

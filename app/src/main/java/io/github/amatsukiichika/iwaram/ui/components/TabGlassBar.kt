@@ -9,7 +9,6 @@ import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import android.os.Build
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -21,6 +20,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -52,6 +53,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlin.math.abs
@@ -453,6 +455,8 @@ fun TabGlassBar(
             Row(
                 modifier = Modifier
                     .fillMaxSize()
+                    // 三个 tab 互斥：selectableGroup + Role.Tab 让读屏能报出当前选中项。
+                    .selectableGroup()
                     // 内容层**滞后**（框体先动、内容略跟不上）—— 见 [CONTENT_LAG_DP]。
                     //   缩放（形变）由父层统一施加，所以图标/文字/药丸与框体是"一致"地拉伸的；
                     //   这里只额外加一点位移滞后，让"拉扯"看得见。
@@ -469,12 +473,16 @@ fun TabGlassBar(
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxSize()
-                            // 单击切换。
+                            // 单击切换；选中态同时下发给无障碍服务（selectable + Role.Tab），
+                            //   不再只靠颜色/实心图标区分。
                             // indication = null —— 默认水波纹在玻璃上就是"扩散噪点"。
-                            .clickable(
+                            .selectable(
+                                selected = index == selected,
                                 interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                                indication = null
-                            ) { onSelect(index) }
+                                indication = null,
+                                role = Role.Tab,
+                                onClick = { onSelect(index) }
+                            )
                     ) {
                         GlassTabIcon(item, selected = lit)
                         Text(

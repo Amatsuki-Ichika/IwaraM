@@ -110,7 +110,9 @@ fun RelationsOverlay(
 
     fun load(force: Boolean) {
         val st = state
-        if (st.loading || (!force && st.end) || (!force && st.loaded && st.items.isNotEmpty())) return
+        // 只挡"同一页的重复请求"与"已到底"。不能再加"已加载过就不翻页"：
+        //   那会让底部「加载更多」永远无效，列表卡在第 0 页（PAGE_LIMIT = 32 个用户）。
+        if (st.loading || (!force && st.end)) return
         // 首拉必须 page 0（同 loadVideos 的说明：page 初值 0 + `page + 1` 会漏掉第一页）。
         val next = if (force || !st.loaded) 0 else st.page + 1
         state = st.copy(loading = true, error = null)

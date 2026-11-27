@@ -23,7 +23,6 @@ import io.github.amatsukiichika.iwaram.data.linkIwaraId
 import io.github.amatsukiichika.iwaram.data.loadPendingDownloads
 import io.github.amatsukiichika.iwaram.data.removePendingDownload
 import io.github.amatsukiichika.iwaram.i18n.AppLanguage
-import io.github.amatsukiichika.iwaram.i18n.LanguageMode
 import io.github.amatsukiichika.iwaram.i18n.tr
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -693,7 +692,11 @@ class VideoViewModel(private val app: IwaraApp) : ViewModel() {
         val videos: List<VideoEntity>,
         val tags: List<TagEntity>,
         val sort: SortMode,
-        val lang: LanguageMode,
+        /**
+         * **解析后的语言**（[AppLanguage.isEnglish]），不是 LanguageMode：
+         * SYSTEM 模式下设备语言变化时 mode 仍是 SYSTEM，只比 mode 会让快照带着旧语言存活整个会话。
+         */
+        val english: Boolean,
         val authors: List<AuthorBucket>,
         val times: List<TimeBucket>,
         val folders: List<FolderBucket>,
@@ -710,7 +713,7 @@ class VideoViewModel(private val app: IwaraApp) : ViewModel() {
             cached.videos === rawVideos &&
             cached.tags === rawTags &&
             cached.sort == sortMode &&
-            cached.lang == AppLanguage.mode
+            cached.english == AppLanguage.isEnglish
         ) {
             return cached
         }
@@ -718,7 +721,7 @@ class VideoViewModel(private val app: IwaraApp) : ViewModel() {
             videos = rawVideos,
             tags = rawTags,
             sort = sortMode,
-            lang = AppLanguage.mode,
+            english = AppLanguage.isEnglish,
             authors = buildAuthors(),
             times = buildTimeBuckets(),
             folders = buildFolders(),
@@ -727,7 +730,8 @@ class VideoViewModel(private val app: IwaraApp) : ViewModel() {
     }
 
     /**
-     * 当前筛选条件下的最终列表 + 被全局筛选器隐藏的条数（`first` = 列表，`second` = 隐藏数）。
+     * 当前筛选条件下的最终列表 + 被任意一层（搜索 / 分类 / 全局筛选）隐藏的条数
+     * （`first` = 列表，`second` = 隐藏数；见 [hiddenByFilterCount]）。
      *
      * 用 Pair 回传而不是写成员字段：本方法跑在后台计算线程、可能有两代并存在飞，
      * 成员字段会被后一代覆写，而 Pair 是这个调用的**局部结果**，天然不会有这个竞态。
@@ -761,16 +765,18 @@ class VideoViewModel(private val app: IwaraApp) : ViewModel() {
         // 全局筛选器：**最后一道**关卡 —— 无论上面筛成什么，最终列表都要过它。
         //   放在排序之前：先筛小再排，排序的开销也跟着降。取键统一走 `localVideoKeys`
         //   （名字 = 标题/文件名，标签 = tagsCsv），与在线各页共用同一套规则（见 data/GlobalFilter.kt）。
-        val beforeFilter = list.size
-        // 「隐藏未匹配的视频」：放在 beforeFilter 快照之后 —— 被藏数量计入 hiddenByFilter，
-        //   空态能显示"已隐藏 N 项"；只藏 iwaraId 为空的（有 id 但元数据未拉到的是瞬态，不藏）。
+        val rawCount = rawVideos.size
+        // 「隐藏未匹配的视频」：只藏 iwaraId 为空的（有 id 但元数据未拉到的是瞬态，不藏）。
         if (hideUnmatched) {
             list = list.filter { !it.iwaraId.isNullOrBlank() }
         }
         list = list.filterBy(GlobalFilterHolder.value, ::localVideoKeys)
 
         // 排序统一走 VideoSorter 纯函数（可单元测试）。
-        return VideoSorter.sortVideos(list, sortMode) to (beforeFilter - list.size)
+        // 「被藏掉的条数」按**原始库 → 最终列表**的总差值算：搜索词 / 分类筛选 / 隐藏未匹配 /
+        //   全局筛选器任何一层藏掉的都计入（见 hiddenByFilterCount），空态才不会把"搜索无结果"
+        //   误显示成"库里还没有视频，请导入"。
+        return VideoSorter.sortVideos(list, sortMode) to hiddenByFilterCount(rawCount, list.size)
     }
 
     /** 取相对路径的第一段作为顶级文件夹，用于文件夹分类；根目录视频归入 ROOT_FOLDER_KEY。 */
@@ -931,3 +937,13 @@ class VideoViewModel(private val app: IwaraApp) : ViewModel() {
         val UNKNOWN_AUTHOR_NAME: String get() = tr("未指定", "Unspecified")
     }
 }
+
+/**
+ * 本地库空态的"被筛掉条数"：**原始库条数 − 当前可见条数**。
+ *
+ * 搜索词、作者/标签/文件夹/时间/分级筛选、隐藏未匹配、全局筛选器任何一层藏掉的都计入。
+ * 只统计最后一道全局筛选会让"搜索没有结果"被误显示成"还没有视频，导入本地文件夹开始管理"
+ * （连同导入按钮），用户会以为搜索坏了。原始库为空时结果恒为 0。
+ */
+internal fun hiddenByFilterCount(rawCount: Int, visibleCount: Int): Int =
+    (rawCount - visibleCount).coerceAtLeast(0)
