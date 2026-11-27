@@ -47,6 +47,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicLong
 
 /** Iwara 客户端模块的统一 ViewModel：会话、信息流分页、互动、播放解析、下载。 */
 class IwaraClientViewModel(internal val app: IwaraApp) : ViewModel() {
@@ -71,6 +72,14 @@ class IwaraClientViewModel(internal val app: IwaraApp) : ViewModel() {
     val session: StateFlow<SessionState> = _session.asStateFlow()
 
     /**
+     * 账号代际：每次账号级状态清空（登出、会话失效、换号登录）自增。
+     *
+     * 网络请求返回时若代际已变，结果属于上一个账号，必须丢弃，不能写回 [_session]、
+     * 播放列表或 IwaraSession 的持久化身份（见 [accountResultIsStale]）。
+     */
+    internal val sessionEpoch = AtomicLong(0)
+
+    /**
      * 本 ViewModel 注册到 [IwaraSession] 的监听器。
      *
      * 会话过期回调只有单槽（[IwaraSession.listener]），所以这里必须保存引用，
@@ -79,6 +88,9 @@ class IwaraClientViewModel(internal val app: IwaraApp) : ViewModel() {
      */
     private val sessionListener = object : IwaraSession.Listener {
         override fun onSessionExpired() {
+            // 先同步推进代际：网络线程上的 401 已经清掉凭证，任何在途 refreshSession /
+            // loadPlaylists 都必须立刻变成过期结果，不能等 resetAccountScopedState 的协程。
+            sessionEpoch.incrementAndGet()
             _session.value = _session.value.copy(
                 loggedIn = false, username = "", userId = "", avatarUrl = null,
                 message = tr("登录已过期，请重新登录", "Your session has expired. Please sign in again")
@@ -117,10 +129,12 @@ class IwaraClientViewModel(internal val app: IwaraApp) : ViewModel() {
     }
 
     private suspend fun refreshSession(loadRemote: Boolean) {
+        val epoch = sessionEpoch.get()
         val username = IwaraSession.savedUsername().orEmpty()
         val userId = IwaraSession.savedUserId().orEmpty()
         try {
             IwaraSession.ensureAccessToken()
+            if (accountResultIsStale(epoch, sessionEpoch.get())) return
             var avatar: String? = IwaraSession.savedAvatarUrl()
             var name = username
             var id = userId
@@ -139,6 +153,7 @@ class IwaraClientViewModel(internal val app: IwaraApp) : ViewModel() {
                     DiagLog.log("Browse", "拉取当前用户信息失败，回退本地缓存: ${e.javaClass.simpleName}")
                     null
                 }
+                if (accountResultIsStale(epoch, sessionEpoch.get())) return
                 if (me != null) {
                     val account = me.asAccount()
                     // 展示名优先取昵称（与本地页"过滤：<昵称>"一致），handle 单独留作接口参数。
@@ -156,8 +171,10 @@ class IwaraClientViewModel(internal val app: IwaraApp) : ViewModel() {
                         IwaraClient.avatarUrl(IwaraClient.call { it.profile(handle) }.avatarRef)
                     }.getOrNull()
                 }
+                if (accountResultIsStale(epoch, sessionEpoch.get())) return
                 if (!avatar.isNullOrBlank()) IwaraSession.saveUserInfo(name, id, avatar)
             }
+            if (accountResultIsStale(epoch, sessionEpoch.get())) return
             _session.value = _session.value.copy(
                 loggedIn = true,
                 checking = false,
@@ -168,6 +185,7 @@ class IwaraClientViewModel(internal val app: IwaraApp) : ViewModel() {
             )
         } catch (t: Throwable) {
             if (t is CancellationException) throw t
+            if (accountResultIsStale(epoch, sessionEpoch.get())) return
             // 网络不可用等临时故障：保留已显示的缓存内容继续用；
             // token 彻底失效时 IwaraSession 会清空并回调 onSessionExpired 回到登录页。
             _session.value = _session.value.copy(checking = false, message = describeIwaraError(t))
@@ -221,6 +239,8 @@ class IwaraClientViewModel(internal val app: IwaraApp) : ViewModel() {
      * 必须同步加进这里，否则就是一个新的串号入口。
      */
     internal fun resetAccountScopedState() {
+        // 先把代际推进一步：在途的账号级请求返回后据此丢弃结果。
+        sessionEpoch.incrementAndGet()
         // 订阅流：数据不再可信，下次加载强制从第 0 页重拉。
         subscribedPager.reset()
         subscribedTrusted = false
@@ -230,7 +250,7 @@ class IwaraClientViewModel(internal val app: IwaraApp) : ViewModel() {
         // 播放列表（含断网兜底缓存的展示态）。
         _playlists.value = PlaylistsState()
         // 评论面板挂着目标作品与回复态，属于具体会话上下文。
-        _comments.value = CommentsState()
+        commentsByTarget.clear()
         // 关注/点赞的本地快照；打底标记一并复位，换账号后必须重新拉一次"我关注了谁"。
         followStates.clear()
         followSeeded = false
@@ -775,8 +795,18 @@ class IwaraClientViewModel(internal val app: IwaraApp) : ViewModel() {
         val replyTo: IwaraComment? = null
     )
 
-    internal val _comments = MutableStateFlow(CommentsState())
-    val comments: StateFlow<CommentsState> = _comments.asStateFlow()
+    /**
+     * 评论状态按 (type, targetId) 分槽。
+     *
+     * 多个评论面板会同时常驻组合（覆盖层栈内所有页 + 播放页评论 tab），单一槽位会让
+     * 后打开的面板覆盖先打开的面板：返回后显示的仍是别人目标的列表，发送也会发到别人目标。
+     * 每个面板只读写自己键下的状态；账号切换时整体清空。
+     */
+    internal val commentsByTarget = mutableStateMapOf<String, CommentsState>()
+
+    /** 取某个目标的评论状态；没有条目时返回只带目标标识的空态（面板可直接渲染）。 */
+    internal fun commentsState(type: String, targetId: String): CommentsState =
+        commentsByTarget[commentsKey(type, targetId)] ?: CommentsState(type = type, targetId = targetId)
 
     /* ---------- 播放列表 ---------- */
 
@@ -811,3 +841,15 @@ class IwaraClientViewModel(internal val app: IwaraApp) : ViewModel() {
         internal const val FOLLOW_SEED_MAX_PAGES = 5
     }
 }
+
+/**
+ * 账号级请求返回时是否已经过期。
+ *
+ * 发起请求时记下 [IwaraClientViewModel.sessionEpoch]，返回后与当前代际比较；
+ * 登出、换号或会话失效都会推进代际，过期结果必须整体丢弃（不写 UI、不写缓存、不写身份）。
+ */
+internal fun accountResultIsStale(capturedEpoch: Long, currentEpoch: Long): Boolean =
+    capturedEpoch != currentEpoch
+
+/** 评论状态的槽位键：目标类型 + 目标 id。 */
+internal fun commentsKey(type: String, targetId: String): String = "$type|$targetId"

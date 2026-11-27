@@ -190,8 +190,8 @@ internal fun documentExists(context: Context, uri: Uri): Boolean? {
             .query(uri, arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID), null, null, null)
             ?.use { cursor -> cursor.moveToFirst() && !cursor.isNull(0) }
     } catch (e: Exception) {
-        // 含 SecurityException：授权状态此刻不可判定，留给下次扫描，绝不据此删行。
-        DiagLog.log("Repo", "扫描收尾查询失败，按仍在处理：" + e.javaClass.simpleName)
+        // 含 SecurityException：授权状态此刻不可判定，按未知处理，绝不据此删行或判坏。
+        DiagLog.log("Repo", "文档存在性查询失败，按未知处理：" + e.javaClass.simpleName)
         null
     }
 }

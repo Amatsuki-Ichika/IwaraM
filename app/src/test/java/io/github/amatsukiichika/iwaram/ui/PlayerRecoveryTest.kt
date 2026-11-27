@@ -41,6 +41,22 @@ class PlayerRecoveryTest {
     }
 
     @Test
+    fun `http retry budget stops at the cap so a dead cdn url cannot loop forever`() {
+        assertTrue(mayRetryHttp(0))
+        assertTrue(mayRetryHttp(1))
+        assertFalse("第 3 次必须交给错误面板", mayRetryHttp(2))
+        assertEquals(2, PLAYER_HTTP_RETRY_MAX_ATTEMPTS)
+    }
+
+    @Test
+    fun `http retry budget is keyed on the video, not on the signed url`() {
+        // 重新解析必然换签名地址；按 URL 复位会让坏 CDN 地址无限重试。
+        assertFalse(shouldResetRetryBudget("iwara:abc123", "iwara:abc123"))
+        assertTrue(shouldResetRetryBudget("iwara:abc123", "iwara:def456"))
+        assertTrue(shouldResetRetryBudget("local:content://a", "local:content://b"))
+    }
+
+    @Test
     fun `an error must not turn a playing session into a paused one after recovery`() {
         assertTrue(
             "错误回调时 isPlaying 已经为 false，但用户意图是继续播放",

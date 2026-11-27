@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The file-integrity check no longer deletes videos imported into the library. It verifies only files it can confirm this app downloaded; an imported file, or one whose download record cannot be confirmed, is reported as unverifiable and left untouched, while a damaged download is still replaced once.
+
+- Signing out while a token refresh is in flight no longer restores the previous account: a late refresh, profile load or playlist load is dropped, and a stored access token without a refresh token is never restored.
+
+- A repeated download tap no longer starts a second worker on the same video, and an automatic integrity repair that cannot start in the background leaves a failure card instead of crashing the app.
+
+- The beta update channel now receives later release candidates of the same version instead of stopping at the first one.
+
+- In fullscreen the playing file stays protected from deletion, the source-management sheet opens above the whole page instead of inside the 16:9 video box, and a CDN URL rejected with 403/404/410 is retried a bounded number of times.
+
+- Comments stay attached to their own video, image or post when several panels are open; author pages no longer crash when a page repeats an item; a tag tapped in a playlist or the player always searches online; and the replies label is fully bilingual.
+
 ## [0.2.3] - 2026-11-22
 
 Downloads are verified, resumable and checkable, the app can update itself, and the player, scrollbars and overlays get their finishing pass.

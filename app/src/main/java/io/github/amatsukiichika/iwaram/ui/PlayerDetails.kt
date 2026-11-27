@@ -52,7 +52,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -129,13 +128,6 @@ internal fun DetailsSection(
     onCheckIntegrity: (() -> Unit)? = null
 ) {
     var tab by rememberSaveable { mutableStateOf(DetailsTab.INTRO) }
-
-    // 登记"播放页当前挂着哪份本地文件"：删除路径据此拒绝删正在播放的那一份。
-    // 详情区是播放页打开期间本层稳定存在的入口（全屏时页面隐藏详情区，登记随之清空）。
-    DisposableEffect(video.localUri) {
-        LocalPlayback.currentUri = video.localUri.takeIf { it.isNotBlank() }
-        onDispose { LocalPlayback.currentUri = null }
-    }
 
     // 药丸条是悬浮的玻璃条，简介列表从它底下穿过。
     // 结构与本地页 / Iwara 页一致（见 GlassBackdrop.GlassTopBar）：底 = 内容（挂背景源），

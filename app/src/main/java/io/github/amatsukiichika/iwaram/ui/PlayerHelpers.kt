@@ -165,15 +165,30 @@ internal const val PLAYER_RECOVERY_MAX_ATTEMPTS = 2
 internal fun mayRetryRecovery(attempts: Int): Boolean = attempts < PLAYER_RECOVERY_MAX_ATTEMPTS
 
 /**
- * 重试预算是否该清零 —— **只在换片源时**清零。
+ * 重试预算是否该清零 —— **只在片源身份变化时**清零。
  *
  * 曾经的实现把 `modelRetries = 0` 直接写进装片 effect，而 1000（帧队列错位）的恢复路径正是
  * "换代重建 → 新实例 → 走标准装片"，于是每一轮都把自己的额度还回去，`< 2` 的上限形同不存在：
  * 同一部片可以无限重建播放器实例。判据必须用**跨重建存活**的片源身份（`mediaUrl`），
  * 不能用随换代归零的 `preparedUrl`/`preparedVideoKey`。
  */
-internal fun shouldResetRecoveryBudget(previousMediaUrl: String?, currentMediaUrl: String): Boolean =
-    previousMediaUrl != currentMediaUrl
+internal fun shouldResetRecoveryBudget(previousMediaUrl: String?, currentMediaUrl: String?): Boolean =
+    shouldResetRetryBudget(previousMediaUrl, currentMediaUrl)
+
+/**
+ * 通用预算复位判据：身份变了才清零。
+ *
+ * HTTP 403/404/410 的自动重解析必须传**作品键**（watchKey），不能传签名地址 ——
+ * 每次重新签名都会得到新 URL，用 URL 当身份等于每次都退还额度，坏 CDN 地址会无限重试。
+ */
+internal fun shouldResetRetryBudget(previousKey: String?, currentKey: String?): Boolean =
+    previousKey != currentKey
+
+/** 403/404/410 自动重解析每条片源的额度。 */
+internal const val PLAYER_HTTP_RETRY_MAX_ATTEMPTS = 2
+
+/** 这条片源还有没有自动重解析额度。 */
+internal fun mayRetryHttp(httpRetries: Int): Boolean = httpRetries < PLAYER_HTTP_RETRY_MAX_ATTEMPTS
 
 /**
  * 换代重建后要不要继续播放。

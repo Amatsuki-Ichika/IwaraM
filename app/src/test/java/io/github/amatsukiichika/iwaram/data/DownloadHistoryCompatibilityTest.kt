@@ -3,6 +3,7 @@ package io.github.amatsukiichika.iwaram.data
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Test
 
@@ -30,6 +31,8 @@ class DownloadHistoryCompatibilityTest {
         assertNull(entry.totalBytes)
         assertNull(entry.verifiedAt)
         assertNull(entry.verifyNote)
+        // 旧记录无法证明文件由本应用写入，默认不参与完整性自动修复。
+        assertFalse(entry.downloadedByApp)
     }
 
     @Test
@@ -42,6 +45,7 @@ class DownloadHistoryCompatibilityTest {
             success = true,
             localUri = "content://doc/video.mp4",
             totalBytes = 1048576L,
+            downloadedByApp = true,
             verifiedAt = 1700000005000L,
             verifyNote = "ok"
         )

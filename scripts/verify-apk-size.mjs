@@ -50,17 +50,32 @@ if (found.length === 0) {
 }
 
 const results = [];
+if (UPDATE) {
+  // Record the current size for every found APK, including variants that already have a
+  // baseline entry. The old code only assigned in the "no entry" branch, so a grown APK
+  // printed OVER, rewrote the unchanged baseline and still exited 0 — the documented
+  // repair for a size increase silently did nothing.
+  for (const apk of found.sort((a, b) => a.variant.localeCompare(b.variant))) {
+    const previous = limits[apk.variant];
+    limits[apk.variant] = apk.size;
+    results.push(
+      previous === undefined
+        ? `RECORD   ${apk.variant} ${apk.size.toLocaleString()} B`
+        : `UPDATE   ${apk.variant} ${previous.toLocaleString()} B -> ${apk.size.toLocaleString()} B`
+    );
+  }
+  writeFileSync(BASELINE, `${JSON.stringify({ toleranceRatio: tolerance, artifacts: limits }, null, 2)}\n`);
+  console.log(results.join("\n"));
+  console.log(`\nUPDATED ${relative(ROOT, BASELINE)}; commit it with the change that altered the APK.`);
+  process.exit(0);
+}
+
 let failed = false;
 for (const apk of found.sort((a, b) => a.variant.localeCompare(b.variant))) {
   const limit = limits[apk.variant];
   if (limit === undefined) {
-    if (UPDATE) {
-      results.push(`RECORD   ${apk.variant} ${apk.size.toLocaleString()} B`);
-      limits[apk.variant] = apk.size;
-    } else {
-      results.push(`UNKNOWN  ${apk.variant} ${apk.size.toLocaleString()} B — no baseline entry; run with --update and commit the baseline`);
-      failed = true;
-    }
+    results.push(`UNKNOWN  ${apk.variant} ${apk.size.toLocaleString()} B — no baseline entry; run with --update and commit the baseline`);
+    failed = true;
     continue;
   }
   const ceiling = Math.floor(limit * (1 + tolerance));
@@ -71,13 +86,6 @@ for (const apk of found.sort((a, b) => a.variant.localeCompare(b.variant))) {
   } else {
     results.push(`OK       ${apk.variant} ${apk.size.toLocaleString()} B / ceiling ${ceiling.toLocaleString()} B`);
   }
-}
-
-if (UPDATE) {
-  writeFileSync(BASELINE, `${JSON.stringify({ toleranceRatio: tolerance, artifacts: limits }, null, 2)}\n`);
-  console.log(results.join("\n"));
-  console.log(`\nUPDATED ${relative(ROOT, BASELINE)}; commit it with the change that altered the APK.`);
-  process.exit(0);
 }
 
 console.log(results.join("\n"));

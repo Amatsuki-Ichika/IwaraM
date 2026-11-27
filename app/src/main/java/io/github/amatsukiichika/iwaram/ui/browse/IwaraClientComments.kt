@@ -47,23 +47,26 @@ import kotlinx.coroutines.withContext
 
 /* ---------- 评论域（原 IwaraClientViewModel 方法，扩展函数形式） ---------- */
 fun IwaraClientViewModel.openComments(type: String, id: String, title: String) {
-        _comments.value = IwaraClientViewModel.CommentsState(type = type, targetId = id, title = title)
-        loadMoreComments(force = true)
+        commentsByTarget[commentsKey(type, id)] =
+            IwaraClientViewModel.CommentsState(type = type, targetId = id, title = title)
+        loadMoreComments(type, id, force = true)
     }
 
-fun IwaraClientViewModel.loadMoreComments(force: Boolean = false) {
-        val current = _comments.value
+fun IwaraClientViewModel.loadMoreComments(type: String, targetId: String, force: Boolean = false) {
+        val key = commentsKey(type, targetId)
+        val current = commentsByTarget[key] ?: return
         if (current.loading || current.targetId.isBlank()) return
         if (!force && current.endReached) return
         val page = if (force) 0 else current.page + 1
-        _comments.value = current.copy(loading = true, error = if (force) null else current.error)
+        commentsByTarget[key] = current.copy(loading = true, error = if (force) null else current.error)
         viewModelScope.launch {
             try {
                 val items = IwaraClient.call {
-                    it.comments(current.type, current.targetId, page, IwaraClientViewModel.PAGE_LIMIT, null).results.orEmpty()
+                    it.comments(type, targetId, page, IwaraClientViewModel.PAGE_LIMIT, null).results.orEmpty()
                 }
-                val snapshot = _comments.value
-                _comments.value = snapshot.copy(
+                // 面板已关闭或账号已切换：条目没了就丢弃结果，绝不把旧账号/旧目标的列表写回来。
+                val snapshot = commentsByTarget[key] ?: return@launch
+                commentsByTarget[key] = snapshot.copy(
                     items = if (page == 0) items else snapshot.items + items,
                     page = page,
                     loading = false,
@@ -71,64 +74,90 @@ fun IwaraClientViewModel.loadMoreComments(force: Boolean = false) {
                 )
             } catch (t: Throwable) {
                 if (t is CancellationException) throw t
-                _comments.value = _comments.value.copy(loading = false, error = describeIwaraError(t))
+                val snapshot = commentsByTarget[key] ?: return@launch
+                commentsByTarget[key] = snapshot.copy(loading = false, error = describeIwaraError(t))
             }
         }
     }
 
-fun IwaraClientViewModel.loadReplies(comment: IwaraComment, scope: CoroutineScope? = null, onDone: (List<IwaraComment>, String?) -> Unit) {
+fun IwaraClientViewModel.loadReplies(
+        comment: IwaraComment,
+        type: String,
+        targetId: String,
+        scope: CoroutineScope? = null,
+        onDone: (List<IwaraComment>, String?) -> Unit
+    ) {
         (scope ?: viewModelScope).launch {
             try {
                 val items = IwaraClient.call {
-                    it.comments(_comments.value.type, _comments.value.targetId, 0, IwaraClientViewModel.PAGE_LIMIT, comment.id)
+                    it.comments(type, targetId, 0, IwaraClientViewModel.PAGE_LIMIT, comment.id)
                         .results.orEmpty()
                 }
                 onDone(items, null)
             } catch (t: Throwable) {
+                if (t is CancellationException) throw t
                 onDone(emptyList(), describeIwaraError(t))
             }
         }
     }
 
-fun IwaraClientViewModel.setReplyTo(comment: IwaraComment?) {
-        _comments.value = _comments.value.copy(replyTo = comment)
+fun IwaraClientViewModel.setReplyTo(type: String, targetId: String, comment: IwaraComment?) {
+        val key = commentsKey(type, targetId)
+        val current = commentsByTarget[key] ?: return
+        commentsByTarget[key] = current.copy(replyTo = comment)
     }
 
-fun IwaraClientViewModel.sendComment(text: String, scope: CoroutineScope? = null, onDone: (String?) -> Unit) {
-        val current = _comments.value
+fun IwaraClientViewModel.sendComment(
+        type: String,
+        targetId: String,
+        text: String,
+        scope: CoroutineScope? = null,
+        onDone: (String?) -> Unit
+    ) {
+        val key = commentsKey(type, targetId)
+        val current = commentsByTarget[key] ?: return
         val body = text.trim()
         if (body.isEmpty()) return
         if (!_session.value.loggedIn) {
             onDone(tr("请先登录后再评论", "Sign in to comment"))
             return
         }
-        _comments.value = current.copy(sending = true)
+        commentsByTarget[key] = current.copy(sending = true)
         (scope ?: viewModelScope).launch {
             try {
                 IwaraClient.call {
                     it.postComment(
-                        current.type,
-                        current.targetId,
+                        type,
+                        targetId,
                         IwaraCommentBody(body = body, parentId = current.replyTo?.id)
                     )
                 }.ensureIwaraSuccess()
-                // 服务端返回体不含评论对象，直接重载第一页以展示新评论。
-                _comments.value = _comments.value.copy(sending = false, replyTo = null)
-                loadMoreComments(force = true)
+                // 服务端返回体不含评论对象，直接重载该目标的第一页以展示新评论。
+                commentsByTarget[key]?.let { commentsByTarget[key] = it.copy(sending = false, replyTo = null) }
+                loadMoreComments(type, targetId, force = true)
                 onDone(null)
             } catch (t: Throwable) {
                 if (t is CancellationException) throw t
-                _comments.value = _comments.value.copy(sending = false)
+                commentsByTarget[key]?.let { commentsByTarget[key] = it.copy(sending = false) }
                 onDone(describeIwaraError(t))
             }
         }
     }
 
-fun IwaraClientViewModel.deleteComment(commentId: String, scope: CoroutineScope? = null, onDone: (String?) -> Unit) {
+fun IwaraClientViewModel.deleteComment(
+        type: String,
+        targetId: String,
+        commentId: String,
+        scope: CoroutineScope? = null,
+        onDone: (String?) -> Unit
+    ) {
+        val key = commentsKey(type, targetId)
         (scope ?: viewModelScope).launch {
             try {
                 IwaraClient.call { it.deleteComment(commentId) }.ensureIwaraSuccess()
-                _comments.value = _comments.value.copy(items = _comments.value.items.filterNot { it.id == commentId })
+                commentsByTarget[key]?.let { snapshot ->
+                    commentsByTarget[key] = snapshot.copy(items = snapshot.items.filterNot { it.id == commentId })
+                }
                 onDone(null)
             } catch (t: Throwable) {
                 if (t is CancellationException) throw t

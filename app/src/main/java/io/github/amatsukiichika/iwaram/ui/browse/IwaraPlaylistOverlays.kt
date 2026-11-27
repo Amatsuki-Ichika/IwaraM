@@ -250,7 +250,7 @@ fun PlaylistDetailOverlay(
                             }
                         }
                     },
-                    onTagClick = { actions.openTagVideos(it) }
+                    onTagClick = { actions.openTagVideos(it, true) }
                 )
             }
         }

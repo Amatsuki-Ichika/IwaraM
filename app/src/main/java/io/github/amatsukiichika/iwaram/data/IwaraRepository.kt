@@ -652,25 +652,28 @@ class IwaraRepository(
      * 校验某个视频的本地下载文件是否完整（L1 长度 + L2 MP4 顶层 box 结构，见 [walkMp4]）。
      *
      * 纯读取：不改动文件、不删记录；是否重下由调用方按 [shouldAutoRedownload] 决定。
+     * 只核对下载服务自己写入的文件：扫描导入、手动关联或下载记录已被裁剪的文件没有
+     * 可比对的下载记录 → [IntegrityVerdict.NoDownloadRecord]，既不检查也不删除（见 ADR 0036）。
      * 本地文件不存在 → [IntegrityVerdict.Broken] + [BrokenReason.Missing]；
      * 读不出来（IO / 权限 / 长度不可知）→ [IntegrityVerdict.Unknown] —— 不确定不等于坏，不触发重下。
-     *
-     * 本地路径优先取下载历史（那里有服务端期望长度 totalBytes），历史被裁剪时回退到视频库行。
      */
     suspend fun checkDownloadedIntegrity(videoId: String): IntegrityVerdict = withContext(Dispatchers.IO) {
-        val entry = loadDownloadHistory().firstOrNull { it.videoId == videoId && it.success }
-        val uriString = entry?.localUri ?: videoRowByIwaraId(videoId)?.localUri?.toString()
-        if (uriString.isNullOrBlank()) {
-            return@withContext IntegrityVerdict.Broken(BrokenReason.Missing, "没有该视频的本地文件记录")
-        }
+        val entry = integrityCheckEntry(loadDownloadHistory(), videoId)
+            ?: return@withContext IntegrityVerdict.NoDownloadRecord
+        val uriString = entry.localUri ?: return@withContext IntegrityVerdict.NoDownloadRecord
         val uri = runCatching { Uri.parse(uriString) }.getOrNull()
             ?: return@withContext IntegrityVerdict.Broken(BrokenReason.Missing, "本地文件地址无法解析")
-        val document = runCatching { DocumentFile.fromSingleUri(context, uri) }.getOrNull()
-        if (document == null || !document.exists()) {
-            return@withContext IntegrityVerdict.Broken(BrokenReason.Missing, "本地文件已不存在")
+        // 不用 DocumentFile.exists()：它吞掉查询异常并返回 false，会把暂时的 provider
+        // 故障误判成"文件已丢失"进而触发删除重下。三值查询只信确定的 false。
+        when (documentExists(context, uri)) {
+            false -> return@withContext IntegrityVerdict.Broken(BrokenReason.Missing, "本地文件已不存在")
+            null -> return@withContext IntegrityVerdict.Unknown
+            true -> Unit
         }
+        val document = runCatching { DocumentFile.fromSingleUri(context, uri) }.getOrNull()
+            ?: return@withContext IntegrityVerdict.Unknown
         val length = resolveLocalFileLength(uri, document) ?: return@withContext IntegrityVerdict.Unknown
-        walkMp4(length, entry?.totalBytes) { offset, size -> readLocalFileBytes(uri, offset, size) }
+        walkMp4(length, entry.totalBytes) { offset, size -> readLocalFileBytes(uri, offset, size) }
     }
 
     /** 读本地文件长度；SAF 部分 provider 的 DocumentFile.length() 返回 0/-1，回退到文件描述符长度。 */
@@ -728,6 +731,14 @@ data class DownloadHistoryEntry(
     val localUri: String? = null,
     /** 下载完成时服务端报告的文件长度（Content-Length），供之后的完整性校验比对；旧记录为 null。 */
     val totalBytes: Long? = null,
+    /**
+     * 这份文件是否由 DownloadService 自己写入。
+     *
+     * 只有真正下载/续传完成才为 true；"本地库已有，跳过下载"的快捷路径为 false。
+     * 旧 JSON 没有该字段 → 默认 false：来源无法证明的历史记录不参与完整性自动修复，
+     * 宁可不修也不删用户文件（见 ADR 0036）。
+     */
+    val downloadedByApp: Boolean = false,
     /** 最近一次完整性校验的时间戳（毫秒）；从未校验过为 null，旧记录天然缺省。 */
     val verifiedAt: Long? = null,
     /** 最近一次完整性校验的机器可读结论（见 [integrityVerdictNote]）：ok / unknown / broken:xxx。 */

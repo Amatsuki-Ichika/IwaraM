@@ -53,7 +53,8 @@ internal sealed interface IntegrityCheckEffect {
  *
  * 规则：确认只在等待确认阶段生效（运行中重复点无效）；取消一律关掉弹窗，运行中额外要求取消 IO；
  * 只有运行中收到的结果才算数 —— 取消后才回来的结果必须丢掉，否则会凭空弹出一个结果框；
- * 只有 [IntegrityVerdict.Broken] 触发自动重下（[IntegrityVerdict.Unknown] 不确定，不动文件）。
+ * 只有 [IntegrityVerdict.Broken] 触发自动重下（[IntegrityVerdict.Unknown] 与
+ * [IntegrityVerdict.NoDownloadRecord] 不动文件）。
  */
 internal fun reduceIntegrityCheck(
     state: IntegrityCheckState?,
@@ -98,8 +99,8 @@ internal fun reduceIntegrityCheck(
 /* ---------- 文案（双语：中文在前，英文在后） ---------- */
 
 internal fun integrityConfirmMessage(target: IntegrityCheckTarget): String = tr(
-    "将读取《${target.title}》的文件结构并核对大小。不会修改或删除文件，大文件可能需要几十秒。",
-    "This reads the structure of \"${target.title}\" and checks its size. The file is not modified or deleted; large files can take a while."
+    "将读取《${target.title}》的文件结构并核对大小。检查本身不改动文件；若发现本应用下载的文件已损坏，会自动删除并重新下载。大文件可能需要几十秒。",
+    "This reads the structure of \"${target.title}\" and checks its size. The check itself does not modify the file; if a file downloaded by this app is damaged, it will be deleted and downloaded again. Large files can take a while."
 )
 
 internal fun integrityRunningTitle(): String = tr("正在检查…", "Checking…")
@@ -114,6 +115,7 @@ internal fun integrityResultTitle(verdict: IntegrityVerdict): String = when (ver
     IntegrityVerdict.Ok -> tr("文件完整", "File is intact")
     is IntegrityVerdict.Broken -> tr("文件已损坏", "File is damaged")
     IntegrityVerdict.Unknown -> tr("无法确认", "Could not verify")
+    IntegrityVerdict.NoDownloadRecord -> tr("无法核对", "Cannot verify")
 }
 
 internal fun integrityResultMessage(
@@ -141,6 +143,11 @@ internal fun integrityResultMessage(
     IntegrityVerdict.Unknown -> tr(
         "读取失败，无法确认文件是否完整。文件没有被改动，可以稍后再试。",
         "Could not read the file, so its integrity is unknown. Nothing was modified; try again later."
+    )
+
+    IntegrityVerdict.NoDownloadRecord -> tr(
+        "没有该文件的下载记录：它可能不是由本应用下载的，或下载记录已被清理。文件没有被改动，也不会被删除。",
+        "There is no download record for this file: it may not have been downloaded by this app, or the record was cleared. Nothing was modified or deleted."
     )
 }
 

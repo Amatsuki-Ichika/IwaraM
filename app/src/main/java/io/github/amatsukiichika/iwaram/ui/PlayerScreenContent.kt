@@ -296,18 +296,8 @@ internal fun PlayerContent(
                     modifier = Modifier.align(Alignment.Center)
                 )
 
-                // 源文件管理（本地多源）：盖在播放页之上。
-                if (showSources && localSources.size > 1) {
-                    PlayerSourcesSheet(
-                        sources = localSources,
-                        currentUri = video.localUri,
-                        onDismiss = { showSources = false },
-                        onDelete = { chosen, deleteFiles ->
-                            showSources = false
-                            onDeleteLocalSources(chosen, deleteFiles)
-                        }
-                    )
-                }
+                // 源文件管理（本地多源）不在视频框内渲染：它需要整页高度与最上层层级，
+                // 见下方根 Box 里的 PlayerSourcesSheet。
 
                 // 顶部短条渐变遮罩：返回 + 标题（淡入淡出 + 上滑动画）。
                 // 圆钮背后是刚才那一帧真实视频（见 rememberPlayerLiveBackdrop），
@@ -380,6 +370,20 @@ internal fun PlayerContent(
                     onCheckIntegrity = onCheckIntegrity
                 )
             }
+        }
+
+        // 源文件管理面板画在整页之上：放在 16:9 视频框里时，手机非全屏只有约 200dp 高，
+        // 底部开关与确认按钮永远拿不到高度；同时它必须盖住顶/底控制栏（两者 zIndex 1f）。
+        if (showSources && localSources.size > 1) {
+            PlayerSourcesSheet(
+                sources = localSources,
+                currentUri = video.localUri,
+                onDismiss = { showSources = false },
+                onDelete = { chosen, deleteFiles ->
+                    showSources = false
+                    onDeleteLocalSources(chosen, deleteFiles)
+                }
+            )
         }
     }
 }

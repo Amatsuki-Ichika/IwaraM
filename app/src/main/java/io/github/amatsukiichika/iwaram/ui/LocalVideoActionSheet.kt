@@ -77,11 +77,12 @@ internal fun LocalVideoActionsSheet(
             ActionSheetEntry(
                 icon = Icons.Filled.CheckCircle,
                 title = tr("检查文件完整性", "Check file integrity"),
-                subtitle = tr("核对本地文件是否完整", "Verifies the local file is intact"),
+                subtitle = tr("只核对本应用下载的文件", "Checks files downloaded by this app"),
                 onClick = { onCheckIntegrity.invoke() }
             )
         }
-        // 分组线：上面是"不删东西"的操作，下面是会改库/删文件的。
+        // 分组线：上面是关联/检查类入口（检查本身只读；坏下载的重下按确认框文案执行），
+        // 下面是会改库/删文件的操作。
         HorizontalDivider(
             color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)

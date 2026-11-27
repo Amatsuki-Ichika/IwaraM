@@ -163,7 +163,7 @@ private fun CheckStageRow(text: String, stage: CheckStage) {
     }
 }
 
-/** 结果弹窗：通过 / 损坏 / 无法确认三种，图标、配色与按钮数量都不同。 */
+/** 结果弹窗：通过 / 损坏 / 无法核对（读取失败或无下载记录），图标、配色与按钮数量都不同。 */
 @Composable
 private fun ResultDialog(
     verdict: IntegrityVerdict,
@@ -210,7 +210,7 @@ private fun ResultDialog(
             )
         }
 
-        IntegrityVerdict.Unknown -> AppDialog(
+        IntegrityVerdict.Unknown, IntegrityVerdict.NoDownloadRecord -> AppDialog(
             visible = true,
             onDismiss = onDismissResult,
             title = integrityResultTitle(verdict),

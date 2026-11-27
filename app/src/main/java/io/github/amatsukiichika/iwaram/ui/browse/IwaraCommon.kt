@@ -101,7 +101,11 @@ data class IwaraNavActions(
     /** 作者页头部的「关注 / 粉丝」计数 → 关系列表二级页。 */
     val openRelations: (userId: String, kind: RelationKind) -> Unit,
     val openSettings: () -> Unit,
-    val openTagVideos: (String) -> Unit,
+    /**
+     * 点 tag 筛选。[online] 必须由调用点按来源传入：
+     * 在线卡片给的是 tag 标识、本地卡片给的是 tag 名字，不能按当前 tab 猜。
+     */
+    val openTagVideos: (tag: String, online: Boolean) -> Unit,
     val close: () -> Unit
 )
 
