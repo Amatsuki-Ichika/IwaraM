@@ -193,7 +193,9 @@ private fun SectionMarkerCell(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val isCurrent by remember(label) {
+    // 键要带上 [currentLabel] 这个 State 实例：markers 重建时 FastScrollbar 会换一个新的
+    // derivedStateOf（闭包持有新 firstIndex 边界），只看 label 会让同名的旧 cell 一直读旧 State。
+    val isCurrent by remember(label, currentLabel) {
         derivedStateOf { !dragging() && currentLabel.value == label }
     }
     Box(

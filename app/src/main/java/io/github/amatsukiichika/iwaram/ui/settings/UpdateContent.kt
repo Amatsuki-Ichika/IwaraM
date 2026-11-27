@@ -98,7 +98,7 @@ private fun updateStatusSummary(
 /**
  * 设置页的「应用内更新」分组。
  *
- * 只负责展示与转发操作：当前版本、通道、自动检查、频率、立即检查、忽略版本。
+ * 只负责展示与转发操作：当前版本、通道、自动检查、频率、立即检查、取消忽略。
  * 下载/安装的进度与结果由 [UpdateDialogs] 展示，本组合函数不弹窗。
  */
 @Composable
@@ -226,21 +226,8 @@ fun UpdateContent(updateVm: UpdateViewModel, modifier: Modifier = Modifier) {
                 }
             }
         }
-        val available = (current as? UpdateUiState.Available)?.release
-        if (available != null) {
-            AppEntryCard(
-                title = tr("忽略此版本", "Ignore this version"),
-                subtitle = tr(
-                    "不再提示此版本 " + available.versionName + "，更新的版本仍会提示",
-                    "Stop prompting for " + available.versionName + "; newer versions still appear"
-                ),
-                trailing = {
-                    TextButton(onClick = updateVm::ignoreCurrentVersion) {
-                        Text(tr("忽略", "Ignore"))
-                    }
-                }
-            )
-        }
+        // 「忽略此版本」只在 Available 弹窗里提供：该状态同时会弹出全屏模态对话框，
+        // 设置页里再放一张同名卡片会被弹窗挡住、永远点不到，是重复入口造成的死代码。
         if (ignoredVersion.isNotBlank()) {
             AppEntryCard(
                 title = tr("已忽略的版本", "Ignored version"),

@@ -1,5 +1,7 @@
 package io.github.amatsukiichika.iwaram.ui.browse
 
+import io.github.amatsukiichika.iwaram.data.IwaraImageItem
+import io.github.amatsukiichika.iwaram.data.IwaraVideoItem
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -102,8 +104,29 @@ class AuthorPageStackTest {
     }
 
     @Test
-    fun `action sheets above the author do not affect the plan`() {
+    fun `video action sheet above the author does not affect the plan`() {
         // 动作面板不占页面栈：回退时它随栈一起弹掉，但不影响"目标作者页 / 是否关播放页"。
+        val stack = listOf(
+            page(1L, profile("alice")),
+            page(2L, IwaraOverlay.VideoActions(IwaraVideoItem()))
+        )
+        val plan = authorNavPlan(stack, playerSeq = 4L, showingPlayer = true, incoming = profile("alice"))
+        assertEquals(AuthorNavPlan.PopTo(targetIndex = 0, closesPlayer = true), plan)
+    }
+
+    @Test
+    fun `image action sheet above the author does not affect the plan`() {
+        val stack = listOf(
+            page(1L, profile("alice")),
+            page(2L, IwaraOverlay.ImageActions(IwaraImageItem()))
+        )
+        val plan = authorNavPlan(stack, playerSeq = 4L, showingPlayer = true, incoming = profile("alice"))
+        assertEquals(AuthorNavPlan.PopTo(targetIndex = 0, closesPlayer = true), plan)
+    }
+
+    @Test
+    fun `ordinary page above the author keeps the same revert target`() {
+        // 普通页面（收藏）不是动作面板：同样只弹掉，不改变回退目标与关播放页判定。
         val stack = listOf(
             page(1L, profile("alice")),
             page(2L, IwaraOverlay.Favorites)

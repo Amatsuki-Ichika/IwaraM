@@ -86,7 +86,7 @@ class GitHubReleaseResultTest {
 
     private fun assetJson(name: String): JSONObject = JSONObject()
         .put("name", name)
-        .put("browser_download_url", "https://example.com/$name")
+        .put("browser_download_url", "https://github.com/$name")
 
     private fun releaseJson(tag: String, prerelease: Boolean = false): JSONObject {
         val apk = "IwaraM-" + tag.removePrefix("v") + "-arm64-v8a.apk"

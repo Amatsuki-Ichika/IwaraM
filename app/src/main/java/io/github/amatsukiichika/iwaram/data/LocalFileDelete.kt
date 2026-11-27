@@ -3,6 +3,7 @@ package io.github.amatsukiichika.iwaram.data
 import android.net.Uri
 import androidx.documentfile.provider.DocumentFile
 import io.github.amatsukiichika.iwaram.i18n.tr
+import io.github.amatsukiichika.iwaram.ui.DiagLog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -40,5 +41,13 @@ internal suspend fun IwaraRepository.deleteLocalFile(uriString: String?): String
                 "文件删除被系统拒绝（可能未授予该目录的写入权限）",
                 "The system refused to delete the file (write permission may be missing)"
             )
-        }.getOrElse { it.message ?: it.javaClass.simpleName }
+        }.getOrElse { e ->
+            // 平台异常文案（"Permission denied"/类名）不是双语的，不能直接给用户看；
+            // 技术细节进诊断日志，界面只拿固定的人话文案（review Low-31）。
+            DiagLog.log("Repo", "删除本地文件失败：" + e.javaClass.simpleName)
+            tr(
+                "文件删除失败，请稍后重试",
+                "The file could not be deleted; try again later"
+            )
+        }
     }

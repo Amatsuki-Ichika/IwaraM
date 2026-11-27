@@ -32,6 +32,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.Instant
@@ -583,10 +584,12 @@ class VideoViewModel(private val app: IwaraApp) : ViewModel() {
     fun setQuery(q: String) {
         if (q == query) return
         query = q
-        // 立即回显：只换一个字段，不触发任何重算（输入框必须跟手）。
-        _uiState.value = _uiState.value.copy(query = q)
-        // 让"正在飞"的旧计算作废：否则它落地时会把输入框里的新词回退掉。
+        // 先作废"正在飞"的旧计算，再回显：否则旧计算可能在回显之后、代自增之前落地，
+        // 用旧快照把刚敲的词覆盖回去。
         generation++
+        // 立即回显：只换一个字段，不触发任何重算（输入框必须跟手）。
+        //   update 是 CAS 读改写：与后台重算同时写时不会互相丢更新。
+        _uiState.update { it.copy(query = q) }
         queryJob?.cancel()
         queryJob = viewModelScope.launch {
             delay(QUERY_DEBOUNCE_MS)
@@ -615,7 +618,9 @@ class VideoViewModel(private val app: IwaraApp) : ViewModel() {
                 return@launch
             }
             // 只有最新一代允许写回：乱序完成不能让界面回退到旧列表。
-            if (gen == generation) _uiState.value = next
+            //   代数判断与写回缩进一次 update（CAS）：期间 setQuery 若改了词并递增代，
+            //   重试时该判断会读到新代并原样保留当前状态，刚敲的词不会被旧快照盖掉。
+            _uiState.update { current -> if (gen == generation) next else current }
         }
     }
 

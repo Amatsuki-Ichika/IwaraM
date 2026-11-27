@@ -53,12 +53,13 @@ import coil.compose.AsyncImage
 import androidx.documentfile.provider.DocumentFile
 import io.github.amatsukiichika.iwaram.DownloadService
 import io.github.amatsukiichika.iwaram.DownloadState
-import io.github.amatsukiichika.iwaram.IwaraApp
 import io.github.amatsukiichika.iwaram.LocalAppRepository
 import io.github.amatsukiichika.iwaram.activeDownloadTasks
 import io.github.amatsukiichika.iwaram.pendingToTask
 import io.github.amatsukiichika.iwaram.data.DownloadHistoryEntry
 import io.github.amatsukiichika.iwaram.data.IwaraAccount
+import io.github.amatsukiichika.iwaram.data.IwaraRepository
+import io.github.amatsukiichika.iwaram.data.downloadFailureText
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import io.github.amatsukiichika.iwaram.data.IwaraClient
@@ -309,7 +310,8 @@ private fun ActiveDownloadsList(cvm: IwaraClientViewModel, modifier: Modifier = 
                         }
                         // message 只在带来新信息时占一行：失败原因 / 自动重试倒计时；
                         // 暂停、排队时 message 只是右侧状态标签的复述，跳过。
-                        val msg = task.message
+                        // 失败文案按 code 用当前语言重新取词（旧数据 / 未知 code 回退到 message）。
+                        val msg = downloadFailureText(task.messageCode, task.message)
                         if (!msg.isNullOrBlank() &&
                             (task.state == DownloadState.STATE_FAILED || task.state == DownloadState.STATE_RUNNING)
                         ) {
@@ -344,7 +346,7 @@ private fun ActiveDownloadsList(cvm: IwaraClientViewModel, modifier: Modifier = 
                                         // 文件删失败要**说出来**。
                                         scope.launch {
                                             DownloadService.cancel(task.videoId)
-                                            removePendingCompletely(ctx, task.videoId, task.docUri)
+                                            removePendingCompletely(repo, ctx, task.videoId, task.docUri)
                                                 ?.let { showDownloadToast(ctx, it) }
                                         }
                                     }
@@ -355,7 +357,7 @@ private fun ActiveDownloadsList(cvm: IwaraClientViewModel, modifier: Modifier = 
                                     }
                                     DownloadCardButton(tr("移除", "Remove"), isDestructive = true) {
                                         scope.launch {
-                                            removePendingCompletely(ctx, task.videoId, task.docUri)
+                                            removePendingCompletely(repo, ctx, task.videoId, task.docUri)
                                                 ?.let { showDownloadToast(ctx, it) }
                                         }
                                     }
@@ -460,7 +462,8 @@ private fun DownloadHistoryList(cvm: IwaraClientViewModel, modifier: Modifier = 
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        entry.message?.let { msg ->
+                        // 失败原因按 code 用当前语言重新取词（旧记录没有 code 时回退到落盘文案）。
+                        downloadFailureText(entry.messageCode, entry.message)?.let { msg ->
                             Spacer(Modifier.size(4.dp))
                             Text(
                                 msg,
@@ -514,7 +517,7 @@ private fun DownloadHistoryList(cvm: IwaraClientViewModel, modifier: Modifier = 
                                         // 删记录是同步的（SharedPreferences.apply 的改动立刻对读可见），
                                         // 但要先把**磁盘文件保留**、只清记录，所以统一走 suspend 版本保证顺序。
                                         scope.launch {
-                                            removeHistoryOnly(ctx, entry.videoId)
+                                            removeHistoryOnly(repo, entry.videoId)
                                             history = withContext(Dispatchers.IO) { repo.loadDownloadHistory() }
                                         }
                                     }
@@ -528,7 +531,7 @@ private fun DownloadHistoryList(cvm: IwaraClientViewModel, modifier: Modifier = 
                                         // 返回值丢掉又立刻刷新，就成了"条目消失了、文件还在"
                                         // （即"删除文件无法使用"）。
                                         scope.launch {
-                                            val err = removeHistoryAndFile(ctx, entry.videoId, entry.localUri)
+                                            val err = removeHistoryAndFile(repo, ctx, entry.videoId, entry.localUri)
                                             history = withContext(Dispatchers.IO) { repo.loadDownloadHistory() }
                                             err?.let { showDownloadToast(ctx, it) }
                                         }
@@ -578,24 +581,26 @@ private suspend fun deleteDocument(context: android.content.Context, uri: String
 /**
  * 取消/移除未完成任务：删待续记录 + 删半成品文件 + 移除列表条目。
  * 返回 null＝成功；非 null＝**文件没删掉**的原因（记录已删，调用方可 toast 提示）。
+ *
+ * [repo] 由调用方从 [LocalAppRepository] 取（组合期读一次）：UI 层不再把 Application
+ * 强转成 IwaraApp 去拿仓库，见 ui/AGENTS.md 的取数路径。
  */
 private suspend fun removePendingCompletely(
+    repo: IwaraRepository,
     context: android.content.Context,
     videoId: String,
     docUri: String?
 ): String? {
-    val app = context.applicationContext as IwaraApp
-    withContext(Dispatchers.IO) { app.repository.removePendingDownload(videoId) }
+    withContext(Dispatchers.IO) { repo.removePendingDownload(videoId) }
     DownloadState.remove(videoId)
-    return deleteDocument(app, docUri)
+    return deleteDocument(context, docUri)
 }
 
 /** 只移除历史/待续记录，**保留磁盘文件**（「移除任务」）。 */
-private suspend fun removeHistoryOnly(context: android.content.Context, videoId: String) {
-    val app = context.applicationContext as IwaraApp
+private suspend fun removeHistoryOnly(repo: IwaraRepository, videoId: String) {
     withContext(Dispatchers.IO) {
-        app.repository.removeDownloadHistory(videoId)
-        app.repository.removePendingDownload(videoId)
+        repo.removeDownloadHistory(videoId)
+        repo.removePendingDownload(videoId)
     }
     DownloadState.remove(videoId)
 }
@@ -605,17 +610,17 @@ private suspend fun removeHistoryOnly(context: android.content.Context, videoId:
  * （不含管理器库条目 —— 库条目由「从库中移除」管理）。
  */
 private suspend fun removeHistoryAndFile(
+    repo: IwaraRepository,
     context: android.content.Context,
     videoId: String,
     localUri: String?
 ): String? {
-    val app = context.applicationContext as IwaraApp
     withContext(Dispatchers.IO) {
-        app.repository.removeDownloadHistory(videoId)
-        app.repository.removePendingDownload(videoId)
+        repo.removeDownloadHistory(videoId)
+        repo.removePendingDownload(videoId)
     }
     DownloadState.remove(videoId)
-    return deleteDocument(app, localUri)
+    return deleteDocument(context, localUri)
 }
 
 internal fun formatBytes(bytes: Long): String = when {

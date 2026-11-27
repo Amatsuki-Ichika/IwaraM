@@ -255,6 +255,10 @@ internal class Anime4kProgram(
         releaseTargets()
         isAllocFailed = false
         if (inputWidth <= 0 || inputHeight <= 0) {
+            // 直通输出按 configure 实际返回的尺寸定：把 outW/outH 同步成输入尺寸，
+            // 否则 renderPassthroughInto 会按放大的目标尺寸落笔，与真实帧缓冲不符。
+            outW = inputWidth
+            outH = inputHeight
             SuperResStatus.reset()
             DiagLog.log(TAG, "configure in=${inputWidth}x${inputHeight} 无效尺寸 → 直通")
             return Size(inputWidth, inputHeight)
@@ -272,7 +276,7 @@ internal class Anime4kProgram(
         val outPixels = outW.toLong() * outH.toLong()
         if (outPixels > SuperRes.MAX_OUTPUT_PIXELS) {
             releaseTargets()
-            isAllocFailed = true
+            markPassthroughOutput(inputWidth, inputHeight)
             val megapixels = String.format(java.util.Locale.US, "%.1f", SuperRes.MAX_OUTPUT_PIXELS / 1_000_000.0)
             SuperResStatus.markDegraded(
                 tr(
@@ -292,7 +296,7 @@ internal class Anime4kProgram(
         val intermediateBytes = intermediateTextureBytes(intermediateNames.size, inputWidth, inputHeight)
         if (intermediateBytes > MAX_INTERMEDIATE_TEXTURE_BYTES) {
             releaseTargets()
-            isAllocFailed = true
+            markPassthroughOutput(inputWidth, inputHeight)
             val needMb = String.format(java.util.Locale.US, "%.0f", intermediateBytes / (1024.0 * 1024.0))
             val limitMb = String.format(
                 java.util.Locale.US,
@@ -312,7 +316,14 @@ internal class Anime4kProgram(
             return Size(inputWidth, inputHeight)
         }
         return try {
-            targets = intermediateNames.associateWith { newTarget(inputWidth, inputHeight) }
+            // 逐张建进 targets（而不是先建完整张 map 再整体赋值）：中途分配失败时，
+            // catch 里的 releaseTargets() 才能回收已经建好的那几张；否则它们只被半成品
+            // map 引用，释放前一直占着显存（低端机反复重试会持续泄漏）。
+            val allocated = LinkedHashMap<String, Target>(intermediateNames.size)
+            targets = allocated
+            intermediateNames.forEach { name ->
+                allocated[name] = newTarget(inputWidth, inputHeight)
+            }
             // 不放大时倍率记 1：chip 只在 >1.01 才显示 "N×"（"SR·修复" 比 "SR·修复 1×" 干净）
             SuperResStatus.activeScale = if (isUpscalingModel) outW.toFloat() / inputWidth else 1f
             SuperResStatus.degraded = false
@@ -329,7 +340,7 @@ internal class Anime4kProgram(
             Log.e(TAG, "中间缓冲分配失败，本模型退回直通", t)
             DiagLog.log(TAG, "中间缓冲分配失败，本模型退回直通: ${t.message}")
             releaseTargets()
-            isAllocFailed = true
+            markPassthroughOutput(inputWidth, inputHeight)
             runCatching {
                 SuperResStatus.markDegraded(describeThrowable(t))
             }
@@ -411,7 +422,10 @@ internal class Anime4kProgram(
 
     /** 把输入原样画进 [fbo]：降级路径的最后一道保险，保证出一帧、不黑屏。 */
     private fun renderPassthroughInto(fbo: Int, inputTexId: Int) {
-        GlUtil.focusFramebufferUsingCurrentContext(fbo, inW, inH)
+        // 按输出帧缓冲的实际尺寸聚焦：放大模型成功运行时是 outW×outH（与末趟一致），
+        // 降级时 configure 已把 outW/outH 改回输入尺寸。只按输入尺寸聚焦会让直通画面
+        // 缩在放大帧缓冲的左下角，其余是残留内容。
+        GlUtil.focusFramebufferUsingCurrentContext(fbo, outW, outH)
         renderSampling(passthrough, listOf("MAIN"), mapOf("MAIN" to inputTexId))
     }
 
@@ -441,9 +455,25 @@ internal class Anime4kProgram(
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
     }
 
+    /**
+     * 降级为直通：configure 返回输入尺寸，输出基准（outW/outH）也同步回输入尺寸，
+     * 直通绘制才会覆盖整张输出帧缓冲（见 [renderPassthroughInto]）。
+     */
+    private fun markPassthroughOutput(inputWidth: Int, inputHeight: Int) {
+        outW = inputWidth
+        outH = inputHeight
+        isAllocFailed = true
+    }
+
     private fun newTarget(w: Int, h: Int): Target {
         val texId = GlUtil.createTexture(w, h, /* useHighPrecision= */ false)
-        val fboId = GlUtil.createFboForTexture(texId)
+        val fboId = try {
+            GlUtil.createFboForTexture(texId)
+        } catch (t: Throwable) {
+            // 纹理已建、FBO 失败：这张纹理还没进 targets，releaseTargets() 收不到，先单独回收
+            runCatching { GlUtil.deleteTexture(texId) }
+            throw t
+        }
         return Target(texId, fboId, w, h)
     }
 

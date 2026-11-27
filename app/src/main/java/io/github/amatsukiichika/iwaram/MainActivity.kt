@@ -240,8 +240,11 @@ private class PlayerResolutionState(
     private val vm: VideoViewModel,
     private val cvm: IwaraClientViewModel,
     private val context: Context,
-    /** debug 开关（回调 lambda 里读不到 CompositionLocal，构造期捕获）。 */
-    private val debugDetails: Boolean,
+    /**
+     * debug 开关**读取器**：回调 lambda 里读不到 CompositionLocal，但也不能在构造期捕获快照 ——
+     * 运行中切换开发者模式后，下一次解析失败必须立即按新开关取轨（面板与 Toast 同一来源）。
+     */
+    private val debugDetails: () -> Boolean,
 ) {
     var currentVideo by mutableStateOf<VideoEntity?>(null)
     var currentOnline by mutableStateOf<IwaraVideoItem?>(null)
@@ -271,7 +274,7 @@ private class PlayerResolutionState(
             if (gen != resolveGen) return@resolveOnlineUrl // 过期回调：静默丢弃
             if (result == null) {
                 // Toast 与面板副行按 debug 开关取轨（关=人话，开=技术细节原样）
-                val text = err?.let { if (debugDetails) it else friendlyIwaraError(it) }
+                val text = err?.let { if (debugDetails()) it else friendlyIwaraError(it) }
                     ?: tr("无法播放该视频", "Unable to play this video")
                 Toast.makeText(context, text, Toast.LENGTH_SHORT).show()
                 resolveError = text
@@ -728,9 +731,10 @@ class MainActivity : ComponentActivity() {
         // currentVideo / 在线解析产物 / 相关推荐等槽都在里面，点赞、地址解析、相关推荐到达时
         // 只重组真正读取它们的调用点，不再重跑整棵 MainContent 函数体。
         // Debug 模式开关：本作用域内所有 Toast / 错误文案的取轨判据
-        //（回调 lambda 里读不到 CompositionLocal，先在组合期捕获）。
+        //（回调 lambda 里读不到 CompositionLocal，故传读取器、调用时再取最新值）。
         val debugDetails by vm.debugDetailsFlow.collectAsStateWithLifecycle()
-        val prs = remember { PlayerResolutionState(vm, cvm, context, debugDetails) }
+        val debugDetailsReader = rememberUpdatedState(debugDetails)
+        val prs = remember { PlayerResolutionState(vm, cvm, context) { debugDetailsReader.value } }
 
         // 播放页作为覆盖层叠在主页之上：返回时主页始终在下方，滑出即可露出真实主页内容。
         var showingPlayer by remember { mutableStateOf(false) }

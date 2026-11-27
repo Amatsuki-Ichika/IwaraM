@@ -37,8 +37,3 @@ definition of done are in the root AGENTS.md; this file only adds what is specif
   `AppLanguage.locale`, not `Locale.getDefault()`.
 - Icon-only buttons need a content description; decorative images need none.
 - Kotlin comments are Simplified Chinese, matching the UI language; do not translate existing ones.
-
-## Formatting
-
-- Do not reformat unrelated code, reorder imports project-wide, or "clean up" white space in a
-  change that does something else. Review noise hides the real diff.

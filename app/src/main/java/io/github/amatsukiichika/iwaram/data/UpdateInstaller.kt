@@ -12,10 +12,12 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
+import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
 import java.io.IOException
+import java.net.ProtocolException
 import java.util.concurrent.TimeUnit
 
 /**
@@ -24,7 +26,7 @@ import java.util.concurrent.TimeUnit
  * 这里不放用户文案：UI 层按类型映射成中英双语提示。
  */
 enum class UpdateInstallFailure {
-    /** 网络不可用、HTTP 非 2xx、下载中断或校验文件拉取失败。 */
+    /** 网络不可用、HTTP 非 2xx、下载中断、校验文件拉取失败，或下载地址被主机白名单拒绝。 */
     NETWORK,
 
     /** 下载完成但 SHA-256 与 Release 附带的校验文件不一致（文件已删除）。 */
@@ -53,6 +55,8 @@ class UpdateInstallException(
  *
  * 网络客户端复用 IwaraClient 的 Dispatcher/ConnectionPool，但不继承注入 Iwara 站点头和
  * Bearer token 的拦截器：APK 与校验文件都在 GitHub 域名上，绝不能带上登录凭据。
+ * 只允许 https 且主机在 [UPDATE_DOWNLOAD_HOSTS] 内的地址；OkHttp 跟随的每一跳重定向
+ * 也会被网络拦截器逐跳重新校验。
  */
 object UpdateInstaller {
 
@@ -71,10 +75,26 @@ object UpdateInstaller {
     /** GitHub 资产名形如 IwaraM-0.2.2-arm64-v8a.apk；只接受安全字符，防路径穿越。 */
     private val APK_FILE_NAME = Regex("[A-Za-z0-9._-]+\\.apk", RegexOption.IGNORE_CASE)
 
+    /**
+     * 逐跳主机白名单：OkHttp 跟随 30x 时，每个重定向后的请求都会重新经过网络拦截器，
+     * 因此指向非白名单主机的 Location 在发请求前就被拒绝。
+     *
+     * 用 [ProtocolException] 而不是普通 IOException：OkHttp 不把它当作可恢复错误，
+     * 不会对同一个被拒地址反复重试；最终仍按 IOException 归为 [UpdateInstallFailure.NETWORK]。
+     */
+    private val hostAllowlistInterceptor = Interceptor { chain ->
+        if (!isAllowedUpdateUrl(chain.request().url)) {
+            throw ProtocolException("update request blocked: host not allowlisted")
+        }
+        chain.proceed(chain.request())
+    }
+
     private val http: OkHttpClient by lazy {
         OkHttpClient.Builder()
             .dispatcher(IwaraClient.sharedDispatcher)
             .connectionPool(IwaraClient.sharedConnectionPool)
+            // 网络拦截器在每一跳请求（含自动跟随的重定向）上执行，逐跳校验主机白名单。
+            .addNetworkInterceptor(hostAllowlistInterceptor)
             .connectTimeout(TIMEOUT_SECONDS, TimeUnit.SECONDS)
             .readTimeout(TIMEOUT_SECONDS, TimeUnit.SECONDS)
             .writeTimeout(TIMEOUT_SECONDS, TimeUnit.SECONDS)
@@ -149,6 +169,22 @@ object UpdateInstaller {
         }
     }
 
+    /**
+     * 构造下载 GET：地址先按 https + 主机白名单收窄，不合法按网络失败处理。
+     *
+     * 解析阶段已校验过，这里再拦一次是给直接构造的 [GitHubRelease]（或将来新的调用方）
+     * 兜底，也让 Request.Builder 不会因非法字符串抛 IllegalArgumentException。
+     */
+    private fun updateRequest(url: String, release: GitHubRelease): Request {
+        val checkedUrl = allowedUpdateUrl(url)
+            ?: throw UpdateInstallException(UpdateInstallFailure.NETWORK, "update URL is not allowlisted")
+        return Request.Builder()
+            .url(checkedUrl)
+            .header("User-Agent", userAgent(release))
+            .get()
+            .build()
+    }
+
     /** 流式下载到 [target]；Content-Length 可得时按已写字节比例回调进度。 */
     // invokeOnCompletion(onCancelling = true) 仍标 internal：公开重载只在 Job 完成后回调，
     // 对阻塞中的 OkHttp execute 太晚。这里用它换取"取消一开始就 cancel call"。
@@ -158,11 +194,7 @@ object UpdateInstaller {
         target: File,
         onProgress: (Float?) -> Unit
     ) {
-        val request = Request.Builder()
-            .url(release.apkUrl)
-            .header("User-Agent", userAgent(release))
-            .get()
-            .build()
+        val request = updateRequest(release.apkUrl, release)
         val call = http.newCall(request)
         // OkHttp 的阻塞式 execute 不响应协程取消：取消开始时主动 cancel，让读循环尽快退出。
         val handle = currentCoroutineContext()[Job]
@@ -212,11 +244,7 @@ object UpdateInstaller {
 
     /** 拉取 .sha256 资产并解析出期望摘要；解析交给 [UpdateChecksum.parseExpectedHash]，这里只管网络与错误分类。 */
     private fun fetchExpectedSha256(release: GitHubRelease): String {
-        val request = Request.Builder()
-            .url(release.shaUrl)
-            .header("User-Agent", userAgent(release))
-            .get()
-            .build()
+        val request = updateRequest(release.shaUrl, release)
         val text = try {
             http.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {

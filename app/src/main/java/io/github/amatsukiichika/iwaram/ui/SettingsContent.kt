@@ -51,6 +51,7 @@ import io.github.amatsukiichika.iwaram.ui.components.GlassMode
 import io.github.amatsukiichika.iwaram.ui.components.PillSegment
 import io.github.amatsukiichika.iwaram.ui.components.PillSelector
 import io.github.amatsukiichika.iwaram.ui.theme.THEME_COLOR_OPTIONS
+import io.github.amatsukiichika.iwaram.ui.theme.resolveDarkTheme
 import kotlin.math.roundToInt
 
 /* ---------- 各分类页内容（原 SettingsScreen.kt 内容区块，一设置项一张 AppEntryCard） ---------- */
@@ -202,6 +203,8 @@ private fun AppearanceContent(
     )
     // 强调色块本身自明，去掉"应用强调色，全局生效"这类复述。
     AppEntryCard(title = tr("主题色", "Theme color")) {
+        // 色块按**解析后的应用主题**取色：强制浅色/深色时不再跟随系统（与 MainActivity 同一判据）。
+        val darkTheme = resolveDarkTheme(themeMode, isSystemInDarkTheme())
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             THEME_COLOR_OPTIONS.forEach { opt ->
                 val selected = themeColor == opt.value
@@ -210,7 +213,7 @@ private fun AppearanceContent(
                     modifier = Modifier
                         .size(32.dp)
                         .clip(CircleShape)
-                        .background(if (isSystemInDarkTheme()) opt.dark else opt.light)
+                        .background(if (darkTheme) opt.dark else opt.light)
                         .then(
                             if (selected) Modifier.border(
                                 width = 2.dp,

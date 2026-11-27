@@ -4,8 +4,8 @@
 // Usage: node scripts/verify-md-hygiene.mjs [--root <dir>]
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
+import { MD_SKIP_DIRS } from "./md-skip-dirs.mjs";
 
-const SKIP_DIRS = new Set([".git", ".gradle", ".kotlin", ".idea", "build", "node_modules", ".zcode", ".local", "dist", "out"]);
 const argRoot = process.argv.indexOf("--root");
 const ROOT = resolve(argRoot !== -1 ? process.argv[argRoot + 1] : process.cwd());
 const issues = [];
@@ -14,7 +14,7 @@ let checked = 0;
 function walk(dir) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     if (entry.isDirectory()) {
-      if (!SKIP_DIRS.has(entry.name)) walk(join(dir, entry.name));
+      if (!MD_SKIP_DIRS.has(entry.name)) walk(join(dir, entry.name));
     } else if (entry.isFile() && /\.md$/i.test(entry.name)) {
       const file = join(dir, entry.name);
       const rel = relative(ROOT, file).split(/[\\/]/).join("/");

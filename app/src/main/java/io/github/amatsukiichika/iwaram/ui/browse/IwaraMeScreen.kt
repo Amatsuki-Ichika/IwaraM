@@ -203,8 +203,10 @@ private fun LoggedInPanel(
 
     Box(Modifier.fillMaxSize()) {
     val meListState = rememberLazyListState()
+    // 拖动滚动条不置 isScrollInProgress：单独记一份并进上报判据（与本地库页同一范式）。
+    var scrollbarDragging by remember { mutableStateOf(false) }
     // 滚动期间停录宿主的整屏背景（我的页在主内容录制子树里）。
-    ReportMainContentScrollActivity { meListState.isScrollInProgress }
+    ReportMainContentScrollActivity { meListState.isScrollInProgress || scrollbarDragging }
     LazyColumn(
         state = meListState,
         modifier = Modifier.fillMaxSize(),
@@ -276,6 +278,11 @@ private fun LoggedInPanel(
             SettingsEntryRow(actions)
         }
     }
-    FastScrollbarBasic(state = meListState, modifier = Modifier.fillMaxHeight())
+    // 右缘对齐（与其他页面一致）：不写 .align 会落进 Box 的 TopStart，轨道画在左边缘并抢走那里的拖动。
+    FastScrollbarBasic(
+        state = meListState,
+        modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight(),
+        onDraggingChange = { scrollbarDragging = it }
+    )
     }
 }

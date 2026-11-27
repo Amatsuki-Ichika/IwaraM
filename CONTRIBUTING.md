@@ -24,15 +24,7 @@ are all welcome.
 
 ## Definition of done
 
-A change is ready when all of these hold, not when it compiles:
-
-- `./gradlew verify` passes (unit tests, lint, debug build).
-- `node scripts/check.mjs` passes (documentation budgets, links, text hygiene, decision records,
-  APK size, tracked-file hygiene).
-- New pure logic has a JVM unit test; changed behavior has a test that would have failed before.
-- A user-visible change has a `CHANGELOG.md` entry under `[Unreleased]`.
-- A non-obvious decision has a record under [docs/decisions](docs/decisions/README.md).
-- The pull request description states what was run and what it proved.
+A change is ready when the conditions in [AGENTS.md](AGENTS.md#definition-of-done) hold, not when it compiles.
 
 ## Reporting bugs
 
@@ -76,9 +68,7 @@ repository; keep them in the tool's own git-ignored directory.
 
 ## Documentation
 
-Documentation rules live in [docs/AGENTS.md](docs/AGENTS.md). Standing docs have word ceilings in
-`scripts/doc-budgets.json`; over budget means relocate, condense, or raise the ceiling with the
-reason in the pull request. The numbers live only in that file — do not restate them in prose.
+Documentation rules, including the word-budget policy, live in [docs/AGENTS.md](docs/AGENTS.md#budgets-and-the-ratchet).
 
 ## Dependencies
 

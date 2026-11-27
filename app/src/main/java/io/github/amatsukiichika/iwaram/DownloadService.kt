@@ -32,6 +32,7 @@ import io.github.amatsukiichika.iwaram.data.DOWNLOAD_MAX_AUTO_RETRIES
 import io.github.amatsukiichika.iwaram.data.BrokenReason
 import io.github.amatsukiichika.iwaram.data.DownloadHistoryEntry
 import io.github.amatsukiichika.iwaram.data.DownloadControl
+import io.github.amatsukiichika.iwaram.data.DownloadFailureCode
 import io.github.amatsukiichika.iwaram.data.DownloadIncompleteException
 import io.github.amatsukiichika.iwaram.data.deleteReplacedVideoRow
 import io.github.amatsukiichika.iwaram.data.canReuseLibraryFile
@@ -139,7 +140,12 @@ object DownloadState {
         val url: String? = null,
         val fileName: String? = null,
         val quality: String? = null,
-        val docUri: String? = null
+        val docUri: String? = null,
+        /**
+         * 失败原因的机器可读码（见 [DownloadFailureCode]）；界面按当前语言重新取词。
+         * null（旧条目/非失败消息）时界面回退到 [message]。
+         */
+        val messageCode: String? = null
     ) {
         val finished: Boolean get() = state == STATE_DONE || state == STATE_FAILED
         val success: Boolean get() = state == STATE_DONE
@@ -310,33 +316,43 @@ internal fun pickResumeTarget(
  *   （断点信息其实还在磁盘的半成品文件里，点「继续」重新解析地址即可续传）；
  * - message 三态文案在这里收敛，UI 与单测共用同一份映射。
  */
-internal fun pendingToTask(p: PendingDownload): DownloadState.Task = DownloadState.Task(
-    p.videoId, p.title, p.received, p.total,
-    state = when (p.state) {
-        DownloadState.STATE_PAUSED -> DownloadState.STATE_PAUSED
-        DownloadState.STATE_FAILED -> DownloadState.STATE_FAILED
-        // queued / running / 其它未知历史值 → 一律按"排队中断"处理（继续按钮走重新解析路径）
-        else -> DownloadState.STATE_QUEUED
-    },
-    message = when (p.state) {
-        DownloadState.STATE_PAUSED -> tr("已暂停", "Paused")
-        DownloadState.STATE_FAILED -> {
-            // 自动重试过 n 次才失败的记录，恢复后也要让用户知道"不是没试过"；
-            // attempts=0（不可重试的失败）保持原文案。
-            val retries = downloadCardFailureReason(p.state, p.attempts) ?: 0
-            if (retries > 0) {
-                tr(
-                    "下载失败（已自动重试 $retries 次，可重新下载续传）",
-                    "Download failed after $retries automatic retries (you can resume)"
-                )
-            } else {
-                tr("下载失败（可重新下载续传）", "Download failed (you can resume)")
+internal fun pendingToTask(p: PendingDownload): DownloadState.Task {
+    // 自动重试次数只算失败状态；文案与失败原因码共用同一份次数，避免两处判断漂移。
+    val retries = downloadCardFailureReason(p.state, p.attempts) ?: 0
+    return DownloadState.Task(
+        p.videoId, p.title, p.received, p.total,
+        state = when (p.state) {
+            DownloadState.STATE_PAUSED -> DownloadState.STATE_PAUSED
+            DownloadState.STATE_FAILED -> DownloadState.STATE_FAILED
+            // queued / running / 其它未知历史值 → 一律按"排队中断"处理（继续按钮走重新解析路径）
+            else -> DownloadState.STATE_QUEUED
+        },
+        message = when (p.state) {
+            DownloadState.STATE_PAUSED -> tr("已暂停", "Paused")
+            DownloadState.STATE_FAILED -> {
+                // 自动重试过 n 次才失败的记录，恢复后也要让用户知道"不是没试过"；
+                // attempts=0（不可重试的失败）保持原文案。
+                if (retries > 0) {
+                    tr(
+                        "下载失败（已自动重试 $retries 次，可重新下载续传）",
+                        "Download failed after $retries automatic retries (you can resume)"
+                    )
+                } else {
+                    tr("下载失败（可重新下载续传）", "Download failed (you can resume)")
+                }
             }
-        }
-        else -> tr("下载中断（点「继续」重新下载）", "Download interrupted (tap Resume to continue)")
-    },
-    fileName = p.fileName, quality = p.quality, docUri = p.docUri
-)
+            else -> tr("下载中断（点「继续」重新下载）", "Download interrupted (tap Resume to continue)")
+        },
+        // 语言切换后恢复出来的失败卡片也要跟着变：code 才是文案来源，message 只是兜底。
+        messageCode = if (p.state == DownloadState.STATE_FAILED) {
+            if (retries > 0) DownloadFailureCode.resumedAfterRetries(retries)
+            else DownloadFailureCode.DOWNLOAD_FAILED_RESUME
+        } else {
+            null
+        },
+        fileName = p.fileName, quality = p.quality, docUri = p.docUri
+    )
+}
 
 /**
  * 在线视频下载前台服务：把视频写入下载目录（SAF），
@@ -383,6 +399,18 @@ internal suspend fun drainDownloadQueue(
         if (queue.isEmpty || queue.isClosedForReceive) onIdle(job.startId)
     }
 }
+
+/**
+ * worker 收尾自停时该带上的 startId（纯函数，配单测）。
+ *
+ * 双 worker 下完成序 ≠ 交付序：后交付的任务可能先完成，它的 onIdle 因另一个任务还在跑
+ * 被 [DownloadService.stopIfIdle] 抑制；先交付的任务最后完成时若只带自己的 startId，
+ * 框架看到已有更新的 start 会忽略这次 `stopSelf(startId)`，服务便带着已收起的前台通知
+ * 在后台空转。取「本次消费的 startId」与「onStartCommand 见过的最大交付 startId」的
+ * 较大者，最后一次 idle 才真正停得掉。
+ */
+internal fun stopStartId(lastConsumedStartId: Int, latestDeliveredStartId: Int): Int =
+    maxOf(lastConsumedStartId, latestDeliveredStartId)
 
 /**
  * 下载并发闸门：最多放行 [maxParallel] 个文件同时下载（不拆分单个文件）。
@@ -543,7 +571,8 @@ class DownloadService : Service() {
         // 内同步入队（入队序 = startId 交付序，见 onStartCommand 注释）。
         stopForeground(STOP_FOREGROUND_REMOVE)
         // 用见过的最新 startId：被去重丢弃的 start 也算一次交付，否则这里会被框架忽略。
-        stopSelf(maxOf(lastStartId, latestStartId))
+        // 双 worker 下另一个 worker 可能带着更小的 startId 最后收工（见 stopStartId）。
+        stopSelf(stopStartId(lastStartId, latestStartId))
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -726,7 +755,11 @@ class DownloadService : Service() {
         val customRoot = repo.getDownloadRoot()
         val rootUri = customRoot ?: repo.getRoot()
         if (rootUri.isNullOrBlank()) {
-            fail(job, repo, tr("尚未设置管理器根目录，请先在设置里选择文件夹", "No library folder is set. Choose one in Settings first"))
+            fail(
+                job, repo,
+                tr("尚未设置管理器根目录，请先在设置里选择文件夹", "No library folder is set. Choose one in Settings first"),
+                messageCode = DownloadFailureCode.NO_LIBRARY_ROOT
+            )
             return@withContext
         }
 
@@ -741,7 +774,8 @@ class DownloadService : Service() {
                     "无法访问下载目录（可能未授予写入权限），请在设置里重新选择下载目录或恢复默认",
                     "Cannot access the download folder (write permission may be missing). " +
                         "Choose the download folder again in Settings or reset it to default"
-                )
+                ),
+                messageCode = DownloadFailureCode.DOWNLOAD_DIR_INACCESSIBLE
             )
             return@withContext
         }
@@ -761,7 +795,8 @@ class DownloadService : Service() {
                     job, repo,
                     tr("下载地址已过期，请重新下载", "The download link expired. Please download again"),
                     // 带上半成品地址：失败卡片的「移除」才能连磁盘上的旧半成品一起删掉。
-                    pending?.docUri
+                    docUri = pending?.docUri,
+                    messageCode = DownloadFailureCode.URL_EXPIRED
                 )
                 return@withContext
             }
@@ -776,7 +811,8 @@ class DownloadService : Service() {
                 fail(
                     job, repo,
                     tr("所选清晰度已不可用，请重新下载", "The selected quality is no longer available. Download it again"),
-                    pending?.docUri
+                    docUri = pending?.docUri,
+                    messageCode = DownloadFailureCode.QUALITY_GONE
                 )
                 return@withContext
             }
@@ -807,7 +843,8 @@ class DownloadService : Service() {
                 DiagLog.log("Download", "替换式重下删除旧文件失败：$deleteFailure")
                 fail(
                     job, repo,
-                    tr("无法删除损坏的旧文件，请手动删除后重试", "The broken file could not be deleted. Delete it manually and try again")
+                    tr("无法删除损坏的旧文件，请手动删除后重试", "The broken file could not be deleted. Delete it manually and try again"),
+                    messageCode = DownloadFailureCode.DELETE_BROKEN_FAILED
                 )
                 return@withContext
             }
@@ -865,7 +902,8 @@ class DownloadService : Service() {
                     "无法在下载目录创建文件（可能未授予写入权限），请在设置里重新选择下载目录或恢复默认",
                     "Cannot create a file in the download folder (write permission may be missing). " +
                         "Choose the download folder again in Settings or reset it to default"
-                )
+                ),
+                messageCode = DownloadFailureCode.CANNOT_CREATE_FILE
             )
             return@withContext
         }
@@ -936,7 +974,8 @@ class DownloadService : Service() {
                             tr(
                                 "所选清晰度已不可用，请重新下载",
                                 "The selected quality is no longer available. Download it again"
-                            )
+                            ),
+                            messageCode = DownloadFailureCode.QUALITY_GONE
                         )
                         return@withContext
                     }
@@ -948,7 +987,8 @@ class DownloadService : Service() {
                     // 重新解析仍失败：队列里的地址确实过期了，让用户手动重下。
                     finalizeFailure(
                         job, repo, doc, attempt, e,
-                        tr("下载地址已过期，请重新下载", "The download link expired. Please download again")
+                        tr("下载地址已过期，请重新下载", "The download link expired. Please download again"),
+                        messageCode = DownloadFailureCode.URL_EXPIRED
                     )
                     return@withContext
                 }
@@ -1186,7 +1226,8 @@ class DownloadService : Service() {
         doc: DocumentFile,
         attempts: Int,
         error: Throwable,
-        message: String? = null
+        message: String? = null,
+        messageCode: String? = null
     ) {
         // 失败不删半成品：保留文件与记录，「重新下载」可从断点继续。
         runCatching {
@@ -1214,7 +1255,15 @@ class DownloadService : Service() {
                 "Download failed (the partial file was kept; you can resume)"
             )
         }
-        fail(job, repo, text, doc.uri.toString())
+        fail(
+            job, repo, text,
+            docUri = doc.uri.toString(),
+            messageCode = messageCode ?: if (retries > 0) {
+                DownloadFailureCode.keptAfterRetries(retries)
+            } else {
+                DownloadFailureCode.DOWNLOAD_FAILED_KEPT
+            }
+        )
     }
 
     /** 下载成功共用收尾：入库 + 本地缩略图 + 元数据补全 + 历史/待续记录清理 + 完整性校验。
@@ -1410,21 +1459,26 @@ class DownloadService : Service() {
         job: Job,
         repo: io.github.amatsukiichika.iwaram.data.IwaraRepository,
         message: String,
-        docUri: String? = null
+        docUri: String? = null,
+        /** 失败原因码：历史行与内存任务卡按它用当前语言重新渲染（[DownloadFailureCode]）。 */
+        messageCode: String? = null
     ) {
         DownloadState.upsert(
             DownloadState.Task(
                 job.videoId, job.title, state = DownloadState.STATE_FAILED, message = message,
+                messageCode = messageCode,
                 url = job.url, fileName = job.fileName, quality = job.quality, docUri = docUri
             )
         )
         runCatching {
             repo.addDownloadHistory(
                 DownloadHistoryEntry(
-                    job.videoId, job.title, job.quality, System.currentTimeMillis(), false, message
+                    job.videoId, job.title, job.quality, System.currentTimeMillis(), false, message,
+                    messageCode = messageCode
                 )
             )
         }
+        // 通知只用当前语言的那份文案即可（不落盘，切语言后也会被新通知覆盖）。
         notify(DONE_NOTIF_ID, doneNotification(false, message))
     }
 
@@ -1674,7 +1728,8 @@ class DownloadService : Service() {
                             message = tr(
                                 "文件校验失败，请手动重新下载",
                                 "Integrity check failed. Please download it again"
-                            )
+                            ),
+                            messageCode = DownloadFailureCode.INTEGRITY_FAILED
                         )
                     )
                     return@launch
@@ -1692,7 +1747,8 @@ class DownloadService : Service() {
                             message = tr(
                                 "无法删除损坏的旧文件，请手动删除后重试",
                                 "The broken file could not be deleted. Delete it manually and try again"
-                            )
+                            ),
+                            messageCode = DownloadFailureCode.DELETE_BROKEN_FAILED
                         )
                     )
                     return@launch
@@ -1709,7 +1765,8 @@ class DownloadService : Service() {
                             message = tr(
                                 "文件校验失败，请手动重新下载",
                                 "Integrity check failed. Please download it again"
-                            )
+                            ),
+                            messageCode = DownloadFailureCode.INTEGRITY_FAILED
                         )
                     )
                     return@launch
@@ -1742,7 +1799,8 @@ class DownloadService : Service() {
                             message = tr(
                                 "无法在后台开始下载，请打开应用后手动重新下载",
                                 "Could not start the download in the background. Open the app and download it again"
-                            )
+                            ),
+                            messageCode = DownloadFailureCode.CANNOT_START_BACKGROUND
                         )
                     )
                 }
