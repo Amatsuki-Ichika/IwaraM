@@ -56,12 +56,13 @@ change goes through a pull request.
 1. Branch from `main` as `fix/<topic>`, `feat/<topic>` or `chore/<topic>`.
 2. Run `./gradlew verify` and `node scripts/check.mjs` before pushing.
 3. Open a pull request with a Conventional Commit title; descriptions follow the template.
-4. Wait for `build` to go green and a human review approval, then merge with a merge commit and
-   delete the branch. Never squash-merge.
+4. Wait for `build` and a human review approval, then merge by squash (one PR, one commit). Use a
+   merge commit only when the PR's commits are themselves worth keeping; never rebase-merge.
+   Delete the branch.
 
-Releases are tag-driven; see [CONTRIBUTING.md](CONTRIBUTING.md#releasing). A change that breaks
-persisted data (Room schema, application ID, signing key) needs a decision record and a
-`### Changed` entry stating what happens to existing users.
+Releases are tag-driven ([CONTRIBUTING.md](CONTRIBUTING.md#releasing)). A change that breaks
+persisted data (schema, application ID, signing key) needs a decision record and a
+`### Changed` entry for existing users.
 
 ## Where rules live
 
